@@ -1,6 +1,7 @@
 type Primitive = string | number | boolean | null | undefined;
 export type Effect = () => void;
 export type Component = (props: Record<string, unknown>, children: VNode[]) => VNode;
+export type RenderFunction = (state: any) => VNode;
 
 const effectStack: Effect[] = [];
 const proxyCache = new WeakMap<object, object>();
@@ -167,6 +168,30 @@ export function createApp(render: (state: any) => VNode, state: object = {}) {
       rerender?.();
     }
   };
+}
+
+type HotComponent = { render: Component; instances: Set<() => void> };
+const hotComponents = new Map<string, HotComponent>();
+
+/** Registers a named component so a compiler can replace its render function in development. */
+export function defineComponent(name: string, render: Component): Component {
+  const existing = hotComponents.get(name);
+  if (existing) existing.render = render;
+  else hotComponents.set(name, { render, instances: new Set() });
+  const component: Component = (props, children) => {
+    const entry = hotComponents.get(name);
+    return (entry?.render ?? render)(props, children);
+  };
+  return component;
+}
+
+/** Replaces one component's render function while preserving its mounted DOM/state. */
+export function hotUpdate(name: string, render: Component): boolean {
+  const entry = hotComponents.get(name);
+  if (!entry) return false;
+  entry.render = render;
+  entry.instances.forEach(update => update());
+  return true;
 }
 
 export type HmrMessage = { path: string; kind: string };
