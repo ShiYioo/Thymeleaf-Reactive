@@ -199,6 +199,11 @@ export function hotUpdate(name: string, render: Component): boolean {
 
 export type HmrMessage = { path: string; kind: string };
 
+export type ComponentHmrMessage = HmrMessage & {
+  component?: string;
+  moduleUrl?: string;
+};
+
 /** Connects the browser runtime to the Spring Boot SSE development channel. */
 export function connectHmr(
   onTemplateChange: (message: HmrMessage) => void,
@@ -212,6 +217,30 @@ export function connectHmr(
   };
   source.onerror = () => console.warn("[thymeleaf-reactive] HMR connection lost; browser will retry");
   return () => source.close();
+}
+
+/**
+ * Connects HMR events to named components. A server/compiler can send a
+ * module URL; the module must export its replacement render as `default`.
+ */
+export function connectComponentHmr(
+  endpoint = "/__thymeleaf_reactive__/events"
+): () => void {
+  return connectHmr(async message => {
+    const update = message as ComponentHmrMessage;
+    if (!update.component || !update.moduleUrl) {
+      window.dispatchEvent(new CustomEvent("thymeleaf-reactive:template-change", { detail: update }));
+      return;
+    }
+    try {
+      const module = await import(`${update.moduleUrl}?t=${Date.now()}`);
+      const render = module.default ?? module.render;
+      if (typeof render !== "function") throw new Error("HMR module has no render export");
+      hotUpdate(update.component, render);
+    } catch (error) {
+      console.error(`[thymeleaf-reactive] failed to update ${update.component}`, error);
+    }
+  }, endpoint);
 }
 
 function readPath(source: any, expression: string): any {

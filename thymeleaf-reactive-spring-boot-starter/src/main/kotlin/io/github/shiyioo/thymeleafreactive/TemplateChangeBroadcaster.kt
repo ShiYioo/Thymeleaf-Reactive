@@ -12,7 +12,12 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
 import java.util.function.Consumer
 
-data class TemplateChange(val path: String, val kind: String)
+data class TemplateChange(
+    val path: String,
+    val kind: String,
+    val component: String? = null,
+    val moduleUrl: String? = null
+)
 
 @Component
 class TemplateChangeBroadcaster(private val properties: ReactiveProperties) : SmartLifecycle {
@@ -55,7 +60,10 @@ class TemplateChangeBroadcaster(private val properties: ReactiveProperties) : Sm
                 key.pollEvents().forEach { event ->
                     val changed = event.context() as? Path ?: return@forEach
                     val kind = event.kind().name()
-                    listeners.forEach { it.accept(TemplateChange(changed.toString(), kind)) }
+                    val component = changed.fileName.toString()
+                        .substringBeforeLast('.')
+                        .takeIf { it.isNotBlank() }
+                    listeners.forEach { it.accept(TemplateChange(changed.toString(), kind, component)) }
                 }
                 if (!key.reset()) break
             }
