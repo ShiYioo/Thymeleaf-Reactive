@@ -14,8 +14,14 @@ The project is intentionally split into a browser runtime, a Thymeleaf compiler,
 
 - JDK 25
 - Spring Boot 4.1.1
-- Maven 3.9.16 or newer
-- Maven Compiler Plugin 3.15.0
+- Kotlin 2.3.20
+- Gradle 9.3.1 via the checked-in Wrapper
+
+Build with the checked-in Gradle Wrapper:
+
+```powershell
+./gradlew.bat test
+```
 
 Development HMR transport is exposed at `/__thymeleaf_reactive__/events` as an SSE stream. The browser Runtime will consume this stream and trigger component recompilation/patching.
 
