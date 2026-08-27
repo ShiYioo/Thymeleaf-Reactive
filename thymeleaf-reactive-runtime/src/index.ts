@@ -337,6 +337,20 @@ export function hydrate(root: Element, state: object, handlers: Record<string, (
     const expression = element.dataset.trShow!;
     effect(() => { element.hidden = !Boolean(readPath(reactiveState, expression)); });
   });
+  root.querySelectorAll<HTMLElement>("[data-tr-if]").forEach(element => {
+    const expression = element.dataset.trIf!;
+    const parent = element.parentNode;
+    if (!parent) return;
+    const anchor = document.createComment("tr-if");
+    parent.insertBefore(anchor, element);
+    effect(() => {
+      if (readPath(reactiveState, expression)) {
+        if (element.parentNode !== parent) parent.insertBefore(element, anchor.nextSibling);
+      } else if (element.parentNode === parent) {
+        parent.removeChild(element);
+      }
+    });
+  });
   root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("[data-tr-model]").forEach(element => {
     const expression = element.dataset.trModel!;
     effect(() => { if (element.value !== String(readPath(reactiveState, expression) ?? "")) element.value = String(readPath(reactiveState, expression) ?? ""); });

@@ -16,6 +16,7 @@ class ReactiveDialect : AbstractProcessorDialect("Thymeleaf Reactive", "tr", 100
         ReactiveAttributeProcessor("state", "data-tr-state"),
         ReactiveAttributeProcessor("text", "data-tr-text"),
         ReactiveAttributeProcessor("model", "data-tr-model"),
+        ReactiveAttributeProcessor("if", "data-tr-if"),
         ReactiveAttributeProcessor("show", "data-tr-show"),
         ReactiveAttributeProcessor("on", "data-tr-on")
     )

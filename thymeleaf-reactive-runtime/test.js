@@ -71,3 +71,15 @@ test('hydrates Thymeleaf bindings and synchronizes model values', () => {
   input.dispatchEvent(new Event('input', { bubbles: true }));
   assert.equal(state.user.name, 'Lin');
 });
+
+test('hydrates conditional blocks by mounting and unmounting their DOM nodes', () => {
+  const document = installDom();
+  const root = document.createElement('section');
+  root.innerHTML = '<p data-tr-if="visible">Only when visible</p>';
+  const state = hydrate(root, { visible: false });
+  assert.equal(root.querySelector('p'), null);
+  state.visible = true;
+  assert.equal(root.querySelector('p').textContent, 'Only when visible');
+  state.visible = false;
+  assert.equal(root.querySelector('p'), null);
+});
