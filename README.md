@@ -10,6 +10,13 @@ The project is intentionally split into a browser runtime, a Thymeleaf compiler,
 - `thymeleaf-reactive-compiler`: reserved for translating `th:*` bindings into runtime metadata.
 - `thymeleaf-reactive-spring-boot-starter`: reserved for Spring Boot auto-configuration and HMR transport.
 
+## Build baseline
+
+- JDK 25
+- Spring Boot 4.1.1
+- Maven 3.9.16 or newer
+- Maven Compiler Plugin 3.15.0
+
 ## License
 
 Apache-2.0
