@@ -1,6 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { reactive, effect } from './dist/index.js';
+import { Window } from 'happy-dom';
+import { reactive, effect, createApp, h, hydrate } from './dist/index.js';
+
+function installDom() {
+  const window = new Window();
+  globalThis.window = window;
+  globalThis.document = window.document;
+  globalThis.Event = window.Event;
+  return window.document;
+}
 
 test('reactive state tracks and reruns dependent effects', () => {
   const state = reactive({ count: 0, other: 1 });
@@ -11,4 +20,34 @@ test('reactive state tracks and reruns dependent effects', () => {
   state.count++;
   assert.equal(runs, 2);
   assert.equal(value, 1);
+});
+
+test('virtual DOM patches changed content without replacing keyed input nodes', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const app = createApp(state => h('section', {}, [
+    h('input', { key: 'draft', value: state.draft }),
+    h('strong', { key: 'count' }, String(state.count))
+  ]), { draft: 'kept', count: 0 });
+  const state = app.mount(root);
+  const input = root.querySelector('input');
+  state.count = 1;
+  assert.equal(root.querySelector('strong').textContent, '1');
+  assert.equal(root.querySelector('input'), input);
+  assert.equal(root.querySelector('input').value, 'kept');
+});
+
+test('hydrates Thymeleaf bindings and synchronizes model values', () => {
+  const document = installDom();
+  const root = document.createElement('section');
+  root.innerHTML = '<span data-tr-text="user.name"></span><input data-tr-model="user.name"><div data-tr-show="visible"></div>';
+  const state = hydrate(root, { user: { name: 'Ada' }, visible: false });
+  assert.equal(root.querySelector('span').textContent, 'Ada');
+  assert.equal(root.querySelector('div').hidden, true);
+  state.user.name = 'Grace';
+  assert.equal(root.querySelector('span').textContent, 'Grace');
+  const input = root.querySelector('input');
+  input.value = 'Lin';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  assert.equal(state.user.name, 'Lin');
 });

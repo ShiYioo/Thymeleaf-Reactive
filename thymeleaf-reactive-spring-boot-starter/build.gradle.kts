@@ -8,11 +8,21 @@ plugins {
 val runtimeDir = rootProject.layout.projectDirectory.dir("thymeleaf-reactive-runtime")
 val runtimeDist = runtimeDir.dir("dist")
 
+val installBrowserDependencies by tasks.registering(Exec::class) {
+    workingDir(runtimeDir)
+    commandLine("npm", "ci")
+    inputs.file(runtimeDir.file("package.json"))
+    inputs.file(runtimeDir.file("package-lock.json"))
+    outputs.dir(runtimeDir.dir("node_modules"))
+}
+
 val buildBrowserRuntime by tasks.registering(Exec::class) {
     workingDir(runtimeDir)
     commandLine("npm", "run", "build")
+    dependsOn(installBrowserDependencies)
     inputs.dir(runtimeDir.dir("src"))
     inputs.file(runtimeDir.file("package.json"))
+    inputs.file(runtimeDir.file("package-lock.json"))
     outputs.dir(runtimeDist)
 }
 

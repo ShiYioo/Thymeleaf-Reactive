@@ -5,6 +5,12 @@
   "main": "dist/index.js",
   "module": "dist/browser.js",
   "types": "dist/index.d.ts",
-  "scripts": { "build": "tsc", "test": "npm run build && node --test" },
-  "devDependencies": { "typescript": "^5.9.2" }
+  "scripts": {
+    "build": "tsc",
+    "test": "npm run build && node --test"
+  },
+  "devDependencies": {
+    "happy-dom": "^20.11.8",
+    "typescript": "^5.9.2"
+  }
 }
