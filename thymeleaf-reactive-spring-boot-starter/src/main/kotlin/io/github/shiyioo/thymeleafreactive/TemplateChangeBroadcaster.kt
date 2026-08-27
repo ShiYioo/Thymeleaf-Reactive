@@ -1,6 +1,7 @@
 package io.github.shiyioo.thymeleafreactive
 
 import org.springframework.context.SmartLifecycle
+import org.springframework.core.io.ClassPathResource
 import org.springframework.stereotype.Component
 import java.nio.file.FileSystems
 import java.nio.file.Files
@@ -8,6 +9,7 @@ import java.nio.file.Path
 import java.nio.file.StandardWatchEventKinds.ENTRY_CREATE
 import java.nio.file.StandardWatchEventKinds.ENTRY_DELETE
 import java.nio.file.StandardWatchEventKinds.ENTRY_MODIFY
+import java.nio.file.WatchKey
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
 import java.util.function.Consumer
@@ -47,25 +49,40 @@ class TemplateChangeBroadcaster(private val properties: ReactiveProperties) : Sm
     override fun isRunning(): Boolean = running
 
     private fun resolveTemplateDirectory(): Path? {
-        val raw = properties.templatePath.removePrefix("file:")
-        val path = Path.of(raw)
+        if (properties.templatePath.startsWith("classpath:")) {
+            val resource = ClassPathResource(properties.templatePath.removePrefix("classpath:"))
+            return runCatching { resource.file.toPath() }.getOrNull()?.takeIf { Files.isDirectory(it) }
+        }
+        val path = Path.of(properties.templatePath.removePrefix("file:"))
         return path.takeIf { Files.isDirectory(it) }
     }
 
     private fun watch(directory: Path) {
         FileSystems.getDefault().newWatchService().use { service ->
-            directory.register(service, ENTRY_CREATE, ENTRY_MODIFY, ENTRY_DELETE)
+            val watchedDirectories = mutableMapOf<WatchKey, Path>()
+            Files.walk(directory).use { paths ->
+                paths.filter { Files.isDirectory(it) }.forEach { path ->
+                    watchedDirectories[path.register(service, ENTRY_CREATE, ENTRY_MODIFY, ENTRY_DELETE)] = path
+                }
+            }
             while (running) {
                 val key = service.take()
+                val parent = watchedDirectories[key] ?: continue
                 key.pollEvents().forEach { event ->
                     val changed = event.context() as? Path ?: return@forEach
                     val kind = event.kind().name()
+                    val absolutePath = parent.resolve(changed)
+                    if (event.kind() == ENTRY_CREATE && Files.isDirectory(absolutePath)) {
+                        watchedDirectories[absolutePath.register(service, ENTRY_CREATE, ENTRY_MODIFY, ENTRY_DELETE)] = absolutePath
+                    }
+                    if (!changed.toString().endsWith(".html")) return@forEach
+                    val relativePath = directory.relativize(absolutePath).toString().replace('\\', '/')
                     val component = changed.fileName.toString()
                         .substringBeforeLast('.')
                         .takeIf { it.isNotBlank() }
-                    listeners.forEach { it.accept(TemplateChange(changed.toString(), kind, component)) }
+                    listeners.forEach { it.accept(TemplateChange(relativePath, kind, component)) }
                 }
-                if (!key.reset()) break
+                if (!key.reset()) watchedDirectories.remove(key)
             }
         }
     }

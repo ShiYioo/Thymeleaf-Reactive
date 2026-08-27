@@ -12,6 +12,7 @@ import org.thymeleaf.engine.AttributeName
 class ReactiveDialect : AbstractProcessorDialect("Thymeleaf Reactive", "tr", 1000) {
     override fun getProcessors(templateMode: TemplateMode): Set<IProcessor> = setOf(
         ReactiveAttributeProcessor("component", "data-tr-component"),
+        ReactiveAttributeProcessor("key", "data-tr-key"),
         ReactiveAttributeProcessor("state", "data-tr-state"),
         ReactiveAttributeProcessor("text", "data-tr-text"),
         ReactiveAttributeProcessor("model", "data-tr-model"),
