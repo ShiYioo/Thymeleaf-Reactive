@@ -17,6 +17,8 @@ The project is intentionally split into a browser runtime, a Thymeleaf compiler,
 - Maven 3.9.16 or newer
 - Maven Compiler Plugin 3.15.0
 
+Development HMR transport is exposed at `/__thymeleaf_reactive__/events` as an SSE stream. The browser Runtime will consume this stream and trigger component recompilation/patching.
+
 ## License
 
 Apache-2.0
