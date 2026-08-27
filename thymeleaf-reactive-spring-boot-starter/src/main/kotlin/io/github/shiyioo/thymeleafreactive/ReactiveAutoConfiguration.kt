@@ -13,4 +13,16 @@ class ReactiveAutoConfiguration
     @Bean
     @ConditionalOnMissingBean(ReactiveDialect::class)
     fun reactiveDialect(objectMapper: ObjectMapper): ReactiveDialect = ReactiveDialect(objectMapper)
+
+    @Bean
+    @ConditionalOnMissingBean
+    fun templateChangeBroadcaster(properties: ReactiveProperties): TemplateChangeBroadcaster = TemplateChangeBroadcaster(properties)
+
+    @Bean
+    @ConditionalOnMissingBean
+    fun hmrController(changes: TemplateChangeBroadcaster): HmrController = HmrController(changes)
+
+    @Bean
+    @ConditionalOnMissingBean
+    fun runtimeController(): RuntimeController = RuntimeController()
 }

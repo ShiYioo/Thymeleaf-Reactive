@@ -2,7 +2,6 @@ package io.github.shiyioo.thymeleafreactive
 
 import org.springframework.context.SmartLifecycle
 import org.springframework.core.io.ClassPathResource
-import org.springframework.stereotype.Component
 import java.nio.file.FileSystems
 import java.nio.file.Files
 import java.nio.file.Path
@@ -21,7 +20,6 @@ data class TemplateChange(
     val moduleUrl: String? = null
 )
 
-@Component
 class TemplateChangeBroadcaster(private val properties: ReactiveProperties) : SmartLifecycle {
     private val listeners = CopyOnWriteArrayList<Consumer<TemplateChange>>()
     private val executor = Executors.newSingleThreadExecutor { runnable ->
