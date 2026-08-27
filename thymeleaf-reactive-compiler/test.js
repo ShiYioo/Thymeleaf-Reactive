@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { compileElementAttributes } from './src/index.js';
+import { compileElementAttributes, toRuntimeAttributes } from './src/index.js';
 
 test('compiles reactive Thymeleaf attributes into metadata', () => {
   const result = compileElementAttributes({
@@ -15,4 +15,11 @@ test('compiles reactive Thymeleaf attributes into metadata', () => {
     { kind: 'event', event: 'click', handler: 'increment' }
   ]);
   assert.equal(result.attrs.class, 'counter');
+  assert.deepEqual(result.runtimeAttrs, {
+    'data-tr-text': 'count',
+    'data-tr-on': 'click:increment'
+  });
+  assert.deepEqual(toRuntimeAttributes({ 'th:model': 'user.name' }), {
+    'data-tr-model': 'user.name'
+  });
 });
