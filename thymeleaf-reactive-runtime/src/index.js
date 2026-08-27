@@ -1,8 +1,10 @@
 const effectStack = [];
+const proxyCache = new WeakMap();
 
 export function reactive(value) {
   if (value === null || typeof value !== 'object') return value;
   if (value.__trProxy) return value;
+  if (proxyCache.has(value)) return proxyCache.get(value);
   const deps = new Map();
   const proxy = new Proxy(value, {
     get(target, key, receiver) {
@@ -30,6 +32,7 @@ export function reactive(value) {
       return ok;
     }
   });
+  proxyCache.set(value, proxy);
   return proxy;
 }
 
@@ -71,6 +74,12 @@ function setProp(el, key, value, previous) {
 
 function mount(vnode, container, anchor = null) {
   vnode = normalizeVNode(vnode);
+  if (typeof vnode.type === 'function') {
+    vnode.component = vnode.type(vnode.props || {}, vnode.children);
+    mount(vnode.component, container, anchor);
+    vnode.el = vnode.component.el;
+    return vnode;
+  }
   if (vnode.type === Text) {
     vnode.el = document.createTextNode(vnode.children);
     container.insertBefore(vnode.el, anchor); return vnode;
@@ -82,10 +91,19 @@ function mount(vnode, container, anchor = null) {
 }
 
 function patchChildren(el, oldChildren, newChildren) {
-  const common = Math.min(oldChildren.length, newChildren.length);
-  for (let i = 0; i < common; i++) patch(oldChildren[i], newChildren[i], el);
-  if (newChildren.length > oldChildren.length) newChildren.slice(common).forEach(c => mount(c, el));
-  else if (oldChildren.length > newChildren.length) oldChildren.slice(common).forEach(c => el.removeChild(c.el));
+  const oldKeyed = new Map(oldChildren.map((child, index) => [child.key ?? index, { child, index }]));
+  let anchor = null;
+  for (let i = newChildren.length - 1; i >= 0; i--) {
+    const next = normalizeVNode(newChildren[i]);
+    const match = oldKeyed.get(next.key ?? i);
+    if (match) {
+      patch(match.child, next, el);
+      if (match.index !== i) el.insertBefore(next.el, anchor);
+      oldKeyed.delete(next.key ?? i);
+    } else mount(next, el, anchor);
+    anchor = next.el;
+  }
+  oldKeyed.forEach(({ child }) => el.removeChild(child.el));
 }
 
 export function patch(oldVNode, newVNode, container) {
@@ -95,6 +113,13 @@ export function patch(oldVNode, newVNode, container) {
     const next = mount(newVNode, container, oldVNode.el); container.removeChild(oldVNode.el); return next;
   }
   newVNode.el = oldVNode.el;
+  if (typeof newVNode.type === 'function') {
+    const nextComponent = newVNode.type(newVNode.props || {}, newVNode.children);
+    patch(oldVNode.component, nextComponent, container);
+    newVNode.component = nextComponent;
+    newVNode.el = nextComponent.el;
+    return newVNode;
+  }
   if (newVNode.type === Text) { if (oldVNode.children !== newVNode.children) newVNode.el.nodeValue = newVNode.children; return newVNode; }
   const oldProps = oldVNode.props || {}, newProps = newVNode.props || {};
   Object.keys({ ...oldProps, ...newProps }).forEach(k => { if (oldProps[k] !== newProps[k]) setProp(newVNode.el, k, newProps[k], oldProps[k]); });
