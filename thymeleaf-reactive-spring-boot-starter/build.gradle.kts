@@ -1,3 +1,5 @@
+import org.gradle.internal.os.OperatingSystem
+
 plugins {
     kotlin("plugin.spring")
     id("org.springframework.boot")
@@ -7,10 +9,11 @@ plugins {
 
 val runtimeDir = rootProject.layout.projectDirectory.dir("thymeleaf-reactive-runtime")
 val runtimeDist = runtimeDir.dir("dist")
+val npmExecutable = if (OperatingSystem.current().isWindows) "npm.cmd" else "npm"
 
 val installBrowserDependencies = tasks.register<Exec>("installBrowserDependencies") {
     workingDir(runtimeDir)
-    commandLine("npm", "ci")
+    commandLine(npmExecutable, "ci")
     inputs.file(runtimeDir.file("package.json"))
     inputs.file(runtimeDir.file("package-lock.json"))
     outputs.dir(runtimeDir.dir("node_modules"))
@@ -18,7 +21,7 @@ val installBrowserDependencies = tasks.register<Exec>("installBrowserDependencie
 
 val buildBrowserRuntime = tasks.register<Exec>("buildBrowserRuntime") {
     workingDir(runtimeDir)
-    commandLine("npm", "run", "build")
+    commandLine(npmExecutable, "run", "build")
     dependsOn(installBrowserDependencies)
     inputs.dir(runtimeDir.dir("src"))
     inputs.file(runtimeDir.file("package.json"))

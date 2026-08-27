@@ -1,6 +1,6 @@
 package io.github.shiyioo.thymeleafreactive
 
-import com.fasterxml.jackson.databind.ObjectMapper
+import tools.jackson.databind.ObjectMapper
 import org.thymeleaf.dialect.AbstractProcessorDialect
 import org.thymeleaf.processor.IProcessor
 import org.thymeleaf.templatemode.TemplateMode
@@ -11,7 +11,7 @@ import org.thymeleaf.model.IProcessableElementTag
 import org.thymeleaf.engine.AttributeName
 
 class ReactiveDialect(private val objectMapper: ObjectMapper) : AbstractProcessorDialect("Thymeleaf Reactive", "tr", 1000) {
-    override fun getProcessors(templateMode: TemplateMode): Set<IProcessor> = setOf(
+    override fun getProcessors(dialectPrefix: String): Set<IProcessor> = setOf(
         ReactiveAttributeProcessor("component", "data-tr-component"),
         ReactiveAttributeProcessor("key", "data-tr-key"),
         ReactiveStateProcessor(objectMapper),
