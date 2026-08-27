@@ -161,6 +161,7 @@ export function createApp(render: (state: any) => VNode, state: object = {}) {
     mount(root: Element): object {
       let tree: VNode | undefined;
       rerender = effect(() => { tree = patch(tree, currentRender(reactiveState), root) ?? undefined; });
+      mountedApps.add(rerender);
       return reactiveState;
     },
     replaceRender(nextRender: (state: any) => VNode): void {
@@ -172,6 +173,7 @@ export function createApp(render: (state: any) => VNode, state: object = {}) {
 
 type HotComponent = { render: Component; instances: Set<() => void> };
 const hotComponents = new Map<string, HotComponent>();
+const mountedApps = new Set<() => void>();
 
 /** Registers a named component so a compiler can replace its render function in development. */
 export function defineComponent(name: string, render: Component): Component {
@@ -191,6 +193,7 @@ export function hotUpdate(name: string, render: Component): boolean {
   if (!entry) return false;
   entry.render = render;
   entry.instances.forEach(update => update());
+  mountedApps.forEach(update => update());
   return true;
 }
 
