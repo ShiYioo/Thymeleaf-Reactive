@@ -14,8 +14,8 @@ The project is intentionally split into a browser runtime, a Thymeleaf compiler,
 
 - JDK 25
 - Spring Boot 4.1.1
-- Kotlin 2.3.20
-- Gradle 9.3.1 via the checked-in Wrapper
+- Kotlin 2.4.10
+- Gradle 9.7.1 via the checked-in Wrapper
 
 Build with the checked-in Gradle Wrapper:
 
