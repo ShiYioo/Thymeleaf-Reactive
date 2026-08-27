@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { reactive, effect } from './src/index.js';
+import { reactive, effect } from './dist/index.js';
 
 test('reactive state tracks and reruns dependent effects', () => {
   const state = reactive({ count: 0, other: 1 });

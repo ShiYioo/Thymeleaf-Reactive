@@ -154,11 +154,34 @@ export function patch(oldVNode: VNode | undefined, newVNode: VNode | undefined, 
 
 export function createApp(render: (state: any) => VNode, state: object = {}) {
   const reactiveState = reactive(state);
+  let currentRender = render;
+  let rerender: (() => void) | undefined;
   return {
     mount(root: Element): object {
       let tree: VNode | undefined;
-      effect(() => { tree = patch(tree, render(reactiveState), root) ?? undefined; });
+      rerender = effect(() => { tree = patch(tree, currentRender(reactiveState), root) ?? undefined; });
       return reactiveState;
+    },
+    replaceRender(nextRender: (state: any) => VNode): void {
+      currentRender = nextRender;
+      rerender?.();
     }
   };
+}
+
+export type HmrMessage = { path: string; kind: string };
+
+/** Connects the browser runtime to the Spring Boot SSE development channel. */
+export function connectHmr(
+  onTemplateChange: (message: HmrMessage) => void,
+  endpoint = "/__thymeleaf_reactive__/events"
+): () => void {
+  if (typeof EventSource === "undefined") return () => undefined;
+  const source = new EventSource(endpoint);
+  source.onmessage = event => {
+    try { onTemplateChange(JSON.parse(event.data) as HmrMessage); }
+    catch (error) { console.warn("[thymeleaf-reactive] invalid HMR message", error); }
+  };
+  source.onerror = () => console.warn("[thymeleaf-reactive] HMR connection lost; browser will retry");
+  return () => source.close();
 }
