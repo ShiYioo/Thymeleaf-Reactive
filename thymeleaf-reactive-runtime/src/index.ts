@@ -1,0 +1,164 @@
+type Primitive = string | number | boolean | null | undefined;
+export type Effect = () => void;
+export type Component = (props: Record<string, unknown>, children: VNode[]) => VNode;
+
+const effectStack: Effect[] = [];
+const proxyCache = new WeakMap<object, object>();
+
+export function reactive<T extends object>(value: T): T {
+  if (proxyCache.has(value)) return proxyCache.get(value) as T;
+  const deps = new Map<PropertyKey, Set<Effect>>();
+  const proxy = new Proxy(value, {
+    get(target, key, receiver) {
+      const active = effectStack.at(-1);
+      if (active) {
+        let subscribers = deps.get(key);
+        if (!subscribers) deps.set(key, subscribers = new Set());
+        subscribers.add(active);
+      }
+      const result = Reflect.get(target, key, receiver);
+      return result && typeof result === 'object' ? reactive(result) : result;
+    },
+    set(target, key, next, receiver) {
+      const changed = !Object.is(Reflect.get(target, key, receiver), next);
+      const ok = Reflect.set(target, key, next, receiver);
+      if (changed) deps.get(key)?.forEach(run => run());
+      return ok;
+    },
+    deleteProperty(target, key) {
+      const existed = key in target;
+      const ok = Reflect.deleteProperty(target, key);
+      if (existed) deps.get(key)?.forEach(run => run());
+      return ok;
+    }
+  });
+  proxyCache.set(value, proxy);
+  return proxy as T;
+}
+
+export function effect(fn: Effect): Effect {
+  const run: Effect = () => {
+    effectStack.push(run);
+    try { fn(); } finally { effectStack.pop(); }
+  };
+  run();
+  return run;
+}
+
+export const Text = Symbol("text");
+export type VNode = {
+  type: string | typeof Text | Component;
+  props: Record<string, unknown>;
+  children: VNode[];
+  el: Node | null;
+  key?: string | number;
+  component?: VNode;
+  text?: string;
+};
+
+export function h(type: VNode["type"], props: Record<string, unknown> = {}, children: VNode["children"] | Primitive = []): VNode {
+  const values = Array.isArray(children) ? children : [children];
+  return {
+    type,
+    props,
+    children: values.filter(value => value !== null && value !== undefined && value !== false).map(normalizeVNode),
+    el: null,
+    key: props.key as string | number | undefined
+  };
+}
+
+function normalizeVNode(value: VNode | Primitive): VNode {
+  if (typeof value === "object" && value !== null && "type" in value) return value as VNode;
+  return { type: Text, props: {}, children: [], el: null, text: String(value ?? "") };
+}
+
+function setProp(el: Element, key: string, value: unknown, previous?: unknown): void {
+  if (key === "key") return;
+  if (key.startsWith("on") && typeof value === "function") {
+    const event = key.slice(2).toLowerCase();
+    if (typeof previous === "function") el.removeEventListener(event, previous as EventListener);
+    el.addEventListener(event, value as EventListener);
+  } else if (value == null || value === false) el.removeAttribute(key);
+  else if (value === true) el.setAttribute(key, "");
+  else if (key in el && !key.includes("-")) (el as unknown as Record<string, unknown>)[key] = value;
+  else el.setAttribute(key, String(value));
+}
+
+function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode {
+  if (vnode.type === Text) {
+    vnode.el = document.createTextNode(vnode.text ?? "");
+    container.insertBefore(vnode.el, anchor);
+    return vnode;
+  }
+  if (typeof vnode.type === "function") {
+    vnode.component = vnode.type(vnode.props, vnode.children);
+    mount(vnode.component, container, anchor);
+    vnode.el = vnode.component.el;
+    return vnode;
+  }
+  const el = vnode.el = document.createElement(vnode.type);
+  Object.entries(vnode.props).forEach(([key, value]) => setProp(el as Element, key, value));
+  vnode.children.forEach(child => mount(child, el));
+  container.insertBefore(el, anchor);
+  return vnode;
+}
+
+function patchChildren(el: Element, oldChildren: VNode[], newChildren: VNode[]): void {
+  const oldKeyed = new Map(oldChildren.map((child, index) => [child.key ?? index, { child, index }]));
+  let anchor: Node | null = null;
+  for (let i = newChildren.length - 1; i >= 0; i--) {
+    const next = newChildren[i];
+    const identity = next.key ?? i;
+    const match = oldKeyed.get(identity);
+    if (match) {
+      patch(match.child, next, el);
+      if (match.index !== i) el.insertBefore(next.el, anchor);
+      oldKeyed.delete(identity);
+    } else mount(next, el, anchor);
+    anchor = next.el;
+  }
+  oldKeyed.forEach(({ child }) => child.el && el.removeChild(child.el));
+}
+
+export function patch(oldVNode: VNode | undefined, newVNode: VNode | undefined, container: Node): VNode | null {
+  if (!oldVNode && newVNode) return mount(newVNode, container);
+  if (oldVNode && !newVNode) { if (oldVNode.el) container.removeChild(oldVNode.el); return null; }
+  if (!oldVNode || !newVNode) return null;
+  if (oldVNode.type !== newVNode.type || oldVNode.key !== newVNode.key) {
+    const next = mount(newVNode, container, oldVNode.el);
+    if (oldVNode.el) container.removeChild(oldVNode.el);
+    return next;
+  }
+  newVNode.el = oldVNode.el;
+  if (newVNode.type === Text) {
+    const oldText = oldVNode.text ?? "";
+    const newText = newVNode.text ?? "";
+    if (oldText !== newText && newVNode.el) newVNode.el.nodeValue = newText;
+    return newVNode;
+  }
+  if (typeof newVNode.type === "function") {
+    const nextComponent = newVNode.type(newVNode.props, newVNode.children);
+    patch(oldVNode.component, nextComponent, container);
+    newVNode.component = nextComponent;
+    newVNode.el = nextComponent.el;
+    return newVNode;
+  }
+  const element = newVNode.el as Element;
+  const oldProps = oldVNode.props;
+  Object.keys({ ...oldProps, ...newVNode.props }).forEach(key => {
+    if (oldProps[key] !== newVNode.props[key]) setProp(element, key, newVNode.props[key], oldProps[key]);
+  });
+  patchChildren(element, oldVNode.children, newVNode.children);
+  return newVNode;
+}
+
+export function createApp(render: (state: any) => VNode, state: object = {}) {
+  const reactiveState = reactive(state);
+  return {
+    mount(root: Element): object {
+      let tree: VNode | undefined;
+      effect(() => { tree = patch(tree, render(reactiveState), root) ?? undefined; });
+      return reactiveState;
+    }
+  };
+}
