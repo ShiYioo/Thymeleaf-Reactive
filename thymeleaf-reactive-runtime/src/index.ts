@@ -112,7 +112,7 @@ function patchChildren(el: Element, oldChildren: VNode[], newChildren: VNode[]):
     const match = oldKeyed.get(identity);
     if (match) {
       patch(match.child, next, el);
-      if (match.index !== i) el.insertBefore(next.el, anchor);
+      if (match.index !== i && next.el) el.insertBefore(next.el, anchor);
       oldKeyed.delete(identity);
     } else mount(next, el, anchor);
     anchor = next.el;
