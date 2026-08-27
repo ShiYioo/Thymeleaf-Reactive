@@ -42,6 +42,21 @@ test('component HMR patches server output while preserving field state', async (
   assert.equal(document.querySelector('input').value, 'typing');
 });
 
+test('component HMR hydrates reactive bindings introduced by a changed template', async () => {
+  const document = installDom();
+  document.body.innerHTML = '<section data-tr-component="profile" data-tr-state="{&quot;name&quot;:&quot;Ada&quot;}"><strong>Before</strong></section>';
+  const state = hydrate(document.querySelector('section'), { name: 'Ada' });
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    text: async () => '<html><body><section data-tr-component="profile"><strong data-tr-text="name">stale</strong></section></body></html>'
+  });
+  await refreshComponentsFromPage('profile');
+  assert.equal(document.querySelector('strong').textContent, 'Ada');
+  state.name = 'Grace';
+  assert.equal(document.querySelector('strong').textContent, 'Grace');
+});
+
 test('virtual DOM patches changed content without replacing keyed input nodes', () => {
   const document = installDom();
   const root = document.createElement('main');
