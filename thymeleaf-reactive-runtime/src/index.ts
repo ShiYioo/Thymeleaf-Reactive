@@ -213,3 +213,39 @@ export function connectHmr(
   source.onerror = () => console.warn("[thymeleaf-reactive] HMR connection lost; browser will retry");
   return () => source.close();
 }
+
+function readPath(source: any, expression: string): any {
+  return expression.trim().split(".").filter(Boolean).reduce((value, key) => value?.[key], source);
+}
+
+function writePath(source: any, expression: string, value: any): void {
+  const keys = expression.trim().split(".").filter(Boolean);
+  if (!keys.length) return;
+  const last = keys.pop()!;
+  const target = keys.reduce((current, key) => current?.[key], source);
+  if (target && typeof target === "object") target[last] = value;
+}
+
+/** Hydrates server-rendered Thymeleaf metadata into reactive DOM bindings. */
+export function hydrate(root: Element, state: object, handlers: Record<string, (...args: any[]) => any> = {}): object {
+  const reactiveState = reactive(state);
+  root.querySelectorAll<HTMLElement>("[data-tr-text]").forEach(element => {
+    const expression = element.dataset.trText!;
+    effect(() => { element.textContent = String(readPath(reactiveState, expression) ?? ""); });
+  });
+  root.querySelectorAll<HTMLElement>("[data-tr-show]").forEach(element => {
+    const expression = element.dataset.trShow!;
+    effect(() => { element.hidden = !Boolean(readPath(reactiveState, expression)); });
+  });
+  root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("[data-tr-model]").forEach(element => {
+    const expression = element.dataset.trModel!;
+    effect(() => { if (element.value !== String(readPath(reactiveState, expression) ?? "")) element.value = String(readPath(reactiveState, expression) ?? ""); });
+    element.addEventListener("input", () => writePath(reactiveState, expression, element.value));
+  });
+  root.querySelectorAll<HTMLElement>("[data-tr-on]").forEach(element => {
+    const [event, name] = (element.dataset.trOn ?? "").split(":", 2);
+    const handler = handlers[name];
+    if (event && handler) element.addEventListener(event, handler.bind(null, reactiveState));
+  });
+  return reactiveState;
+}
