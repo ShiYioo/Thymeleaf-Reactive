@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en" xmlns:tr="https://thymeleaf-reactive.dev">
+<head>
+  <meta charset="UTF-8">
+  <title>Thymeleaf Reactive Counter</title>
+</head>
+<body>
+  <main tr:component="counter" tr:state='{"count":0,"visible":true}'>
+    <h1>Counter</h1>
+    <p tr:text="count">0</p>
+    <input tr:model="count" aria-label="count">
+    <button tr:on="click:increment">Increment</button>
+    <button tr:on="click:toggle">Toggle message</button>
+    <p tr:if="visible">Reactive Thymeleaf is live.</p>
+  </main>
+
+  <script>
+    window.ThymeleafReactive = {
+      handlers: {
+        increment(state) { state.count = Number(state.count) + 1; },
+        toggle(state) { state.visible = !state.visible; }
+      }
+    };
+  </script>
+  <script type="module" src="/__thymeleaf_reactive__/bootstrap.js"></script>
+</body>
+</html>

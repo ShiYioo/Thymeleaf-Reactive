@@ -23,6 +23,18 @@ Build with the checked-in Gradle Wrapper:
 ./gradlew.bat test
 ```
 
+## Example
+
+Run the counter application with JDK 25:
+
+```powershell
+./gradlew.bat :examples:counter:bootRun
+```
+
+Then open `http://localhost:8080`. The template is watched directly from
+`examples/counter/src/main/resources/templates`; changes to a `tr:component`
+are fetched and patched in place during development.
+
 Development HMR transport is exposed at `/__thymeleaf_reactive__/events` as an SSE stream. The browser Runtime will consume this stream and trigger component recompilation/patching.
 
 ## License

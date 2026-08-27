@@ -13,3 +13,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "thymeleaf-reactive"
 include(":thymeleaf-reactive-spring-boot-starter")
+include(":examples:counter")
