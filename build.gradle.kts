@@ -1,3 +1,6 @@
+import org.gradle.api.plugins.JavaPluginExtension
+import org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension
+
 plugins {
     kotlin("jvm") version "2.4.10" apply false
     kotlin("plugin.spring") version "2.4.10" apply false
@@ -11,13 +14,14 @@ allprojects {
 }
 
 subprojects {
+    apply(plugin = "java-library")
     apply(plugin = "org.jetbrains.kotlin.jvm")
 
-    java {
+    extensions.configure<JavaPluginExtension> {
         toolchain { languageVersion = JavaLanguageVersion.of(25) }
     }
 
-    kotlin {
+    extensions.configure<KotlinJvmProjectExtension> {
         jvmToolchain(25)
         compilerOptions { javaParameters.set(true) }
     }
