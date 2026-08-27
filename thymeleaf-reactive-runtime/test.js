@@ -9,6 +9,7 @@ function installDom() {
   globalThis.document = window.document;
   globalThis.Event = window.Event;
   globalThis.Node = window.Node;
+  globalThis.Element = window.Element;
   globalThis.DOMParser = window.DOMParser;
   globalThis.HTMLInputElement = window.HTMLInputElement;
   return window.document;
