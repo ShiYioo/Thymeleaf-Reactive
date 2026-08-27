@@ -1,13 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { reactive, effect, createApp, h, hydrate } from './dist/index.js';
+import { reactive, effect, createApp, h, hydrate, refreshComponentsFromPage } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
   globalThis.window = window;
   globalThis.document = window.document;
   globalThis.Event = window.Event;
+  globalThis.Node = window.Node;
+  globalThis.DOMParser = window.DOMParser;
+  globalThis.HTMLInputElement = window.HTMLInputElement;
   return window.document;
 }
 
@@ -20,6 +23,22 @@ test('reactive state tracks and reruns dependent effects', () => {
   state.count++;
   assert.equal(runs, 2);
   assert.equal(value, 1);
+});
+
+test('component HMR patches server output while preserving field state', async () => {
+  const document = installDom();
+  document.body.innerHTML = '<section data-tr-component="counter"><input data-tr-key="draft" value="server"><strong data-tr-key="label">Before</strong></section>';
+  const input = document.querySelector('input');
+  input.value = 'typing';
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    text: async () => '<html><body><section data-tr-component="counter"><input data-tr-key="draft" value="new-server"><strong data-tr-key="label">After</strong></section></body></html>'
+  });
+  await refreshComponentsFromPage('counter');
+  assert.equal(document.querySelector('strong').textContent, 'After');
+  assert.equal(document.querySelector('input'), input);
+  assert.equal(document.querySelector('input').value, 'typing');
 });
 
 test('virtual DOM patches changed content without replacing keyed input nodes', () => {

@@ -228,8 +228,12 @@ export function connectComponentHmr(
 ): () => void {
   return connectHmr(async message => {
     const update = message as ComponentHmrMessage;
-    if (!update.component || !update.moduleUrl) {
+    if (!update.component) {
       window.dispatchEvent(new CustomEvent("thymeleaf-reactive:template-change", { detail: update }));
+      return;
+    }
+    if (!update.moduleUrl) {
+      await refreshComponentsFromPage(update.component);
       return;
     }
     try {
@@ -241,6 +245,73 @@ export function connectComponentHmr(
       console.error(`[thymeleaf-reactive] failed to update ${update.component}`, error);
     }
   }, endpoint);
+}
+
+function vnodeFromDom(node: Node): VNode {
+  if (node.nodeType === Node.TEXT_NODE) {
+    return { type: Text, props: {}, children: [], el: node, text: node.textContent ?? "" };
+  }
+  const element = node as Element;
+  const props = Object.fromEntries(Array.from(element.attributes).map(attribute => [attribute.name, attribute.value]));
+  const key = element.getAttribute("data-tr-key") ?? element.getAttribute("key") ?? undefined;
+  return {
+    type: element.tagName.toLowerCase(),
+    props,
+    children: Array.from(element.childNodes).map(vnodeFromDom),
+    el: node,
+    key
+  };
+}
+
+type FormState = { value?: string; checked?: boolean; start?: number | null; end?: number | null };
+
+function fieldIdentity(field: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement, index: number): string {
+  return (field.dataset.trModel ?? field.getAttribute("data-tr-key") ?? field.id ?? field.name) || `field-${index}`;
+}
+
+function preserveFormState(root: Element): Map<string, FormState> {
+  const state = new Map<string, FormState>();
+  root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input,textarea,select").forEach((field, index) => {
+    state.set(fieldIdentity(field, index), {
+      value: field.value,
+      checked: field instanceof HTMLInputElement ? field.checked : undefined,
+      start: "selectionStart" in field ? field.selectionStart : null,
+      end: "selectionEnd" in field ? field.selectionEnd : null
+    });
+  });
+  return state;
+}
+
+function restoreFormState(root: Element, state: Map<string, FormState>): void {
+  root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input,textarea,select").forEach((field, index) => {
+    const previous = state.get(fieldIdentity(field, index));
+    if (!previous) return;
+    field.value = previous.value ?? field.value;
+    if (field instanceof HTMLInputElement && previous.checked !== undefined) field.checked = previous.checked;
+    if (document.activeElement === field && "setSelectionRange" in field && previous.start != null && previous.end != null) {
+      field.setSelectionRange(previous.start, previous.end);
+    }
+  });
+}
+
+/** Re-renders only components with this name from the current server-rendered page. */
+export async function refreshComponentsFromPage(component: string): Promise<void> {
+  const response = await fetch(window.location.href, {
+    cache: "no-store",
+    headers: { "X-Thymeleaf-Reactive": "hmr" }
+  });
+  if (!response.ok) throw new Error(`HMR refresh failed: ${response.status}`);
+  const nextDocument = new DOMParser().parseFromString(await response.text(), "text/html");
+  const current = Array.from(document.querySelectorAll<HTMLElement>("[data-tr-component]")).filter(node => node.dataset.trComponent === component);
+  const next = Array.from(nextDocument.querySelectorAll<HTMLElement>("[data-tr-component]")).filter(node => node.dataset.trComponent === component);
+  if (current.length !== next.length) throw new Error(`HMR component count changed for ${component}`);
+  current.forEach((root, index) => {
+    const parent = root.parentNode;
+    if (!parent) return;
+    const formState = preserveFormState(root);
+    const patched = patch(vnodeFromDom(root), vnodeFromDom(next[index]), parent);
+    if (patched?.el instanceof Element) restoreFormState(patched.el, formState);
+  });
 }
 
 function readPath(source: any, expression: string): any {
