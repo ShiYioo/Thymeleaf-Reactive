@@ -5,7 +5,7 @@
   <title>Thymeleaf Reactive Counter</title>
 </head>
 <body>
-  <main tr:component="counter" tr:state='{"count":0,"visible":true}'>
+  <main tr:component="counter" tr:state="${counter}">
     <h1>Counter</h1>
     <p tr:text="count">0</p>
     <input tr:model="count" aria-label="count">

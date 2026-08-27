@@ -9,10 +9,13 @@ The Starter packages the TypeScript browser runtime at `/thymeleaf-reactive/brow
 Use the reactive dialect in a Thymeleaf page:
 
 ```html
-<section tr:component="counter" tr:state='{"count":0}'>
+<section tr:component="counter" tr:state="${counter}">
   <strong tr:text="count"></strong>
   <input tr:model="count">
   <button tr:on="click:increment">+</button>
 </section>
 <script type="module" src="/__thymeleaf_reactive__/bootstrap.js"></script>
 ```
+
+`tr:state` accepts JSON directly or a simple server model reference such as
+`${counter}`. The latter is serialized with the application `ObjectMapper`.
