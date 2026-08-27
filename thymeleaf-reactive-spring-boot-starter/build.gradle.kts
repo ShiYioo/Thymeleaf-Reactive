@@ -5,6 +5,22 @@ plugins {
     `java-library`
 }
 
+val runtimeDir = rootProject.layout.projectDirectory.dir("thymeleaf-reactive-runtime")
+val runtimeDist = runtimeDir.dir("dist")
+
+val buildBrowserRuntime by tasks.registering(Exec::class) {
+    workingDir(runtimeDir)
+    commandLine("npm", "run", "build")
+    inputs.dir(runtimeDir.dir("src"))
+    inputs.file(runtimeDir.file("package.json"))
+    outputs.dir(runtimeDist)
+}
+
+tasks.processResources {
+    dependsOn(buildBrowserRuntime)
+    from(runtimeDist) { into("META-INF/resources/thymeleaf-reactive") }
+}
+
 dependencies {
     api("org.springframework.boot:spring-boot-autoconfigure")
     api("org.thymeleaf:thymeleaf-spring6")

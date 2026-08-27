@@ -9,22 +9,7 @@ import org.springframework.web.bind.annotation.ResponseBody
 @RestController
 @RequestMapping("/__thymeleaf_reactive__")
 class RuntimeController {
-    @GetMapping("/runtime.js", produces = ["text/javascript"])
+    @GetMapping("/bootstrap.js", produces = ["text/javascript"])
     @ResponseBody
-    fun runtimeBootstrap(): String = """
-        (() => {
-          if (!window.EventSource) return;
-          const source = new EventSource('/__thymeleaf_reactive__/events');
-          source.onmessage = (event) => {
-            try {
-              const message = JSON.parse(event.data);
-              window.dispatchEvent(new CustomEvent('thymeleaf-reactive:template-change', { detail: message }));
-            } catch (error) {
-              console.warn('[thymeleaf-reactive] invalid HMR event', error);
-            }
-          };
-          source.onerror = () => console.warn('[thymeleaf-reactive] HMR connection lost; retrying');
-          window.addEventListener('beforeunload', () => source.close(), { once: true });
-        })();
-    """.trimIndent()
+    fun runtimeBootstrap(): String = "import '/thymeleaf-reactive/browser.js';"
 }

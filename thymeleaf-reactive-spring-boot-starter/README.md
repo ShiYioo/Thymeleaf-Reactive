@@ -4,4 +4,15 @@ Spring Boot integration is planned here: auto-configuration, runtime asset injec
 
 The development event endpoint is currently exposed as Server-Sent Events at `/__thymeleaf_reactive__/events`. The browser package provides `connectHmr()` for subscribing to it.
 
-The Starter also exposes `/__thymeleaf_reactive__/runtime.js`, a zero-dependency browser bootstrap that dispatches `thymeleaf-reactive:template-change` events.
+The Starter packages the TypeScript browser runtime at `/thymeleaf-reactive/browser.js` and exposes `/__thymeleaf_reactive__/bootstrap.js` as a module entry point.
+
+Use the reactive dialect in a Thymeleaf page:
+
+```html
+<section tr:component="counter" tr:state='{"count":0}'>
+  <strong tr:text="count"></strong>
+  <input tr:model="count">
+  <button tr:on="click:increment">+</button>
+</section>
+<script type="module" src="/__thymeleaf_reactive__/bootstrap.js"></script>
+```
