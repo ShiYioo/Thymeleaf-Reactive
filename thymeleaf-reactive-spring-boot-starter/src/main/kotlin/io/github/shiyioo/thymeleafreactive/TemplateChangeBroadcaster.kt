@@ -15,13 +15,15 @@ import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 import java.util.function.Consumer
 
 data class TemplateChange(
     val path: String,
     val kind: String,
     val component: String? = null,
-    val moduleUrl: String? = null
+    val moduleUrl: String? = null,
+    val version: Long = 0
 )
 
 class TemplateChangeBroadcaster(private val properties: ReactiveProperties) : SmartLifecycle {
@@ -39,6 +41,7 @@ class TemplateChangeBroadcaster(private val properties: ReactiveProperties) : Sm
     @Volatile private var watchedDirectory: Path? = null
     @Volatile private var pollTask: ScheduledFuture<*>? = null
     @Volatile private var lastChange: TemplateChange? = null
+    private val version = AtomicLong()
     private var running = false
 
     fun subscribe(listener: Consumer<TemplateChange>): AutoCloseable {
@@ -88,6 +91,7 @@ class TemplateChangeBroadcaster(private val properties: ReactiveProperties) : Sm
         "directory" to watchedDirectory?.toString(),
         "templatePath" to properties.templatePath,
         "lastChange" to lastChange,
+        "version" to version.get(),
         "listeners" to listeners.size
     )
 
@@ -100,7 +104,7 @@ class TemplateChangeBroadcaster(private val properties: ReactiveProperties) : Sm
         synchronized(pendingLock) {
             pending.remove(normalized)?.cancel(false)
             pending[normalized] = scheduler.schedule({
-                val change = TemplateChange(normalized, kind, componentFor(normalized, source))
+                val change = TemplateChange(normalized, kind, componentFor(normalized, source), version = version.incrementAndGet())
                 lastChange = change
                 listeners.forEach { it.accept(change) }
                 synchronized(pendingLock) { pending.remove(normalized) }

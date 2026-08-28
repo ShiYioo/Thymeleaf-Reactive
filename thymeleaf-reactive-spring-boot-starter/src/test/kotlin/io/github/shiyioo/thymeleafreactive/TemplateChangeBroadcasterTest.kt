@@ -28,7 +28,11 @@ class TemplateChangeBroadcasterTest {
         assertThat(latch.await(2, TimeUnit.SECONDS)).isTrue()
         Thread.sleep(80)
         assertThat(changes).hasSize(1)
-        assertThat(changes.single()).isEqualTo(TemplateChange("admin/dashboard.html", "ENTRY_MODIFY", "dashboard"))
+        val change = changes.single()
+        assertThat(change.path).isEqualTo("admin/dashboard.html")
+        assertThat(change.kind).isEqualTo("ENTRY_MODIFY")
+        assertThat(change.component).isEqualTo("dashboard")
+        assertThat(change.version).isPositive()
         assertThat(broadcaster.componentFor("pages/profile.html")).isEqualTo("profile")
 
         subscription.close()

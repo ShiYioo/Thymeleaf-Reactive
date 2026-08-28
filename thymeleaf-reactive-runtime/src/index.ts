@@ -334,7 +334,7 @@ export function hotUpdate(name: string, render: Component): boolean {
   return true;
 }
 
-export type HmrMessage = { path: string; kind: string };
+export type HmrMessage = { path: string; kind: string; version?: number };
 
 export type ComponentHmrMessage = HmrMessage & {
   component?: string;
@@ -361,10 +361,15 @@ export function connectHmr(
  * module URL; the module must export its replacement render as `default`.
  */
 export function connectComponentHmr(
-  endpoint = "/__thymeleaf_reactive__/events"
+  endpoint = "/__thymeleaf_reactive__/events",
+  statusEndpoint = "/__thymeleaf_reactive__/status",
+  pollInterval = 500
 ): () => void {
-  return connectHmr(async message => {
+  let seenVersion = 0;
+  let pollingInitialized = false;
+  const applyChange = async (message: HmrMessage) => {
     const update = message as ComponentHmrMessage;
+    if (typeof update.version === "number") seenVersion = Math.max(seenVersion, update.version);
     if (!update.component) {
       window.dispatchEvent(new CustomEvent("thymeleaf-reactive:template-change", { detail: update }));
       return;
@@ -381,7 +386,24 @@ export function connectComponentHmr(
     } catch (error) {
       console.error(`[thymeleaf-reactive] failed to update ${update.component}`, error);
     }
-  }, endpoint);
+  };
+  const closeEvents = connectHmr(applyChange, endpoint);
+  const poll = async () => {
+    try {
+      const response = await fetch(statusEndpoint, { cache: "no-store" });
+      if (!response.ok) return;
+      const status = await response.json() as { version?: number; lastChange?: ComponentHmrMessage };
+      const version = status.version ?? 0;
+      if (!pollingInitialized) { pollingInitialized = true; seenVersion = Math.max(seenVersion, version); return; }
+      if (version > seenVersion && status.lastChange) await applyChange(status.lastChange);
+    } catch {
+      // The EventSource channel remains the primary fast path; polling retries quietly.
+    }
+  };
+  void poll();
+  const timer = setInterval(() => { void poll(); }, pollInterval);
+  if (typeof timer === "object" && "unref" in timer) (timer as { unref(): void }).unref();
+  return () => { closeEvents(); clearInterval(timer); };
 }
 
 function vnodeFromDom(node: Node): VNode {
