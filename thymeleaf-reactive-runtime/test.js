@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { reactive, effect, computed, connectComponentHmr, createApp, defineComponent, Fragment, h, hotUpdate, hydrate, refreshComponentsFromPage } from './dist/index.js';
+import { reactive, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineComponent, Fragment, h, hotUpdate, hydrate, refreshComponentsFromPage } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -366,6 +366,40 @@ test('virtual DOM removes stale event listeners and style properties', () => {
   assert.equal(newClicks, 1);
   assert.equal(button.style.color, 'green');
   assert.equal(button.style.background, '');
+});
+
+test('SFC render tracks state, loops keyed children, and writes v-model values back', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const render = compileSfcComponent(`
+    <template>
+      <section>
+        <strong>{{count}}</strong>
+        <button v-if="visible" @click="increment()">inc</button>
+        <em v-else>hidden</em>
+        <ul><li v-for="item in items" :key="item.id">{{item.label}}</li></ul>
+        <input v-model="name">
+      </section>
+    </template>
+  `);
+  const state = createApp(render, {
+    count: 0,
+    visible: true,
+    name: 'Ada',
+    items: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }],
+    increment() { this.count++; }
+  }).mount(root);
+  assert.equal(root.querySelector('strong').textContent, '0');
+  root.querySelector('button').dispatchEvent(new Event('click', { bubbles: true }));
+  assert.equal(root.querySelector('strong').textContent, '1');
+  state.visible = false;
+  assert.equal(root.querySelector('em').textContent, 'hidden');
+  state.items = [{ id: 'b', label: 'B2' }, { id: 'a', label: 'A' }];
+  assert.deepEqual([...root.querySelectorAll('li')].map(item => item.textContent), ['B2', 'A']);
+  const input = root.querySelector('input');
+  input.value = 'Grace';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  assert.equal(state.name, 'Grace');
 });
 
 test('hydrates Thymeleaf bindings and synchronizes model values', () => {

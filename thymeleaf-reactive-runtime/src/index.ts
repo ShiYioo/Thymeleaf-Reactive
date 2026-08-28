@@ -280,7 +280,7 @@ export function compileSfcComponent(source: string): Component {
   template.innerHTML = match[1];
   const roots = Array.from(template.content.childNodes);
   return (props, children) => {
-    const scope = Object.assign(Object.create(null), props) as Record<string, unknown>;
+    const scope = props as Record<string, unknown>;
     const nodes = renderSfcChildren(roots, scope, children);
     return nodes.length === 1 ? nodes[0] : h(Fragment, {}, nodes);
   };
