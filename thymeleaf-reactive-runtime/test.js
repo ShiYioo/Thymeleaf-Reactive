@@ -120,6 +120,19 @@ test('component HMR hydrates reactive bindings introduced by a changed template'
   assert.equal(document.querySelector('strong').textContent, 'Grace');
 });
 
+test('component HMR patches server conditional comment anchors', async () => {
+  const document = installDom();
+  document.body.innerHTML = '<section data-tr-component="counter"><!--tr-if--><p data-tr-if="visible">Before</p></section>';
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    text: async () => '<html><body><section data-tr-component="counter"><!--tr-if--><p data-tr-if="visible">After</p></section></body></html>'
+  });
+  await refreshComponentsFromPage('counter');
+  assert.equal(document.querySelector('p').textContent, 'After');
+  assert.equal(document.querySelector('section').firstChild.nodeType, Node.COMMENT_NODE);
+});
+
 test('virtual DOM patches changed content without replacing keyed input nodes', () => {
   const document = installDom();
   const root = document.createElement('main');

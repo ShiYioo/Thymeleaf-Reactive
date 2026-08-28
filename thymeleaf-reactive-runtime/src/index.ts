@@ -90,6 +90,7 @@ export function effect(fn: Effect): Effect {
 }
 
 export const Text = Symbol("text");
+export const Comment = Symbol("comment");
 type ComponentInstance = {
   vnode: VNode;
   tree: VNode;
@@ -97,7 +98,7 @@ type ComponentInstance = {
   dispose: () => void;
 };
 export type VNode = {
-  type: string | typeof Text | Component;
+  type: string | typeof Text | typeof Comment | Component;
   props: Record<string, unknown>;
   children: VNode[];
   el: Node | null;
@@ -169,6 +170,11 @@ function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode
     container.insertBefore(vnode.el, anchor);
     return vnode;
   }
+  if (vnode.type === Comment) {
+    vnode.el = document.createComment(vnode.text ?? "");
+    container.insertBefore(vnode.el, anchor);
+    return vnode;
+  }
   if (typeof vnode.type === "function") {
     vnode.component = vnode.type(vnode.props, vnode.children);
     mount(vnode.component, container, anchor);
@@ -205,7 +211,7 @@ function unmount(vnode: VNode, container: Node): void {
     if (vnode.component) unmount(vnode.component, container);
     return;
   }
-  if (vnode.type !== Text) vnode.children.forEach(child => unmount(child, vnode.el ?? container));
+  if (vnode.type !== Text && vnode.type !== Comment) vnode.children.forEach(child => unmount(child, vnode.el ?? container));
   if (vnode.el?.parentNode === container) container.removeChild(vnode.el);
 }
 
@@ -247,7 +253,7 @@ export function patch(oldVNode: VNode | undefined, newVNode: VNode | undefined, 
     return next;
   }
   newVNode.el = oldVNode.el;
-  if (newVNode.type === Text) {
+  if (newVNode.type === Text || newVNode.type === Comment) {
     const oldText = oldVNode.text ?? "";
     const newText = newVNode.text ?? "";
     if (oldText !== newText && newVNode.el) newVNode.el.nodeValue = newText;
@@ -409,6 +415,9 @@ export function connectComponentHmr(
 function vnodeFromDom(node: Node): VNode {
   if (node.nodeType === Node.TEXT_NODE) {
     return { type: Text, props: {}, children: [], el: node, text: node.textContent ?? "" };
+  }
+  if (node.nodeType === Node.COMMENT_NODE) {
+    return { type: Comment, props: {}, children: [], el: node, text: node.textContent ?? "" };
   }
   const element = node as Element;
   const props = Object.fromEntries(Array.from(element.attributes).map(attribute => [attribute.name, attribute.value]));
