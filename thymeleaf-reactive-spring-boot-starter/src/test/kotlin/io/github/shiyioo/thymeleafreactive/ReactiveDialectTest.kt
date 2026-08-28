@@ -37,18 +37,21 @@ class ReactiveDialectTest {
         }
         val hidden = Context().apply { setVariable("visible", false) }
         val hiddenOutput = engine.process(
-            """<section tr:if="visible"><span>Hidden</span></section>""",
+            """<section tr:if="visible"><span>Hidden</span></section><aside tr:show="visible">Also hidden</aside>""",
             hidden
         )
-        assertThat(hiddenOutput).doesNotContain("Hidden")
+        assertThat(hiddenOutput).contains("data-tr-if=\"visible\"", "hidden=\"hidden\"", "Hidden")
+        assertThat(hiddenOutput).contains("data-tr-show=\"visible\"", "Also hidden")
 
         val shown = Context().apply { setVariable("visible", true) }
         val shownOutput = engine.process(
-            """<section tr:if="visible"><span>Shown</span></section>""",
+            """<section tr:if="visible"><span>Shown</span></section><aside tr:show="visible">Also shown</aside>""",
             shown
         )
         assertThat(shownOutput).contains("data-tr-if=\"visible\"")
         assertThat(shownOutput).contains("Shown")
+        assertThat(shownOutput).contains("data-tr-show=\"visible\"", "Also shown")
+        assertThat(shownOutput).doesNotContain("hidden=\"hidden\"")
     }
 
     @Test

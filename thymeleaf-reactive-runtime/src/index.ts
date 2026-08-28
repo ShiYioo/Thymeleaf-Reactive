@@ -872,6 +872,7 @@ export function hydrate(root: Element, state: object, handlers: Record<string, (
     parent.insertBefore(anchor, element);
     const runner = effect(() => {
       if (readPath(reactiveState, expression)) {
+        element.hidden = false;
         if (element.parentNode !== parent) parent.insertBefore(element, anchor.nextSibling);
       } else if (element.parentNode === parent) {
         parent.removeChild(element);

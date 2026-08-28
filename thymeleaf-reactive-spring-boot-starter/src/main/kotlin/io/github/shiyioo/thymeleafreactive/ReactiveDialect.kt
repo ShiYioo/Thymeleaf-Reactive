@@ -20,7 +20,7 @@ class ReactiveDialect(private val objectMapper: ObjectMapper) : AbstractProcesso
         ReactiveTextProcessor(),
         ReactiveAttributeProcessor("model", "data-tr-model"),
         ReactiveIfProcessor(),
-        ReactiveAttributeProcessor("show", "data-tr-show"),
+        ReactiveShowProcessor(),
         ReactiveAttributeProcessor("on", "data-tr-on"),
         ReactiveDynamicProcessor("attr", "data-tr-attr"),
         ReactiveDynamicProcessor("class", "data-tr-class"),
@@ -127,7 +127,22 @@ private class ReactiveIfProcessor : AbstractAttributeTagProcessor(
         structureHandler: IElementTagStructureHandler
     ) {
         structureHandler.setAttribute("data-tr-if", attributeValue)
-        if (evaluate(context, attributeValue) != true) structureHandler.removeElement()
+        if (evaluate(context, attributeValue) != true) structureHandler.setAttribute("hidden", "hidden")
+    }
+}
+
+private class ReactiveShowProcessor : AbstractAttributeTagProcessor(
+    TemplateMode.HTML, "tr", null, false, "show", true, 1000, true
+) {
+    override fun doProcess(
+        context: ITemplateContext,
+        tag: IProcessableElementTag,
+        attributeName: AttributeName,
+        attributeValue: String,
+        structureHandler: IElementTagStructureHandler
+    ) {
+        structureHandler.setAttribute("data-tr-show", attributeValue)
+        if (evaluate(context, attributeValue) != true) structureHandler.setAttribute("hidden", "hidden")
     }
 }
 

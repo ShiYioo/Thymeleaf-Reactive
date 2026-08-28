@@ -59,6 +59,8 @@ Reactive lists can be rendered on the server with `tr:each`; repeated rows shoul
 
 The first response keeps the server-rendered rows. During browser hydration, those rows are adopted as the initial keyed list rather than rendered a second time, then continue to update when the component state changes.
 
+For `tr:if` and `tr:show`, a false server value is emitted with the HTML `hidden` attribute and reactive metadata. That keeps the first paint hidden without JavaScript while preserving the DOM necessary for the browser runtime to reveal the block later.
+
 ## License
 
 Apache-2.0

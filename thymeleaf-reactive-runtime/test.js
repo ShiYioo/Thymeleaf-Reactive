@@ -383,6 +383,19 @@ test('hydrates conditional blocks by mounting and unmounting their DOM nodes', (
   assert.equal(root.querySelector('p'), null);
 });
 
+test('hydrates server-hidden conditional blocks and reveals them reactively', () => {
+  const document = installDom();
+  const root = document.createElement('section');
+  root.innerHTML = '<p data-tr-if="visible" hidden>Only when visible</p><div data-tr-show="visible" hidden>Shown when visible</div>';
+  const state = hydrate(root, { visible: false });
+  assert.equal(root.querySelector('p'), null);
+  assert.equal(root.querySelector('div').hidden, true);
+  state.visible = true;
+  assert.equal(root.querySelector('p').hidden, false);
+  assert.equal(root.querySelector('p').textContent, 'Only when visible');
+  assert.equal(root.querySelector('div').hidden, false);
+});
+
 test('hydrates keyed each bindings with scoped reactive rows', () => {
   const document = installDom();
   const root = document.createElement('ul');
