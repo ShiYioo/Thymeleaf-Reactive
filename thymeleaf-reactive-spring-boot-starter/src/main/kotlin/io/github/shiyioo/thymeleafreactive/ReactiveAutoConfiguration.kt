@@ -23,7 +23,7 @@ class ReactiveAutoConfiguration
 
     @Bean
     @ConditionalOnMissingBean
-    fun hmrController(changes: TemplateChangeBroadcaster): HmrController = HmrController(changes)
+    fun hmrController(changes: TemplateChangeBroadcaster, objectMapper: ObjectMapper): HmrController = HmrController(changes, objectMapper)
 
     @Bean
     @ConditionalOnMissingBean

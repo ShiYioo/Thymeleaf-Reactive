@@ -38,6 +38,7 @@ class TemplateChangeBroadcaster(private val properties: ReactiveProperties) : Sm
     @Volatile private var watcherReady = CountDownLatch(0)
     @Volatile private var watchedDirectory: Path? = null
     @Volatile private var pollTask: ScheduledFuture<*>? = null
+    @Volatile private var lastChange: TemplateChange? = null
     private var running = false
 
     fun subscribe(listener: Consumer<TemplateChange>): AutoCloseable {
@@ -85,7 +86,9 @@ class TemplateChangeBroadcaster(private val properties: ReactiveProperties) : Sm
     fun status(): Map<String, Any?> = mapOf(
         "running" to running,
         "directory" to watchedDirectory?.toString(),
-        "templatePath" to properties.templatePath
+        "templatePath" to properties.templatePath,
+        "lastChange" to lastChange,
+        "listeners" to listeners.size
     )
 
     /** Schedules one normalized event; repeated saves of the same template collapse into one event. */
@@ -98,6 +101,7 @@ class TemplateChangeBroadcaster(private val properties: ReactiveProperties) : Sm
             pending.remove(normalized)?.cancel(false)
             pending[normalized] = scheduler.schedule({
                 val change = TemplateChange(normalized, kind, componentFor(normalized, source))
+                lastChange = change
                 listeners.forEach { it.accept(change) }
                 synchronized(pendingLock) { pending.remove(normalized) }
             }, delay, TimeUnit.MILLISECONDS)

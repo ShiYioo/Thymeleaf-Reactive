@@ -8,17 +8,21 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 import java.io.IOException
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.function.Consumer
+import tools.jackson.databind.ObjectMapper
 
 @RestController
 @RequestMapping("/__thymeleaf_reactive__")
-class HmrController(private val changes: TemplateChangeBroadcaster) {
+class HmrController(
+    private val changes: TemplateChangeBroadcaster,
+    private val objectMapper: ObjectMapper
+) {
     private val clients = CopyOnWriteArrayList<SseEmitter>()
 
     init {
         changes.subscribe(Consumer { change ->
             clients.removeIf { emitter ->
                 try {
-                    emitter.send(change, MediaType.APPLICATION_JSON)
+                    emitter.send(SseEmitter.event().data(objectMapper.writeValueAsString(change)))
                     false
                 } catch (_: IOException) {
                     emitter.complete()
@@ -38,5 +42,5 @@ class HmrController(private val changes: TemplateChangeBroadcaster) {
     }
 
     @GetMapping("/status", produces = [MediaType.APPLICATION_JSON_VALUE])
-    fun status(): Map<String, Any?> = changes.status()
+    fun status(): Map<String, Any?> = changes.status() + mapOf("clients" to clients.size)
 }
