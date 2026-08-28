@@ -625,6 +625,16 @@ export function patch(oldVNode: VNode | undefined, newVNode: VNode | undefined, 
   return newVNode;
 }
 
+const renderedTrees = new WeakMap<Node, VNode>();
+
+/** Renders a VNode into a container, retaining the previous tree for subsequent patches. */
+export function render(vnode: VNode | null, container: Node): VNode | null {
+  const patched = patch(renderedTrees.get(container), vnode ?? undefined, container);
+  if (patched) renderedTrees.set(container, patched);
+  else renderedTrees.delete(container);
+  return patched;
+}
+
 export function createApp(render: (state: any) => VNode, state: object = {}) {
   const reactiveState = reactive(state);
   let currentRender = render;

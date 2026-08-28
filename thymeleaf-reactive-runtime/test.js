@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { reactive, ref, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineComponent, Fragment, h, hotUpdate, hydrate, refreshComponentsFromPage } from './dist/index.js';
+import { reactive, ref, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineComponent, Fragment, h, hotUpdate, hydrate, refreshComponentsFromPage, render } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -330,6 +330,18 @@ test('virtual DOM patches changed content without replacing keyed input nodes', 
   assert.equal(root.querySelector('strong').textContent, '1');
   assert.equal(root.querySelector('input'), input);
   assert.equal(root.querySelector('input').value, 'kept');
+});
+
+test('render retains the previous tree and supports explicit unmounting', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  render(h('section', {}, [h('input', { key: 'draft', value: 'kept' }), h('strong', {}, 'Before')]), root);
+  const input = root.querySelector('input');
+  render(h('section', {}, [h('input', { key: 'draft', value: 'kept' }), h('strong', {}, 'After')]), root);
+  assert.equal(root.querySelector('input'), input);
+  assert.equal(root.textContent, 'After');
+  render(null, root);
+  assert.equal(root.childNodes.length, 0);
 });
 
 test('virtual DOM performs keyed moves and insertions while updating props and listeners', () => {
