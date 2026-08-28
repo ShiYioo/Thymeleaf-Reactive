@@ -72,6 +72,51 @@ test('virtual DOM patches changed content without replacing keyed input nodes', 
   assert.equal(root.querySelector('input').value, 'kept');
 });
 
+test('virtual DOM performs keyed moves and insertions while updating props and listeners', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  let clicks = 0;
+  const first = createApp(state => h('ul', { class: state.active ? 'active' : 'idle', style: { color: state.color } }, [
+    ...state.items.map(item => h('li', { key: item.id, onClick: () => clicks++ }, item.label))
+  ]), { active: false, color: 'red', items: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] });
+  const state = first.mount(root);
+  const originalA = root.querySelectorAll('li')[0];
+  const originalB = root.querySelectorAll('li')[1];
+
+  state.items = [{ id: 'b', label: 'B2' }, { id: 'a', label: 'A' }, { id: 'c', label: 'C' }];
+  state.active = true;
+  state.color = 'blue';
+
+  const items = root.querySelectorAll('li');
+  assert.equal(items.length, 3);
+  assert.equal(items[0], originalB);
+  assert.equal(items[1], originalA);
+  assert.equal(items[0].textContent, 'B2');
+  assert.equal(root.querySelector('ul').className, 'active');
+  assert.equal(root.querySelector('ul').style.color, 'blue');
+  items[0].dispatchEvent(new Event('click', { bubbles: true }));
+  assert.equal(clicks, 1);
+});
+
+test('virtual DOM removes stale event listeners and style properties', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  let oldClicks = 0;
+  let newClicks = 0;
+  const app = createApp(state => h('button', {
+    onClick: state.version === 0 ? () => oldClicks++ : () => newClicks++,
+    style: state.version === 0 ? { color: 'red', background: 'white' } : { color: 'green' }
+  }, 'go'), { version: 0 });
+  const state = app.mount(root);
+  const button = root.querySelector('button');
+  state.version = 1;
+  button.dispatchEvent(new Event('click'));
+  assert.equal(oldClicks, 0);
+  assert.equal(newClicks, 1);
+  assert.equal(button.style.color, 'green');
+  assert.equal(button.style.background, '');
+});
+
 test('hydrates Thymeleaf bindings and synchronizes model values', () => {
   const document = installDom();
   const root = document.createElement('section');

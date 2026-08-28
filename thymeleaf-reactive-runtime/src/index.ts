@@ -76,15 +76,42 @@ function normalizeVNode(value: VNode | Primitive): VNode {
   return { type: Text, props: {}, children: [], el: null, text: String(value ?? "") };
 }
 
+const eventListeners = new WeakMap<Element, Map<string, EventListener>>();
+
 function setProp(el: Element, key: string, value: unknown, previous?: unknown): void {
   if (key === "key") return;
-  if (key.startsWith("on") && typeof value === "function") {
+  if (key.startsWith("on")) {
     const event = key.slice(2).toLowerCase();
-    if (typeof previous === "function") el.removeEventListener(event, previous as EventListener);
-    el.addEventListener(event, value as EventListener);
+    const listeners = eventListeners.get(el) ?? new Map<string, EventListener>();
+    const registered = listeners.get(event);
+    if (registered) el.removeEventListener(event, registered);
+    if (typeof value === "function") {
+      const listener = value as EventListener;
+      el.addEventListener(event, listener);
+      listeners.set(event, listener);
+    } else {
+      listeners.delete(event);
+    }
+    if (listeners.size) eventListeners.set(el, listeners);
+    else eventListeners.delete(el);
+  } else if (key === "class" && value && typeof value === "object") {
+    const classes = Object.entries(value as Record<string, unknown>)
+      .filter(([, enabled]) => Boolean(enabled)).map(([name]) => name).join(" ");
+    el.className = classes;
+  } else if (key === "style" && value && typeof value === "object") {
+    const style = (el as HTMLElement).style;
+    if (previous && typeof previous === "object") {
+      Object.keys(previous as object).forEach(name => style.removeProperty(name));
+    }
+    Object.entries(value as Record<string, unknown>).forEach(([name, styleValue]) => {
+      if (styleValue == null) style.removeProperty(name);
+      else style.setProperty(name, String(styleValue));
+    });
   } else if (value == null || value === false) el.removeAttribute(key);
-  else if (value === true) el.setAttribute(key, "");
-  else if (key in el && !key.includes("-")) (el as unknown as Record<string, unknown>)[key] = value;
+  else if (value === true) {
+    el.setAttribute(key, "");
+    if (key in el && !key.includes("-")) (el as unknown as Record<string, unknown>)[key] = true;
+  } else if (key in el && !key.includes("-")) (el as unknown as Record<string, unknown>)[key] = value;
   else el.setAttribute(key, String(value));
 }
 
@@ -108,20 +135,31 @@ function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode
 }
 
 function patchChildren(el: Element, oldChildren: VNode[], newChildren: VNode[]): void {
-  const oldKeyed = new Map(oldChildren.map((child, index) => [child.key ?? index, { child, index }]));
+  const oldKeyed = new Map<string | number, { child: VNode; index: number }>();
+  const duplicateKeys = new Set<string | number>();
+  oldChildren.forEach((child, index) => {
+    const identity = child.key ?? index;
+    if (child.key != null && oldKeyed.has(identity)) duplicateKeys.add(identity);
+    else oldKeyed.set(identity, { child, index });
+  });
+  duplicateKeys.forEach(key => oldKeyed.delete(key));
+  const used = new Set<VNode>();
   let anchor: Node | null = null;
   for (let i = newChildren.length - 1; i >= 0; i--) {
     const next = newChildren[i];
     const identity = next.key ?? i;
-    const match = oldKeyed.get(identity);
+    const match = !duplicateKeys.has(identity) ? oldKeyed.get(identity) : undefined;
     if (match) {
       patch(match.child, next, el);
       if (match.index !== i && next.el) el.insertBefore(next.el, anchor);
       oldKeyed.delete(identity);
+      used.add(match.child);
     } else mount(next, el, anchor);
     anchor = next.el;
   }
-  oldKeyed.forEach(({ child }) => child.el && el.removeChild(child.el));
+  oldKeyed.forEach(({ child }) => {
+    if (!used.has(child) && child.el?.parentNode === el) el.removeChild(child.el);
+  });
 }
 
 export function patch(oldVNode: VNode | undefined, newVNode: VNode | undefined, container: Node): VNode | null {
