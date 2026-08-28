@@ -265,7 +265,10 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
   Array.from(element.attributes).forEach(attribute => {
     const { name, value } = attribute;
     if (name === "v-if" || name === "v-else" || name === "v-show" || name === "v-text") return;
-    if (name.startsWith(":")) props[name.slice(1)] = readPath(scope, value);
+    if (name === "v-bind") {
+      const bound = readPath(scope, value);
+      if (bound && typeof bound === "object") Object.assign(props, bound);
+    } else if (name.startsWith(":")) props[name.slice(1)] = readPath(scope, value);
     else if (name.startsWith("v-bind:")) props[name.slice(7)] = readPath(scope, value);
     else if (name.startsWith("@")) props[sfcEventPropName(name.slice(1))] = sfcEventHandler(value, scope);
     else if (name.startsWith("v-on:")) props[sfcEventPropName(name.slice(5))] = sfcEventHandler(value, scope);

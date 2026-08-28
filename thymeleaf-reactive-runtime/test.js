@@ -448,6 +448,24 @@ test('SFC resolves registered child components into the VDOM tree', () => {
   assert.equal(child.textContent, 'After');
 });
 
+test('SFC supports object spread bindings for native and child component props', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Child = defineComponent('sfc-bind-test', props => h('strong', {}, `${props.label}:${props.active}`));
+  const render = compileSfcComponent('<template><div><input v-bind="inputProps"><Child v-bind="childProps" /></div></template>');
+  const state = createApp(render, {
+    inputProps: { title: 'Editor', value: 'draft' },
+    childProps: { label: 'Ready', active: true },
+    components: { Child }
+  }).mount(root);
+  const input = root.querySelector('input');
+  assert.equal(input.title, 'Editor');
+  assert.equal(input.value, 'draft');
+  assert.equal(root.querySelector('strong').textContent, 'Ready:true');
+  state.childProps = { label: 'Done', active: false };
+  assert.equal(root.querySelector('strong').textContent, 'Done:false');
+});
+
 test('hydrates Thymeleaf bindings and synchronizes model values', () => {
   const document = installDom();
   const root = document.createElement('section');
