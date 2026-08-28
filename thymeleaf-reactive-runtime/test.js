@@ -517,6 +517,18 @@ test('hydrates server-rendered each rows without duplicating them', () => {
   assert.equal(rows[1], firstA);
 });
 
+test('each row scopes inherit outer reactive state for expressions', () => {
+  const document = installDom();
+  const root = document.createElement('ul');
+  root.innerHTML = '<li data-tr-each="item in items" data-tr-key="item.id" data-tr-text="item.label + suffix"></li>';
+  const state = hydrate(root, { suffix: '!', items: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] });
+  assert.deepEqual([...root.querySelectorAll('li')].map(row => row.textContent), ['A!', 'B!']);
+  state.suffix = '?';
+  assert.deepEqual([...root.querySelectorAll('li')].map(row => row.textContent), ['A?', 'B?']);
+  state.items[0].label = 'Alpha';
+  assert.deepEqual([...root.querySelectorAll('li')].map(row => row.textContent), ['Alpha?', 'B?']);
+});
+
 test('browser bootstrap preserves existing handlers and hydrates encoded server state', async () => {
   const document = installDom();
   document.body.innerHTML = '<main data-tr-component="counter" data-tr-state="{&quot;count&quot;:2}"><p data-tr-text="count">stale</p></main>';

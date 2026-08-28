@@ -904,7 +904,10 @@ export function hydrate(root: Element, state: object, handlers: Record<string, (
       const nextKeys = new Set<string | number>();
       const nextRecords: EachRecord[] = [];
       values.forEach((item, index) => {
-        const candidateScope = { [parsed.item]: item, ...(parsed.index ? { [parsed.index]: index } : {}) };
+        const candidateScope = Object.assign(Object.create(reactiveState), {
+          [parsed.item]: item,
+          ...(parsed.index ? { [parsed.index]: index } : {})
+        });
         const candidateKey = eachKey(blueprint, candidateScope, index);
         const previous = records.get(candidateKey);
         const scope = previous?.scope ?? reactive(candidateScope);
