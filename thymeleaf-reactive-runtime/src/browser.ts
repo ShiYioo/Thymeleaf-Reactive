@@ -33,7 +33,7 @@ async function adoptSfcComponent(
   if (typeof render !== "function") throw new Error(`SFC ${source} has no component render export`);
   registerComponentSource(source, name);
   Object.assign(state, handlers);
-  adoptComponentRoot(root, defineComponent(name, render), state);
+  adoptComponentRoot(root, defineComponent(name, render), state as Record<string, unknown>);
 }
 
 async function boot(): Promise<void> {
