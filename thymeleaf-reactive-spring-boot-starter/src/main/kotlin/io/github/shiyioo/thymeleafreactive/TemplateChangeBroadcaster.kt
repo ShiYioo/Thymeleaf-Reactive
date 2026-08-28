@@ -17,6 +17,8 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import java.util.function.Consumer
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 
 data class TemplateChange(
     val path: String,
@@ -105,14 +107,20 @@ class TemplateChangeBroadcaster(private val properties: ReactiveProperties) : Sm
 
     /** Schedules one normalized event; repeated saves of the same template collapse into one event. */
     internal fun notifyChange(relativePath: String, kind: String, source: Path? = null) {
-        if (!relativePath.endsWith(".html", ignoreCase = true)) return
+        if (!relativePath.endsWith(".html", ignoreCase = true) && !relativePath.endsWith(".vue", ignoreCase = true)) return
         val normalized = relativePath.replace('\\', '/')
         source?.let { rememberTemplate(it) }
         val delay = properties.debounceMillis.coerceAtLeast(0)
         synchronized(pendingLock) {
             pending.remove(normalized)?.cancel(false)
             pending[normalized] = scheduler.schedule({
-                val change = TemplateChange(normalized, kind, componentFor(normalized, source), version = version.incrementAndGet())
+                val change = TemplateChange(
+                    normalized,
+                    kind,
+                    componentFor(normalized, source),
+                    moduleUrlFor(normalized),
+                    version.incrementAndGet()
+                )
                 lastChange = change
                 synchronized(historyLock) {
                     history += change
@@ -136,6 +144,12 @@ class TemplateChangeBroadcaster(private val properties: ReactiveProperties) : Sm
         return Path.of(normalized).fileName.toString()
             .substringBeforeLast('.')
             .takeIf { it.isNotBlank() }
+    }
+
+    private fun moduleUrlFor(relativePath: String): String? {
+        if (!relativePath.endsWith(".vue", ignoreCase = true)) return null
+        val encoded = URLEncoder.encode(relativePath.replace('\\', '/'), StandardCharsets.UTF_8).replace("+", "%20")
+        return "/__thymeleaf_reactive__/component?path=$encoded"
     }
 
     private fun resolveTemplateDirectory(): Path? {
@@ -176,7 +190,7 @@ class TemplateChangeBroadcaster(private val properties: ReactiveProperties) : Sm
     private fun snapshotTemplates(directory: Path) {
         templateStamps.clear()
         Files.walk(directory).use { paths ->
-            paths.filter { Files.isRegularFile(it) && it.toString().endsWith(".html", ignoreCase = true) }
+            paths.filter { isReactiveSource(it) }
                 .forEach(::rememberTemplate)
         }
     }
@@ -193,7 +207,7 @@ class TemplateChangeBroadcaster(private val properties: ReactiveProperties) : Sm
         if (!running) return
         val current = mutableSetOf<Path>()
         Files.walk(directory).use { paths ->
-            paths.filter { Files.isRegularFile(it) && it.toString().endsWith(".html", ignoreCase = true) }.forEach { path ->
+            paths.filter { isReactiveSource(it) }.forEach { path ->
                 val normalized = path.toAbsolutePath().normalize()
                 current.add(normalized)
                 val stamp = Files.getLastModifiedTime(path).toMillis() to Files.size(path)
@@ -207,4 +221,7 @@ class TemplateChangeBroadcaster(private val properties: ReactiveProperties) : Sm
             notifyChange(directory.toAbsolutePath().normalize().relativize(removed).toString(), "POLL_DELETE", removed)
         }
     }
+
+    private fun isReactiveSource(path: Path): Boolean = Files.isRegularFile(path) &&
+        (path.toString().endsWith(".html", ignoreCase = true) || path.toString().endsWith(".vue", ignoreCase = true))
 }

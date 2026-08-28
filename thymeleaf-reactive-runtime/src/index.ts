@@ -162,6 +162,67 @@ export function h(type: VNode["type"], props: Record<string, unknown> = {}, chil
   };
 }
 
+function interpolateSfcText(value: string, scope: Record<string, unknown>): string {
+  return value.replace(/{{\s*([^}]+?)\s*}}/g, (_match, expression: string) =>
+    String(readPath(scope, expression) ?? "")
+  );
+}
+
+function sfcEventPropName(name: string): string {
+  return `on${name.slice(0, 1).toUpperCase()}${name.slice(1)}`;
+}
+
+function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[]): VNode | undefined {
+  if (node.nodeType === Node.TEXT_NODE) {
+    const text = node.textContent ?? "";
+    return text.trim() ? normalizeVNode(interpolateSfcText(text, scope)) : undefined;
+  }
+  if (node.nodeType !== Node.ELEMENT_NODE) return undefined;
+  const element = node as Element;
+  if (element.tagName.toLowerCase() === "slot") return h(Fragment, {}, slots);
+  const condition = element.getAttribute("v-if");
+  if (condition && !readPath(scope, condition)) return { type: Comment, props: {}, children: [], el: null, text: "v-if" };
+
+  const props: Record<string, unknown> = {};
+  Array.from(element.attributes).forEach(attribute => {
+    const { name, value } = attribute;
+    if (name === "v-if" || name === "v-text") return;
+    if (name.startsWith(":")) props[name.slice(1)] = readPath(scope, value);
+    else if (name.startsWith("v-bind:")) props[name.slice(7)] = readPath(scope, value);
+    else if (name.startsWith("@")) props[sfcEventPropName(name.slice(1))] = readPath(scope, value);
+    else if (name.startsWith("v-on:")) props[sfcEventPropName(name.slice(5))] = readPath(scope, value);
+    else props[name] = value;
+  });
+  const textExpression = element.getAttribute("v-text");
+  const children = textExpression
+    ? [normalizeVNode(String(readPath(scope, textExpression) ?? ""))]
+    : Array.from(element.childNodes)
+      .map(child => renderSfcNode(child, scope, slots))
+      .filter((child): child is VNode => child !== undefined);
+  return h(element.tagName.toLowerCase(), props, children);
+}
+
+/**
+ * Compiles the template block of a resource-backed Vue single-file component.
+ * Script blocks are deliberately not evaluated: component behavior is supplied
+ * through reactive props and event-handler props, keeping HMR modules CSP-safe.
+ */
+export function compileSfcComponent(source: string): Component {
+  if (typeof document === "undefined") throw new Error("SFC components require a browser document");
+  const match = source.match(/<template(?:\s[^>]*)?>([\s\S]*?)<\/template>/i);
+  if (!match) throw new Error("Vue component is missing a <template> block");
+  const template = document.createElement("template");
+  template.innerHTML = match[1];
+  const roots = Array.from(template.content.childNodes);
+  return (props, children) => {
+    const scope = Object.assign(Object.create(null), props) as Record<string, unknown>;
+    const nodes = roots
+      .map(node => renderSfcNode(node, scope, children))
+      .filter((node): node is VNode => node !== undefined);
+    return nodes.length === 1 ? nodes[0] : h(Fragment, {}, nodes);
+  };
+}
+
 function normalizeVNode(value: VNode | Primitive): VNode {
   if (typeof value === "object" && value !== null && "type" in value) return value as VNode;
   return { type: Text, props: {}, children: [], el: null, text: String(value ?? "") };
@@ -410,6 +471,30 @@ export function defineComponent(name: string, render: Component): Component {
   return component;
 }
 
+/** Adopts a server-rendered component root so future SFC HMR updates patch it in place. */
+export function adoptComponentRoot(root: Element, component: Component, props: Record<string, unknown> = {}): void {
+  const name = componentNames.get(component);
+  const entry = name ? hotComponents.get(name) : undefined;
+  const container = root.parentNode;
+  if (!entry || !container) return;
+  const tree = vnodeFromDom(root);
+  const vnode: VNode = { type: component, props, children: tree.children, el: tree.el, anchor: tree.anchor, component: tree };
+  const instance = {} as ComponentInstance;
+  instance.vnode = vnode;
+  instance.tree = tree;
+  instance.update = () => {
+    const current = instance.vnode;
+    const nextTree = entry.render(current.props, current.children);
+    instance.tree = patch(instance.tree, nextTree, container) ?? instance.tree;
+    current.component = instance.tree;
+    current.el = instance.tree.el;
+    current.anchor = instance.tree.anchor;
+  };
+  instance.dispose = () => entry.instances.delete(instance.update);
+  vnode.instance = instance;
+  entry.instances.add(instance.update);
+}
+
 /** Replaces one component's render function while preserving its mounted DOM/state. */
 export function hotUpdate(name: string, render: Component): boolean {
   const entry = hotComponents.get(name);
@@ -464,7 +549,9 @@ export function connectComponentHmr(
     } else if (!update.moduleUrl) {
       await refreshComponentsFromPage(update.component);
     } else {
-      const module = await import(`${update.moduleUrl}?t=${Date.now()}`);
+      const moduleUrl = new URL(update.moduleUrl, window.location.origin);
+      moduleUrl.searchParams.set("t", String(Date.now()));
+      const module = await import(moduleUrl.href);
       const render = module.default ?? module.render;
       if (typeof render !== "function") throw new Error("HMR module has no render export");
       hotUpdate(update.component, render);

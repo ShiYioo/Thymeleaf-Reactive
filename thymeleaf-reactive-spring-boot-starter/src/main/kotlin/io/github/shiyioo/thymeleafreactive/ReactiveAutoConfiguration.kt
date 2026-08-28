@@ -30,6 +30,11 @@ class ReactiveAutoConfiguration
     fun runtimeController(): RuntimeController = RuntimeController()
 
     @Bean
+    @ConditionalOnMissingBean
+    fun vueComponentController(properties: ReactiveProperties, objectMapper: ObjectMapper): VueComponentController =
+        VueComponentController(properties, objectMapper)
+
+    @Bean
     @Conditional(ReactiveFileTemplatePathCondition::class)
     fun reactiveFileTemplateResolver(properties: ReactiveProperties): SpringResourceTemplateResolver =
         SpringResourceTemplateResolver().apply {

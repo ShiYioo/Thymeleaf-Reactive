@@ -49,6 +49,18 @@ thymeleaf.reactive.component-mappings.admin/dashboard.html=dashboard
 `component-mappings` accepts template paths relative to `thymeleaf.reactive.template-path`; without an explicit mapping, the HTML file name is used as the component name.
 The development status endpoint retains the latest `hmr-history-size` template changes, so the browser polling fallback can replay every missed update in order when an SSE connection is interrupted.
 
+## Resource Vue Components
+
+In development mode, a template component can opt into a resource-backed Vue SFC with `tr:component-src`. The file is resolved relative to `thymeleaf.reactive.template-path`; saving it emits an HMR event, the browser fetches a cache-busted ES module, and only matching component roots are patched.
+
+```html
+<section tr:component="counter" tr:component-src="components/Counter.vue" tr:state="${counter}">
+  <p tr:text="count">0</p>
+</section>
+```
+
+The current SFC template compiler supports HTML, interpolation, `v-if`, `v-text`, `:prop`/`v-bind`, `@event`/`v-on`, and `<slot>`. Its `<script>` blocks are intentionally not evaluated yet, so component behavior is passed from the host as props and handler props. This keeps the first resource-SFC HMR pipeline CSP-safe while script setup and client state ownership are implemented as the next layer.
+
 Reactive lists can be rendered on the server with `tr:each`; repeated rows should use `tr:key` so HMR can preserve and move the corresponding DOM nodes:
 
 ```html

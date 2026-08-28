@@ -15,6 +15,7 @@ import org.thymeleaf.standard.expression.StandardExpressions
 class ReactiveDialect(private val objectMapper: ObjectMapper) : AbstractProcessorDialect("Thymeleaf Reactive", "tr", 1000) {
     override fun getProcessors(dialectPrefix: String): Set<IProcessor> = setOf(
         ReactiveAttributeProcessor("component", "data-tr-component"),
+        ReactiveAttributeProcessor("component-src", "data-tr-component-src"),
         ReactiveKeyProcessor(),
         ReactiveEachProcessor(),
         ReactiveStateProcessor(objectMapper),
