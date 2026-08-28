@@ -14,6 +14,8 @@ function installDom() {
   globalThis.CustomEvent = window.CustomEvent;
   globalThis.DOMParser = window.DOMParser;
   globalThis.HTMLInputElement = window.HTMLInputElement;
+  globalThis.HTMLTextAreaElement = window.HTMLTextAreaElement;
+  globalThis.HTMLSelectElement = window.HTMLSelectElement;
   return window.document;
 }
 
@@ -346,6 +348,51 @@ test('hydrates Thymeleaf bindings and synchronizes model values', () => {
   input.value = 'Lin';
   input.dispatchEvent(new Event('input', { bubbles: true }));
   assert.equal(state.user.name, 'Lin');
+});
+
+test('hydrates checkbox radio and multiple-select model bindings', () => {
+  const document = installDom();
+  const root = document.createElement('section');
+  root.innerHTML = [
+    '<input type="checkbox" data-tr-model="enabled">',
+    '<input type="checkbox" value="a" data-tr-model="tags">',
+    '<input type="checkbox" value="b" data-tr-model="tags">',
+    '<input type="radio" name="choice" value="a" data-tr-model="choice">',
+    '<input type="radio" name="choice" value="b" data-tr-model="choice">',
+    '<select multiple data-tr-model="selected"><option value="a">A</option><option value="b">B</option><option value="c">C</option></select>'
+  ].join('');
+  const state = hydrate(root, { enabled: true, tags: ['a'], choice: 'b', selected: ['b', 'c'] });
+  const [enabled, tagA, tagB, choiceA, choiceB] = root.querySelectorAll('input');
+  const select = root.querySelector('select');
+  assert.equal(enabled.checked, true);
+  assert.equal(tagA.checked, true);
+  assert.equal(tagB.checked, false);
+  assert.equal(choiceA.checked, false);
+  assert.equal(choiceB.checked, true);
+  assert.deepEqual([...select.selectedOptions].map(option => option.value), ['b', 'c']);
+
+  enabled.checked = false;
+  enabled.dispatchEvent(new Event('change', { bubbles: true }));
+  tagB.checked = true;
+  tagB.dispatchEvent(new Event('change', { bubbles: true }));
+  choiceA.checked = true;
+  choiceA.dispatchEvent(new Event('change', { bubbles: true }));
+  Object.defineProperty(select, 'selectedOptions', { configurable: true, value: [select.options[0]] });
+  select.dispatchEvent(new Event('change', { bubbles: true }));
+  assert.equal(state.enabled, false);
+  assert.deepEqual(state.tags, ['a', 'b']);
+  assert.equal(state.choice, 'a');
+  assert.deepEqual(state.selected, ['a']);
+  delete select.selectedOptions;
+
+  state.tags = ['b'];
+  state.choice = 'b';
+  state.selected = ['c'];
+  assert.equal(tagA.checked, false);
+  assert.equal(tagB.checked, true);
+  assert.equal(choiceA.checked, false);
+  assert.equal(choiceB.checked, true);
+  assert.deepEqual([...select.options].filter(option => option.selected).map(option => option.value), ['c']);
 });
 
 test('hydrates dynamic attributes, classes, and styles reactively', () => {

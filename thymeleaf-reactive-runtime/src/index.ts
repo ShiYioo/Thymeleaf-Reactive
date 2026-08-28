@@ -497,7 +497,7 @@ function vnodeFromDom(node: Node): VNode {
   };
 }
 
-type FormState = { value?: string; checked?: boolean; start?: number | null; end?: number | null };
+type FormState = { value?: string; checked?: boolean; selected?: string[]; start?: number | null; end?: number | null };
 type HydrationContext = {
   state: object;
   handlers: Record<string, (...args: any[]) => any>;
@@ -532,6 +532,9 @@ function preserveFormState(root: Element): Map<string, FormState> {
     state.set(fieldIdentity(field, index), {
       value: field.value,
       checked: field instanceof HTMLInputElement ? field.checked : undefined,
+      selected: field instanceof HTMLSelectElement && field.multiple
+        ? Array.from(field.selectedOptions).map(option => option.value)
+        : undefined,
       start: "selectionStart" in field ? field.selectionStart : null,
       end: "selectionEnd" in field ? field.selectionEnd : null
     });
@@ -545,6 +548,9 @@ function restoreFormState(root: Element, state: Map<string, FormState>): void {
     if (!previous) return;
     field.value = previous.value ?? field.value;
     if (field instanceof HTMLInputElement && previous.checked !== undefined) field.checked = previous.checked;
+    if (field instanceof HTMLSelectElement && previous.selected) {
+      Array.from(field.options).forEach(option => { option.selected = previous.selected!.includes(option.value); });
+    }
     if (document.activeElement === field && "setSelectionRange" in field && previous.start != null && previous.end != null) {
       field.setSelectionRange(previous.start, previous.end);
     }
@@ -885,12 +891,43 @@ export function hydrate(root: Element, state: object, handlers: Record<string, (
   });
   bindings<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("[data-tr-model]").forEach(element => {
     const expression = element.dataset.trModel!;
-    const runner = effect(() => { if (element.value !== String(readPath(reactiveState, expression) ?? "")) element.value = String(readPath(reactiveState, expression) ?? ""); });
-    const listener = () => writePath(reactiveState, expression, element.value);
-    element.addEventListener("input", listener);
+    const isCheckbox = element instanceof HTMLInputElement && element.type === "checkbox";
+    const isRadio = element instanceof HTMLInputElement && element.type === "radio";
+    const isMultipleSelect = element instanceof HTMLSelectElement && element.multiple;
+    const runner = effect(() => {
+      const value = readPath(reactiveState, expression);
+      if (isCheckbox) {
+        element.checked = Array.isArray(value) ? value.map(String).includes(element.value) : Boolean(value);
+      } else if (isRadio) {
+        element.checked = String(value ?? "") === element.value;
+      } else if (isMultipleSelect) {
+        const selected = new Set((Array.isArray(value) ? value : []).map(String));
+        Array.from(element.options).forEach(option => { option.selected = selected.has(option.value); });
+      } else if (!(element instanceof HTMLInputElement && element.type === "file")) {
+        const next = String(value ?? "");
+        if (element.value !== next) element.value = next;
+      }
+    });
+    const listener = () => {
+      if (isCheckbox) {
+        const current = readPath(reactiveState, expression);
+        if (Array.isArray(current)) {
+          const values = current.map(String);
+          const next = element.checked
+            ? values.includes(element.value) ? values : [...values, element.value]
+            : values.filter(value => value !== element.value);
+          writePath(reactiveState, expression, next);
+        } else writePath(reactiveState, expression, element.checked);
+      } else if (isRadio) {
+        if (element.checked) writePath(reactiveState, expression, element.value);
+      } else if (isMultipleSelect) {
+        writePath(reactiveState, expression, Array.from(element.selectedOptions).map(option => option.value));
+      } else writePath(reactiveState, expression, element.value);
+    };
+    element.addEventListener(isCheckbox || isRadio || isMultipleSelect ? "change" : "input", listener);
     cleanup(() => {
       runner.stop?.();
-      element.removeEventListener("input", listener);
+      element.removeEventListener(isCheckbox || isRadio || isMultipleSelect ? "change" : "input", listener);
     });
   });
   bindings<HTMLElement>("[data-tr-on]").forEach(element => {

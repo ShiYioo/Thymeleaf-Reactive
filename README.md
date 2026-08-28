@@ -61,6 +61,8 @@ The first response keeps the server-rendered rows. During browser hydration, tho
 
 For `tr:if` and `tr:show`, a false server value is emitted with the HTML `hidden` attribute and reactive metadata. That keeps the first paint hidden without JavaScript while preserving the DOM necessary for the browser runtime to reveal the block later.
 
+`tr:model` supports text fields, checkboxes (including array values), radio groups, and multiple selects. The runtime preserves their current values while patching a component during HMR.
+
 ## License
 
 Apache-2.0
