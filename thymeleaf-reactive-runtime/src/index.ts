@@ -337,9 +337,13 @@ function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode
         current.el = instance.tree.el;
         current.anchor = instance.tree.anchor;
       };
-      instance.dispose = () => entry.instances.delete(instance.update);
+      const reactiveUpdate = effect(instance.update);
+      instance.dispose = () => {
+        reactiveUpdate.stop?.();
+        entry.instances.delete(reactiveUpdate);
+      };
       vnode.instance = instance;
-      entry.instances.add(instance.update);
+      entry.instances.add(reactiveUpdate);
     }
     return vnode;
   }
@@ -526,9 +530,13 @@ export function adoptComponentRoot(root: Element, component: Component, props: R
     current.el = instance.tree.el;
     current.anchor = instance.tree.anchor;
   };
-  instance.dispose = () => entry.instances.delete(instance.update);
+  const reactiveUpdate = effect(instance.update);
+  instance.dispose = () => {
+    reactiveUpdate.stop?.();
+    entry.instances.delete(reactiveUpdate);
+  };
   vnode.instance = instance;
-  entry.instances.add(instance.update);
+  entry.instances.add(reactiveUpdate);
 }
 
 /** Replaces one component's render function while preserving its mounted DOM/state. */
