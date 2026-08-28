@@ -172,7 +172,7 @@ function sfcEventPropName(name: string): string {
   return `on${name.slice(0, 1).toUpperCase()}${name.slice(1)}`;
 }
 
-function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[]): VNode | undefined {
+function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[]): VNode | VNode[] | undefined {
   if (node.nodeType === Node.TEXT_NODE) {
     const text = node.textContent ?? "";
     return text.trim() ? normalizeVNode(interpolateSfcText(text, scope)) : undefined;
@@ -180,6 +180,23 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
   if (node.nodeType !== Node.ELEMENT_NODE) return undefined;
   const element = node as Element;
   if (element.tagName.toLowerCase() === "slot") return h(Fragment, {}, slots);
+  const loop = element.getAttribute("v-for");
+  if (loop) {
+    const match = loop.match(/^\s*([A-Za-z_$][\w$]*)(?:\s*,\s*([A-Za-z_$][\w$]*))?\s+in\s+(.+)\s*$/);
+    if (!match) return undefined;
+    const values = readPath(scope, match[3]);
+    const collection = Array.isArray(values) ? values : values && typeof values === "object" ? Object.values(values) : [];
+    return collection.flatMap((value, index) => {
+      const childScope = Object.assign(Object.create(scope), {
+        [match[1]]: value,
+        ...(match[2] ? { [match[2]]: index } : {})
+      }) as Record<string, unknown>;
+      const clone = element.cloneNode(true) as Element;
+      clone.removeAttribute("v-for");
+      const rendered = renderSfcNode(clone, childScope, slots);
+      return rendered === undefined ? [] : Array.isArray(rendered) ? rendered : [rendered];
+    });
+  }
   const condition = element.getAttribute("v-if");
   if (condition && !readPath(scope, condition)) return { type: Comment, props: {}, children: [], el: null, text: "v-if" };
 
@@ -191,6 +208,10 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
     else if (name.startsWith("v-bind:")) props[name.slice(7)] = readPath(scope, value);
     else if (name.startsWith("@")) props[sfcEventPropName(name.slice(1))] = readPath(scope, value);
     else if (name.startsWith("v-on:")) props[sfcEventPropName(name.slice(5))] = readPath(scope, value);
+    else if (name === "v-model") {
+      props.value = readPath(scope, value);
+      props.onInput = (event: Event) => writePath(scope, value, (event.target as HTMLInputElement).value);
+    }
     else props[name] = value;
   });
   const textExpression = element.getAttribute("v-text");
@@ -198,7 +219,7 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
     ? [normalizeVNode(String(readPath(scope, textExpression) ?? ""))]
     : Array.from(element.childNodes)
       .map(child => renderSfcNode(child, scope, slots))
-      .filter((child): child is VNode => child !== undefined);
+      .flatMap(child => child === undefined ? [] : Array.isArray(child) ? child : [child]);
   return h(element.tagName.toLowerCase(), props, children);
 }
 
@@ -218,7 +239,7 @@ export function compileSfcComponent(source: string): Component {
     const scope = Object.assign(Object.create(null), props) as Record<string, unknown>;
     const nodes = roots
       .map(node => renderSfcNode(node, scope, children))
-      .filter((node): node is VNode => node !== undefined);
+      .flatMap(node => node === undefined ? [] : Array.isArray(node) ? node : [node]);
     return nodes.length === 1 ? nodes[0] : h(Fragment, {}, nodes);
   };
 }

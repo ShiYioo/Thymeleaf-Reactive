@@ -32,7 +32,8 @@ async function adoptSfcComponent(
   const render = module.default ?? module.render;
   if (typeof render !== "function") throw new Error(`SFC ${source} has no component render export`);
   registerComponentSource(source, name);
-  adoptComponentRoot(root, defineComponent(name, render), Object.assign(Object.create(null), state, handlers));
+  Object.assign(state, handlers);
+  adoptComponentRoot(root, defineComponent(name, render), state);
 }
 
 async function boot(): Promise<void> {
