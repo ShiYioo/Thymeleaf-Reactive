@@ -19,7 +19,10 @@ function parseState(value: string | undefined): object {
 }
 
 function boot(): void {
-  const api = window.ThymeleafReactive ?? { handlers: {}, hydrate };
+  const api = {
+    handlers: window.ThymeleafReactive?.handlers ?? {},
+    hydrate: window.ThymeleafReactive?.hydrate ?? hydrate
+  };
   window.ThymeleafReactive = api;
   document.querySelectorAll<HTMLElement>("[data-tr-component]").forEach(root => {
     if (root.dataset.trHydrated === "true") return;

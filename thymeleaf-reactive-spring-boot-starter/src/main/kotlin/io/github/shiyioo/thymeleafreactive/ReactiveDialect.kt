@@ -150,7 +150,10 @@ private class ReactiveStateProcessor(private val objectMapper: ObjectMapper) : A
         val isModelReference = expression.startsWith("\${") && expression.endsWith('}')
         val state = if (isModelReference) context.getVariable(expression.substring(2, expression.length - 1).trim()) else null
         val json = if (isModelReference) objectMapper.writeValueAsString(state) else attributeValue
-        structureHandler.setAttribute("data-tr-state", json)
+        // Attribute processors write literal values, so quote and ampersand
+        // entities must be supplied explicitly for valid HTML output.
+        val attributeJson = json.replace("&", "&amp;").replace("\"", "&quot;")
+        structureHandler.setAttribute("data-tr-state", attributeJson)
     }
 }
 

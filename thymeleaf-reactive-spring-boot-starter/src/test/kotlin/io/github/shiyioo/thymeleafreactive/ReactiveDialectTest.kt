@@ -22,7 +22,7 @@ class ReactiveDialectTest {
         )
 
         assertThat(output).contains("data-tr-component=\"counter\"")
-        assertThat(output).contains("data-tr-state=\"{\"count\":3,\"visible\":true}\"")
+        assertThat(output).contains("data-tr-state=\"{&quot;count&quot;:3,&quot;visible&quot;:true}\"")
         assertThat(output).contains("data-tr-key=\"counter\"")
         assertThat(output).contains("data-tr-if=\"visible\"")
         assertThat(output).contains("data-tr-text=\"count\"")

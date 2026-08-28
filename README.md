@@ -37,10 +37,11 @@ are fetched and patched in place during development.
 
 Development HMR transport is exposed at `/__thymeleaf_reactive__/events` as an SSE stream. The browser Runtime will consume this stream and trigger component recompilation/patching.
 
-In development mode the starter injects `/__thymeleaf_reactive__/bootstrap.js` into HTML responses automatically. No script tag is required. Template save events are debounced by 150 ms by default and can be configured:
+In development mode the starter injects `/__thymeleaf_reactive__/bootstrap.js` into HTML responses automatically. No script tag is required. Set `thymeleaf.reactive.template-path` to a `file:` directory and the starter uses that same directory as the highest-priority Thymeleaf resolver, so edits are rendered immediately as well as watched. Template save events are debounced by 150 ms by default and can be configured:
 
 ```properties
 thymeleaf.reactive.debounce-millis=150
+thymeleaf.reactive.poll-interval-millis=500
 thymeleaf.reactive.component-mappings.admin/dashboard.html=dashboard
 ```
 

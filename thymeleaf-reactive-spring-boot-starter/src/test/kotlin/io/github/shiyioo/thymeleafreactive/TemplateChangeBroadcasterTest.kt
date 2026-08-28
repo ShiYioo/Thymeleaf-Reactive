@@ -5,6 +5,9 @@ import org.junit.jupiter.api.Test
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import kotlin.io.path.createTempFile
+import kotlin.io.path.createTempDirectory
+import kotlin.io.path.writeText
 
 class TemplateChangeBroadcasterTest {
     @Test
@@ -42,5 +45,39 @@ class TemplateChangeBroadcasterTest {
         assertThat(changes).isEmpty()
         subscription.close()
         broadcaster.stop()
+    }
+
+    @Test
+    fun `discovers the declared component from a changed template`() {
+        val source = createTempFile(suffix = ".html").apply {
+            writeText("<main tr:component=\"counter\"><p>Counter</p></main>")
+        }
+        val broadcaster = TemplateChangeBroadcaster(ReactiveProperties())
+        assertThat(broadcaster.componentFor("index.html", source)).isEqualTo("counter")
+        source.toFile().delete()
+        broadcaster.stop()
+    }
+
+    @Test
+    fun `watches a real template directory and broadcasts filesystem changes`() {
+        val directory = createTempDirectory("thymeleaf-reactive-watch")
+        val broadcaster = TemplateChangeBroadcaster(
+            ReactiveProperties(templatePath = "file:${directory.toAbsolutePath()}", debounceMillis = 20)
+        )
+        val template = directory.resolve("counter.html").apply {
+            writeText("<main tr:component=\"counter\">Before</main>")
+        }
+        val latch = CountDownLatch(1)
+        val changes = CopyOnWriteArrayList<TemplateChange>()
+        val subscription = broadcaster.subscribe { change -> changes += change; latch.countDown() }
+        broadcaster.start()
+        template.writeText("<main tr:component=\"counter\">Updated</main>")
+
+        assertThat(latch.await(3, TimeUnit.SECONDS)).isTrue()
+        assertThat(changes.single().path).isEqualTo("counter.html")
+        assertThat(changes.single().component).isEqualTo("counter")
+        subscription.close()
+        broadcaster.stop()
+        directory.toFile().deleteRecursively()
     }
 }

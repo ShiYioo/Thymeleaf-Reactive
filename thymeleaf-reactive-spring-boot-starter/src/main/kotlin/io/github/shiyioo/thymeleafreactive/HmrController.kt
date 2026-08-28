@@ -36,4 +36,7 @@ class HmrController(private val changes: TemplateChangeBroadcaster) {
         clients += emitter
         return emitter
     }
+
+    @GetMapping("/status", produces = [MediaType.APPLICATION_JSON_VALUE])
+    fun status(): Map<String, Any?> = changes.status()
 }

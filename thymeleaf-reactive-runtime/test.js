@@ -247,3 +247,14 @@ test('hydrates keyed each bindings with scoped reactive rows', () => {
   state.items.pop();
   assert.deepEqual([...root.querySelectorAll('li')].map(row => row.textContent), ['B2', 'A']);
 });
+
+test('browser bootstrap preserves existing handlers and hydrates encoded server state', async () => {
+  const document = installDom();
+  document.body.innerHTML = '<main data-tr-component="counter" data-tr-state="{&quot;count&quot;:2}"><p data-tr-text="count">stale</p></main>';
+  window.ThymeleafReactive = { handlers: { increment(state) { state.count++; } } };
+  globalThis.EventSource = undefined;
+  await import(`./dist/browser.js?bootstrap=${Date.now()}`);
+  const count = document.querySelector('p');
+  assert.equal(count.textContent, '2');
+  assert.equal(typeof window.ThymeleafReactive.hydrate, 'function');
+});
