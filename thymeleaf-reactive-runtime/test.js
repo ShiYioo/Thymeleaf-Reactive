@@ -50,6 +50,27 @@ test('reactive effects clean stale branches and track array length changes', () 
   assert.equal(length, 1);
 });
 
+test('effects can be stopped and apps can be unmounted cleanly', () => {
+  const document = installDom();
+  const state = reactive({ count: 0 });
+  let runs = 0;
+  const runner = effect(() => { runs++; state.count; });
+  state.count++;
+  assert.equal(runs, 2);
+  runner.stop();
+  state.count++;
+  assert.equal(runs, 2);
+
+  const root = document.createElement('main');
+  const app = createApp(current => h('span', {}, String(current.count)), state);
+  app.mount(root);
+  assert.equal(root.textContent, '2');
+  app.unmount();
+  assert.equal(root.textContent, '');
+  state.count++;
+  assert.equal(root.textContent, '');
+});
+
 test('component HMR patches server output while preserving field state', async () => {
   const document = installDom();
   document.body.innerHTML = '<section data-tr-component="counter"><input data-tr-key="draft" value="server"><strong data-tr-key="label">Before</strong></section>';

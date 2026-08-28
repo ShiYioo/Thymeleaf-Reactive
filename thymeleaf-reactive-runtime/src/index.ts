@@ -1,5 +1,5 @@
 type Primitive = string | number | boolean | null | undefined;
-export type Effect = () => void;
+export type Effect = (() => void) & { stop?: () => void };
 export type Component = (props: Record<string, unknown>, children: VNode[]) => VNode;
 export type RenderFunction = (state: any) => VNode;
 
@@ -37,7 +37,7 @@ export function reactive<T extends object>(value: T): T {
           if (Number.isInteger(Number(key)) && Number(key) >= oldLength) deps.get("length")?.forEach(run => triggered.add(run));
         }
         deps.get(ITERATE_KEY)?.forEach(run => triggered.add(run));
-        triggered.forEach(run => run());
+        [...triggered].forEach(run => run());
       }
       return ok;
     },
@@ -45,10 +45,10 @@ export function reactive<T extends object>(value: T): T {
       const existed = key in target;
       const ok = Reflect.deleteProperty(target, key);
       if (existed) {
-        const triggered = new Set<Effect>(deps.get(key));
+        const triggered = new Set<Effect>(deps.get(key) ?? []);
         deps.get(ITERATE_KEY)?.forEach(run => triggered.add(run));
         if (Array.isArray(target)) deps.get("length")?.forEach(run => triggered.add(run));
-        triggered.forEach(run => run());
+        [...triggered].forEach(run => run());
       }
       return ok;
     },
@@ -71,11 +71,19 @@ export function reactive<T extends object>(value: T): T {
 }
 
 export function effect(fn: Effect): Effect {
+  let active = true;
   const run: Effect = () => {
+    if (!active) return;
     effectDeps.get(run)?.forEach(subscribers => subscribers.delete(run));
     effectDeps.delete(run);
     effectStack.push(run);
     try { fn(); } finally { effectStack.pop(); }
+  };
+  run.stop = () => {
+    if (!active) return;
+    active = false;
+    effectDeps.get(run)?.forEach(subscribers => subscribers.delete(run));
+    effectDeps.delete(run);
   };
   run();
   return run;
@@ -229,10 +237,13 @@ export function patch(oldVNode: VNode | undefined, newVNode: VNode | undefined, 
 export function createApp(render: (state: any) => VNode, state: object = {}) {
   const reactiveState = reactive(state);
   let currentRender = render;
-  let rerender: (() => void) | undefined;
+  let rerender: Effect | undefined;
+  let mountedRoot: Element | undefined;
+  let tree: VNode | undefined;
   return {
     mount(root: Element): object {
-      let tree: VNode | undefined;
+      if (rerender) this.unmount();
+      mountedRoot = root;
       rerender = effect(() => { tree = patch(tree, currentRender(reactiveState), root) ?? undefined; });
       mountedApps.add(rerender);
       return reactiveState;
@@ -240,13 +251,22 @@ export function createApp(render: (state: any) => VNode, state: object = {}) {
     replaceRender(nextRender: (state: any) => VNode): void {
       currentRender = nextRender;
       rerender?.();
+    },
+    unmount(): void {
+      if (!rerender || !mountedRoot) return;
+      rerender.stop?.();
+      mountedApps.delete(rerender);
+      mountedRoot.replaceChildren();
+      rerender = undefined;
+      mountedRoot = undefined;
+      tree = undefined;
     }
   };
 }
 
-type HotComponent = { render: Component; instances: Set<() => void> };
+type HotComponent = { render: Component; instances: Set<Effect> };
 const hotComponents = new Map<string, HotComponent>();
-const mountedApps = new Set<() => void>();
+const mountedApps = new Set<Effect>();
 
 /** Registers a named component so a compiler can replace its render function in development. */
 export function defineComponent(name: string, render: Component): Component {
