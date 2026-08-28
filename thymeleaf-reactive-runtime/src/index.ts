@@ -312,14 +312,39 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
         : "text";
       const current = readPath(scope, value);
       if (inputType === "checkbox") {
-        props.checked = Boolean(current);
-        props.onChange = (event: Event) => writePath(scope, value, (event.target as HTMLInputElement).checked);
+        const option = element.getAttribute("value");
+        props.checked = Array.isArray(current) && option != null
+          ? current.map(String).includes(option)
+          : Boolean(current);
+        props.onChange = (event: Event) => {
+          const checked = (event.target as HTMLInputElement).checked;
+          if (Array.isArray(current) && option != null) {
+            const values = current.map(String);
+            writePath(scope, value, checked
+              ? values.includes(option) ? values : [...values, option]
+              : values.filter(item => item !== option));
+          } else writePath(scope, value, checked);
+        };
       } else if (inputType === "radio") {
         const option = element.getAttribute("value") ?? "";
         props.checked = String(current ?? "") === option;
         props.onChange = (event: Event) => {
           if ((event.target as HTMLInputElement).checked) writePath(scope, value, option);
         };
+      } else if (element.tagName.toLowerCase() === "select") {
+        const select = element as HTMLSelectElement;
+        if (select.multiple) {
+          const selected = new Set((Array.isArray(current) ? current : []).map(String));
+          props.value = current;
+          props.onChange = (event: Event) => {
+            const target = event.target as HTMLSelectElement;
+            writePath(scope, value, Array.from(target.selectedOptions).map(option => option.value));
+          };
+          Array.from(select.options).forEach(optionNode => { optionNode.selected = selected.has(optionNode.value); });
+        } else {
+          props.value = current;
+          props.onChange = (event: Event) => writePath(scope, value, (event.target as HTMLSelectElement).value);
+        }
       } else {
         props.value = current;
         props.onInput = (event: Event) => writePath(scope, value, (event.target as HTMLInputElement).value);
@@ -332,6 +357,14 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
   const children = textExpression
     ? [normalizeVNode(String(readPath(scope, textExpression) ?? ""))]
     : renderSfcChildren(Array.from(element.childNodes), scope, slots);
+  if (element.tagName.toLowerCase() === "select" && element.hasAttribute("multiple")) {
+    const selected = new Set((Array.isArray(readPath(scope, element.getAttribute("v-model") ?? ""))
+      ? readPath(scope, element.getAttribute("v-model") ?? "")
+      : []).map(String));
+    children.forEach(child => {
+      if (child.type === "option") child.props.selected = selected.has(String(child.props.value ?? ""));
+    });
+  }
   return h(resolveSfcComponent(element.tagName, scope) ?? element.tagName.toLowerCase(), props, children);
 }
 
@@ -362,6 +395,7 @@ function normalizeVNode(value: VNode | Primitive): VNode {
 const eventListeners = new WeakMap<Element, Map<string, EventListener>>();
 const componentNames = new WeakMap<Component, string>();
 const componentSources = new Map<string, string>();
+const booleanAttributes = new Set(["allowfullscreen", "async", "autofocus", "autoplay", "checked", "controls", "defer", "disabled", "formnovalidate", "hidden", "inert", "ismap", "itemscope", "loop", "multiple", "muted", "nomodule", "novalidate", "open", "playsinline", "readonly", "required", "reversed", "selected"]);
 
 function normalizeComponentSource(source: string): string {
   try {
@@ -405,8 +439,19 @@ function setProp(el: Element, key: string, value: unknown, previous?: unknown): 
   else if (value === true) {
     el.setAttribute(key, "");
     if (key in el && !key.includes("-")) (el as unknown as Record<string, unknown>)[key] = true;
+  } else if (value === "" && booleanAttributes.has(key.toLowerCase())) {
+    el.setAttribute(key, "");
+    if (key in el && !key.includes("-")) (el as unknown as Record<string, unknown>)[key] = true;
   } else if (key in el && !key.includes("-")) (el as unknown as Record<string, unknown>)[key] = value;
   else el.setAttribute(key, String(value));
+}
+
+function syncMultipleSelect(el: Element, value: unknown): void {
+  if (el.tagName.toLowerCase() !== "select" || !(el as HTMLSelectElement).multiple) return;
+  const selected = new Set((Array.isArray(value) ? value : []).map(String));
+  Array.from((el as HTMLSelectElement).options).forEach(option => {
+    option.selected = selected.has(option.value);
+  });
 }
 
 function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode {
@@ -458,8 +503,14 @@ function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode
     return vnode;
   }
   const el = vnode.el = document.createElement(vnode.type);
-  Object.entries(vnode.props).forEach(([key, value]) => setProp(el as Element, key, value));
+  const deferredValue = vnode.type === "select" && !vnode.props.multiple ? vnode.props.value : undefined;
+  Object.entries(vnode.props).forEach(([key, value]) => {
+    if (vnode.type === "select" && key === "value") return;
+    setProp(el as Element, key, value);
+  });
   vnode.children.forEach(child => mount(child, el));
+  if (vnode.type === "select" && deferredValue !== undefined) setProp(el as Element, "value", deferredValue);
+  if (vnode.type === "select") syncMultipleSelect(el as Element, vnode.props.value);
   container.insertBefore(el, anchor);
   return vnode;
 }
@@ -563,9 +614,14 @@ export function patch(oldVNode: VNode | undefined, newVNode: VNode | undefined, 
   const element = newVNode.el as Element;
   const oldProps = oldVNode.props;
   Object.keys({ ...oldProps, ...newVNode.props }).forEach(key => {
+    if (element.tagName.toLowerCase() === "select" && key === "value") return;
     if (oldProps[key] !== newVNode.props[key]) setProp(element, key, newVNode.props[key], oldProps[key]);
   });
   patchChildren(element, oldVNode.children, newVNode.children);
+  if (element.tagName.toLowerCase() === "select" && !newVNode.props.multiple && oldProps.value !== newVNode.props.value) {
+    setProp(element, "value", newVNode.props.value, oldProps.value);
+  }
+  if (element.tagName.toLowerCase() === "select") syncMultipleSelect(element, newVNode.props.value);
   return newVNode;
 }
 

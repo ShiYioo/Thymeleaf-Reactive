@@ -462,6 +462,40 @@ test('SFC event handlers accept literal and $event arguments', () => {
   assert.equal(state.event, event);
 });
 
+test('SFC v-model supports checkbox arrays and select values', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const render = compileSfcComponent(`
+    <template>
+      <div>
+        <input type="checkbox" value="a" v-model="tags">
+        <input type="checkbox" value="b" v-model="tags">
+        <select v-model="choice"><option value="a">A</option><option value="b">B</option></select>
+        <select multiple v-model="selected"><option value="a">A</option><option value="b">B</option><option value="c">C</option></select>
+      </div>
+    </template>
+  `);
+  const state = createApp(render, { tags: ['a'], choice: 'b', selected: ['a', 'c'] }).mount(root);
+  const [tagA, tagB] = root.querySelectorAll('input');
+  const [choice, selected] = root.querySelectorAll('select');
+  assert.equal(tagA.checked, true);
+  assert.equal(tagB.checked, false);
+  assert.equal(choice.value, 'b');
+  assert.deepEqual([...selected.selectedOptions].map(option => option.value), ['a', 'c']);
+  tagB.checked = true;
+  tagB.dispatchEvent(new Event('change', { bubbles: true }));
+  tagA.checked = false;
+  tagA.dispatchEvent(new Event('change', { bubbles: true }));
+  choice.value = 'a';
+  choice.dispatchEvent(new Event('change', { bubbles: true }));
+  Object.defineProperty(selected, 'selectedOptions', { configurable: true, value: [selected.options[1]] });
+  selected.dispatchEvent(new Event('change', { bubbles: true }));
+  assert.deepEqual(state.tags, ['b']);
+  assert.equal(state.choice, 'a');
+  assert.deepEqual(state.selected, ['b']);
+  delete selected.selectedOptions;
+});
+
 test('SFC evaluates v-else-if chains in sibling order', () => {
   const document = installDom();
   const root = document.createElement('main');
