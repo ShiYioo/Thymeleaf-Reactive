@@ -7,8 +7,8 @@ The project is intentionally split into a browser runtime, a Thymeleaf compiler,
 ## Milestone 1
 
 - `thymeleaf-reactive-runtime`: dependency-tracked state, virtual DOM, keyed patching, and declarative event bindings.
-- `thymeleaf-reactive-compiler`: reserved for translating `th:*` bindings into runtime metadata.
-- `thymeleaf-reactive-spring-boot-starter`: reserved for Spring Boot auto-configuration and HMR transport.
+- `thymeleaf-reactive-compiler`: translates reactive template bindings into runtime metadata.
+- `thymeleaf-reactive-spring-boot-starter`: provides Spring Boot auto-configuration, browser bootstrap injection, template watching, and SSE HMR transport.
 
 ## Build baseline
 
@@ -36,6 +36,15 @@ Then open `http://localhost:8080`. The template is watched directly from
 are fetched and patched in place during development.
 
 Development HMR transport is exposed at `/__thymeleaf_reactive__/events` as an SSE stream. The browser Runtime will consume this stream and trigger component recompilation/patching.
+
+In development mode the starter injects `/__thymeleaf_reactive__/bootstrap.js` into HTML responses automatically. No script tag is required. Template save events are debounced by 150 ms by default and can be configured:
+
+```properties
+thymeleaf.reactive.debounce-millis=150
+thymeleaf.reactive.component-mappings.admin/dashboard.html=dashboard
+```
+
+`component-mappings` accepts template paths relative to `thymeleaf.reactive.template-path`; without an explicit mapping, the HTML file name is used as the component name.
 
 ## License
 

@@ -7,5 +7,7 @@ data class ReactiveProperties(
     var enabled: Boolean = true,
     var developmentMode: Boolean = true,
     var templatePath: String = "classpath:/templates",
-    var runtimePath: String = "/__thymeleaf_reactive__/bootstrap.js"
+    var runtimePath: String = "/__thymeleaf_reactive__/bootstrap.js",
+    var debounceMillis: Long = 150,
+    var componentMappings: Map<String, String> = emptyMap()
 )

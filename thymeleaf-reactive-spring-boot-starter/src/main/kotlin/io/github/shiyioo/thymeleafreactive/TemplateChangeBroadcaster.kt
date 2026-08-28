@@ -11,6 +11,8 @@ import java.nio.file.StandardWatchEventKinds.ENTRY_MODIFY
 import java.nio.file.WatchKey
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 import java.util.function.Consumer
 
 data class TemplateChange(
@@ -25,6 +27,11 @@ class TemplateChangeBroadcaster(private val properties: ReactiveProperties) : Sm
     private val executor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "thymeleaf-reactive-template-watch").apply { isDaemon = true }
     }
+    private val scheduler = Executors.newSingleThreadScheduledExecutor { runnable ->
+        Thread(runnable, "thymeleaf-reactive-template-debounce").apply { isDaemon = true }
+    }
+    private val pending = mutableMapOf<String, ScheduledFuture<*>>()
+    private val pendingLock = Any()
     private var running = false
 
     fun subscribe(listener: Consumer<TemplateChange>): AutoCloseable {
@@ -42,9 +49,37 @@ class TemplateChangeBroadcaster(private val properties: ReactiveProperties) : Sm
     override fun stop() {
         running = false
         executor.shutdownNow()
+        scheduler.shutdownNow()
+        synchronized(pendingLock) {
+            pending.values.forEach { it.cancel(false) }
+            pending.clear()
+        }
     }
 
     override fun isRunning(): Boolean = running
+
+    /** Schedules one normalized event; repeated saves of the same template collapse into one event. */
+    internal fun notifyChange(relativePath: String, kind: String) {
+        if (!relativePath.endsWith(".html", ignoreCase = true)) return
+        val normalized = relativePath.replace('\\', '/')
+        val delay = properties.debounceMillis.coerceAtLeast(0)
+        synchronized(pendingLock) {
+            pending.remove(normalized)?.cancel(false)
+            pending[normalized] = scheduler.schedule({
+                val change = TemplateChange(normalized, kind, componentFor(normalized))
+                listeners.forEach { it.accept(change) }
+                synchronized(pendingLock) { pending.remove(normalized) }
+            }, delay, TimeUnit.MILLISECONDS)
+        }
+    }
+
+    internal fun componentFor(relativePath: String): String? {
+        val normalized = relativePath.replace('\\', '/')
+        properties.componentMappings[normalized]?.let { return it }
+        return Path.of(normalized).fileName.toString()
+            .substringBeforeLast('.')
+            .takeIf { it.isNotBlank() }
+    }
 
     private fun resolveTemplateDirectory(): Path? {
         if (properties.templatePath.startsWith("classpath:")) {
@@ -68,17 +103,12 @@ class TemplateChangeBroadcaster(private val properties: ReactiveProperties) : Sm
                 val parent = watchedDirectories[key] ?: continue
                 key.pollEvents().forEach { event ->
                     val changed = event.context() as? Path ?: return@forEach
-                    val kind = event.kind().name()
                     val absolutePath = parent.resolve(changed)
                     if (event.kind() == ENTRY_CREATE && Files.isDirectory(absolutePath)) {
                         watchedDirectories[absolutePath.register(service, ENTRY_CREATE, ENTRY_MODIFY, ENTRY_DELETE)] = absolutePath
                     }
-                    if (!changed.toString().endsWith(".html")) return@forEach
                     val relativePath = directory.relativize(absolutePath).toString().replace('\\', '/')
-                    val component = changed.fileName.toString()
-                        .substringBeforeLast('.')
-                        .takeIf { it.isNotBlank() }
-                    listeners.forEach { it.accept(TemplateChange(relativePath, kind, component)) }
+                    notifyChange(relativePath, event.kind().name())
                 }
                 if (!key.reset()) watchedDirectories.remove(key)
             }
