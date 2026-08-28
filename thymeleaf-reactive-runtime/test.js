@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { reactive, effect, createApp, h, hydrate, refreshComponentsFromPage } from './dist/index.js';
+import { reactive, effect, createApp, defineComponent, h, hotUpdate, hydrate, refreshComponentsFromPage } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -68,6 +68,24 @@ test('effects can be stopped and apps can be unmounted cleanly', () => {
   app.unmount();
   assert.equal(root.textContent, '');
   state.count++;
+  assert.equal(root.textContent, '');
+});
+
+test('component HMR patches only mounted named component instances and cleans up on unmount', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Badge = defineComponent('badge-hmr-test', () => h('strong', { class: 'badge' }, 'Before'));
+  const app = createApp(() => h('section', {}, [h('p', {}, 'Outside'), h(Badge)]));
+  app.mount(root);
+  const outside = root.querySelector('p');
+  const badge = root.querySelector('strong');
+  assert.equal(hotUpdate('badge-hmr-test', () => h('strong', { class: 'badge updated' }, 'After')), true);
+  assert.equal(root.querySelector('p'), outside);
+  assert.equal(root.querySelector('strong'), badge);
+  assert.equal(root.querySelector('strong').textContent, 'After');
+  assert.equal(root.querySelector('strong').className, 'badge updated');
+  app.unmount();
+  hotUpdate('badge-hmr-test', () => h('strong', {}, 'Ignored'));
   assert.equal(root.textContent, '');
 });
 

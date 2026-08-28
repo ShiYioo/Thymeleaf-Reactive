@@ -90,6 +90,12 @@ export function effect(fn: Effect): Effect {
 }
 
 export const Text = Symbol("text");
+type ComponentInstance = {
+  vnode: VNode;
+  tree: VNode;
+  update: () => void;
+  dispose: () => void;
+};
 export type VNode = {
   type: string | typeof Text | Component;
   props: Record<string, unknown>;
@@ -97,6 +103,7 @@ export type VNode = {
   el: Node | null;
   key?: string | number;
   component?: VNode;
+  instance?: ComponentInstance;
   text?: string;
 };
 
@@ -117,6 +124,7 @@ function normalizeVNode(value: VNode | Primitive): VNode {
 }
 
 const eventListeners = new WeakMap<Element, Map<string, EventListener>>();
+const componentNames = new WeakMap<Component, string>();
 
 function setProp(el: Element, key: string, value: unknown, previous?: unknown): void {
   if (key === "key") return;
@@ -165,6 +173,23 @@ function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode
     vnode.component = vnode.type(vnode.props, vnode.children);
     mount(vnode.component, container, anchor);
     vnode.el = vnode.component.el;
+    const name = componentNames.get(vnode.type);
+    const entry = name ? hotComponents.get(name) : undefined;
+    if (entry) {
+      const instance = {} as ComponentInstance;
+      instance.vnode = vnode;
+      instance.tree = vnode.component;
+      instance.update = () => {
+        const current = instance.vnode;
+        const nextTree = entry.render(current.props, current.children);
+        instance.tree = patch(instance.tree, nextTree, container) ?? instance.tree;
+        current.component = instance.tree;
+        current.el = instance.tree.el;
+      };
+      instance.dispose = () => entry.instances.delete(instance.update);
+      vnode.instance = instance;
+      entry.instances.add(instance.update);
+    }
     return vnode;
   }
   const el = vnode.el = document.createElement(vnode.type);
@@ -172,6 +197,16 @@ function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode
   vnode.children.forEach(child => mount(child, el));
   container.insertBefore(el, anchor);
   return vnode;
+}
+
+function unmount(vnode: VNode, container: Node): void {
+  if (typeof vnode.type === "function") {
+    vnode.instance?.dispose();
+    if (vnode.component) unmount(vnode.component, container);
+    return;
+  }
+  if (vnode.type !== Text) vnode.children.forEach(child => unmount(child, vnode.el ?? container));
+  if (vnode.el?.parentNode === container) container.removeChild(vnode.el);
 }
 
 function patchChildren(el: Element, oldChildren: VNode[], newChildren: VNode[]): void {
@@ -198,17 +233,17 @@ function patchChildren(el: Element, oldChildren: VNode[], newChildren: VNode[]):
     anchor = next.el;
   }
   oldKeyed.forEach(({ child }) => {
-    if (!used.has(child) && child.el?.parentNode === el) el.removeChild(child.el);
+    if (!used.has(child)) unmount(child, el);
   });
 }
 
 export function patch(oldVNode: VNode | undefined, newVNode: VNode | undefined, container: Node): VNode | null {
   if (!oldVNode && newVNode) return mount(newVNode, container);
-  if (oldVNode && !newVNode) { if (oldVNode.el) container.removeChild(oldVNode.el); return null; }
+  if (oldVNode && !newVNode) { unmount(oldVNode, container); return null; }
   if (!oldVNode || !newVNode) return null;
   if (oldVNode.type !== newVNode.type || oldVNode.key !== newVNode.key) {
     const next = mount(newVNode, container, oldVNode.el);
-    if (oldVNode.el) container.removeChild(oldVNode.el);
+    unmount(oldVNode, container);
     return next;
   }
   newVNode.el = oldVNode.el;
@@ -219,10 +254,19 @@ export function patch(oldVNode: VNode | undefined, newVNode: VNode | undefined, 
     return newVNode;
   }
   if (typeof newVNode.type === "function") {
-    const nextComponent = newVNode.type(newVNode.props, newVNode.children);
-    patch(oldVNode.component, nextComponent, container);
-    newVNode.component = nextComponent;
-    newVNode.el = nextComponent.el;
+    const instance = oldVNode.instance;
+    if (instance) {
+      instance.vnode = newVNode;
+      const nextComponent = newVNode.type(newVNode.props, newVNode.children);
+      instance.tree = patch(instance.tree, nextComponent, container) ?? instance.tree;
+      newVNode.component = instance.tree;
+      newVNode.instance = instance;
+      newVNode.el = instance.tree.el;
+    } else {
+      const nextComponent = newVNode.type(newVNode.props, newVNode.children);
+      newVNode.component = patch(oldVNode.component, nextComponent, container) ?? nextComponent;
+      newVNode.el = newVNode.component.el;
+    }
     return newVNode;
   }
   const element = newVNode.el as Element;
@@ -256,7 +300,7 @@ export function createApp(render: (state: any) => VNode, state: object = {}) {
       if (!rerender || !mountedRoot) return;
       rerender.stop?.();
       mountedApps.delete(rerender);
-      mountedRoot.replaceChildren();
+      if (tree) unmount(tree, mountedRoot);
       rerender = undefined;
       mountedRoot = undefined;
       tree = undefined;
@@ -264,7 +308,7 @@ export function createApp(render: (state: any) => VNode, state: object = {}) {
   };
 }
 
-type HotComponent = { render: Component; instances: Set<Effect> };
+type HotComponent = { render: Component; instances: Set<() => void> };
 const hotComponents = new Map<string, HotComponent>();
 const mountedApps = new Set<Effect>();
 
@@ -277,6 +321,7 @@ export function defineComponent(name: string, render: Component): Component {
     const entry = hotComponents.get(name);
     return (entry?.render ?? render)(props, children);
   };
+  componentNames.set(component, name);
   return component;
 }
 
@@ -286,7 +331,6 @@ export function hotUpdate(name: string, render: Component): boolean {
   if (!entry) return false;
   entry.render = render;
   entry.instances.forEach(update => update());
-  mountedApps.forEach(update => update());
   return true;
 }
 
