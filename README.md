@@ -59,7 +59,7 @@ In development mode, a template component can opt into a resource-backed Vue SFC
 </section>
 ```
 
-The current SFC template compiler supports HTML, interpolation, `v-if`, `v-for`, `v-text`, `v-model`, `:prop`/`v-bind`, `@event`/`v-on`, and `<slot>`. The browser registers `components/Counter.vue` against the `counter` root name, so the server's file-based HMR event remains component-scoped even when filenames and rendered component names differ. Its `<script>` blocks are intentionally not evaluated yet, so component behavior is passed from the host as props and handler props. This keeps the first resource-SFC HMR pipeline CSP-safe while script setup and client state ownership are implemented as the next layer.
+The current SFC template compiler supports HTML, interpolation, `v-if`/`v-else`, `v-show`, `v-for`, `v-text`, `v-model`, `:prop`/`v-bind`, `@event`/`v-on` (including `method()` calls), and `<slot>`. The browser registers `components/Counter.vue` against the `counter` root name, so the server's file-based HMR event remains component-scoped even when filenames and rendered component names differ. Its `<script>` blocks are intentionally not evaluated yet, so component behavior is passed from the host as props and handler props. This keeps the first resource-SFC HMR pipeline CSP-safe while script setup and client state ownership are implemented as the next layer.
 
 Reactive lists can be rendered on the server with `tr:each`; repeated rows should use `tr:key` so HMR can preserve and move the corresponding DOM nodes:
 
