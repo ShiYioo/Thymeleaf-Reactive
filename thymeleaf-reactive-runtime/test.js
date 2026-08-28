@@ -496,6 +496,23 @@ test('SFC v-model supports checkbox arrays and select values', () => {
   delete selected.selectedOptions;
 });
 
+test('SFC v-for accepts tuple syntax and preserves keyed form nodes', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const render = compileSfcComponent('<template><ul><li v-for="(item, index) of items" :key="item.id"><input :value="item.label"><span>{{index}}:{{item.label}}</span></li></ul></template>');
+  const state = createApp(render, {
+    items: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }]
+  }).mount(root);
+  const [inputA, inputB] = root.querySelectorAll('input');
+  inputB.value = 'Typing';
+  state.items = [{ id: 'b', label: 'B2' }, { id: 'a', label: 'A' }];
+  const [first, second] = root.querySelectorAll('input');
+  assert.equal(first, inputB);
+  assert.equal(second, inputA);
+  assert.equal(first.value, 'B2');
+  assert.deepEqual([...root.querySelectorAll('span')].map(node => node.textContent), ['0:B2', '1:A']);
+});
+
 test('SFC evaluates v-else-if chains in sibling order', () => {
   const document = installDom();
   const root = document.createElement('main');

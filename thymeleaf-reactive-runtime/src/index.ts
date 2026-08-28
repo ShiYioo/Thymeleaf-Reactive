@@ -275,7 +275,7 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
   if (element.tagName.toLowerCase() === "slot") return h(Fragment, {}, slots);
   const loop = element.getAttribute("v-for");
   if (loop) {
-    const match = loop.match(/^\s*([A-Za-z_$][\w$]*)(?:\s*,\s*([A-Za-z_$][\w$]*))?\s+in\s+(.+)\s*$/);
+    const match = loop.match(/^\s*\(?\s*([A-Za-z_$][\w$]*)(?:\s*,\s*([A-Za-z_$][\w$]*))?\s*\)?\s+(?:in|of)\s+(.+)\s*$/);
     if (!match) return undefined;
     const values = readPath(scope, match[3]);
     const collection = Array.isArray(values) ? values : values && typeof values === "object" ? Object.values(values) : [];
