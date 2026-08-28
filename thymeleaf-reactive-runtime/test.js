@@ -435,6 +435,19 @@ test('SFC v-model handles checkbox and radio values and event arguments', () => 
   assert.equal(state.result, 'done');
 });
 
+test('SFC resolves registered child components into the VDOM tree', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Child = defineComponent('sfc-child-test', props => h('strong', { class: 'child' }, String(props.label)));
+  const render = compileSfcComponent('<template><section><Child :label="message" /></section></template>');
+  const state = createApp(render, { message: 'Before', components: { Child } }).mount(root);
+  const child = root.querySelector('strong');
+  assert.equal(child.textContent, 'Before');
+  state.message = 'After';
+  assert.equal(root.querySelector('strong'), child);
+  assert.equal(child.textContent, 'After');
+});
+
 test('hydrates Thymeleaf bindings and synchronizes model values', () => {
   const document = installDom();
   const root = document.createElement('section');

@@ -188,6 +188,17 @@ function sfcEventHandler(expression: string, scope: Record<string, unknown>): ((
   return typeof method === "function" ? event => method.call(scope, event) : undefined;
 }
 
+function resolveSfcComponent(tagName: string, scope: Record<string, unknown>): Component | undefined {
+  const name = tagName.toLowerCase();
+  if (["html", "head", "body", "div", "span", "p", "section", "main", "header", "footer", "nav", "ul", "ol", "li", "button", "input", "textarea", "select", "option", "form", "label", "a", "img", "table", "thead", "tbody", "tr", "th", "td", "strong", "em", "code", "small", "h1", "h2", "h3", "h4", "h5", "h6"].includes(name)) return undefined;
+  const pascal = tagName.replace(/(^|-)([a-z])/g, (_match, _dash, letter) => letter.toUpperCase());
+  const registry = scope.components;
+  const candidate = (registry && typeof registry === "object" ? (registry as Record<string, unknown>)[tagName] ?? (registry as Record<string, unknown>)[pascal] : undefined)
+    ?? scope[tagName]
+    ?? scope[pascal];
+  return typeof candidate === "function" ? candidate as Component : undefined;
+}
+
 function renderSfcChildren(nodes: Node[], scope: Record<string, unknown>, slots: VNode[]): VNode[] {
   const output: VNode[] = [];
   let previousIf = false;
@@ -284,7 +295,7 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
   const children = textExpression
     ? [normalizeVNode(String(readPath(scope, textExpression) ?? ""))]
     : renderSfcChildren(Array.from(element.childNodes), scope, slots);
-  return h(element.tagName.toLowerCase(), props, children);
+  return h(resolveSfcComponent(element.tagName, scope) ?? element.tagName.toLowerCase(), props, children);
 }
 
 /**
