@@ -13,6 +13,13 @@ const effectDeps = new WeakMap<Effect, Set<Set<Effect>>>();
 const effectSchedulers = new WeakMap<Effect, () => void>();
 const ITERATE_KEY = Symbol("iterate");
 
+function isReactiveValue(value: unknown): value is object {
+  if (!value || typeof value !== "object") return false;
+  if (Array.isArray(value)) return true;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
 function trackEffect(subscribers: Set<Effect>): void {
   const active = effectStack.at(-1);
   if (!active) return;
@@ -42,7 +49,7 @@ export function reactive<T extends object>(value: T): T {
       if (!subscribers) deps.set(key, subscribers = new Set());
       trackEffect(subscribers);
       const result = Reflect.get(target, key, receiver);
-      return result && typeof result === 'object' ? reactive(result) : result;
+      return isReactiveValue(result) ? reactive(result) : result;
     },
     set(target, key, next, receiver) {
       const oldLength = Array.isArray(target) ? target.length : 0;
