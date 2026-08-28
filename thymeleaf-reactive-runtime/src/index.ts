@@ -484,6 +484,117 @@ function restoreFormState(root: Element, state: Map<string, FormState>): void {
   });
 }
 
+type ComponentRootPair = { current: HTMLElement; next: HTMLElement };
+
+function componentInstanceKey(root: HTMLElement): string | undefined {
+  const key = root.dataset.trKey;
+  return key ? `key:${key}` : undefined;
+}
+
+function pairComponentRoots(current: HTMLElement[], next: HTMLElement[]): {
+  pairs: ComponentRootPair[];
+  removed: HTMLElement[];
+  added: HTMLElement[];
+} {
+  const countKeys = (roots: HTMLElement[]) => {
+    const counts = new Map<string, number>();
+    roots.forEach(root => {
+      const key = componentInstanceKey(root);
+      if (key) counts.set(key, (counts.get(key) ?? 0) + 1);
+    });
+    return counts;
+  };
+  const currentKeyCounts = countKeys(current);
+  const nextKeyCounts = countKeys(next);
+  const currentByKey = new Map<string, HTMLElement>();
+  current.forEach(root => {
+    const key = componentInstanceKey(root);
+    if (key && currentKeyCounts.get(key) === 1) currentByKey.set(key, root);
+  });
+
+  const pairs: ComponentRootPair[] = [];
+  const usedCurrent = new Set<HTMLElement>();
+  const usedNext = new Set<HTMLElement>();
+  next.forEach(root => {
+    const key = componentInstanceKey(root);
+    const match = key && nextKeyCounts.get(key) === 1 ? currentByKey.get(key) : undefined;
+    if (match) {
+      pairs.push({ current: match, next: root });
+      usedCurrent.add(match);
+      usedNext.add(root);
+    }
+  });
+
+  const remainingCurrent = current.filter(root => !usedCurrent.has(root) && !componentInstanceKey(root));
+  const remainingNext = next.filter(root => !usedNext.has(root) && !componentInstanceKey(root));
+  const pairCount = Math.min(remainingCurrent.length, remainingNext.length);
+  for (let index = 0; index < pairCount; index++) {
+    pairs.push({ current: remainingCurrent[index], next: remainingNext[index] });
+    usedCurrent.add(remainingCurrent[index]);
+    usedNext.add(remainingNext[index]);
+  }
+  return {
+    pairs,
+    removed: current.filter(root => !usedCurrent.has(root)),
+    added: next.filter(root => !usedNext.has(root))
+  };
+}
+
+function parseComponentState(root: HTMLElement): object {
+  const source = root.dataset.trState;
+  if (!source) return {};
+  try { return JSON.parse(source) as object; }
+  catch {
+    console.error("[thymeleaf-reactive] invalid data-tr-state JSON during HMR");
+    return {};
+  }
+}
+
+function hydrateComponentRoot(root: HTMLElement, context?: HydrationContext): void {
+  const globalHandlers = (globalThis as { ThymeleafReactive?: { handlers?: Record<string, (...args: any[]) => any> } })
+    .ThymeleafReactive?.handlers;
+  const handlers = context?.handlers ?? globalHandlers ?? {};
+  hydrate(root, context?.state ?? parseComponentState(root), handlers);
+  root.dataset.trHydrated = "true";
+}
+
+function insertionPointForAddedComponent(
+  nextRoot: HTMLElement,
+  nextRoots: HTMLElement[],
+  liveRoots: Map<HTMLElement, HTMLElement>
+): { parent: Node; anchor: Node | null } | undefined {
+  const index = nextRoots.indexOf(nextRoot);
+  for (let cursor = index + 1; cursor < nextRoots.length; cursor++) {
+    const peer = nextRoots[cursor];
+    const live = liveRoots.get(peer);
+    if (live?.parentNode && peer.parentElement === nextRoot.parentElement) return { parent: live.parentNode, anchor: live };
+  }
+  for (let cursor = index - 1; cursor >= 0; cursor--) {
+    const peer = nextRoots[cursor];
+    const live = liveRoots.get(peer);
+    if (live?.parentNode && peer.parentElement === nextRoot.parentElement) return { parent: live.parentNode, anchor: live.nextSibling };
+  }
+  if (nextRoot.parentElement?.id) {
+    const parent = document.getElementById(nextRoot.parentElement.id);
+    if (parent) return { parent, anchor: null };
+  }
+  return undefined;
+}
+
+function reorderComponentRoots(nextRoots: HTMLElement[], liveRoots: Map<HTMLElement, HTMLElement>): void {
+  let anchor: Node | null = null;
+  for (let index = nextRoots.length - 1; index >= 0; index--) {
+    const nextRoot = nextRoots[index];
+    const liveRoot = liveRoots.get(nextRoot);
+    if (!liveRoot?.parentNode) continue;
+    const sibling = nextRoots[index + 1];
+    const nextSibling = sibling ? liveRoots.get(sibling) : undefined;
+    if (nextSibling?.parentNode && nextSibling.parentNode !== liveRoot.parentNode) continue;
+    liveRoot.parentNode.insertBefore(liveRoot, anchor);
+    anchor = liveRoot;
+  }
+}
+
 /** Re-renders only components with this name from the current server-rendered page. */
 export async function refreshComponentsFromPage(component: string): Promise<void> {
   const response = await fetch(window.location.href, {
@@ -494,18 +605,38 @@ export async function refreshComponentsFromPage(component: string): Promise<void
   const nextDocument = new DOMParser().parseFromString(await response.text(), "text/html");
   const current = Array.from(document.querySelectorAll<HTMLElement>("[data-tr-component]")).filter(node => node.dataset.trComponent === component);
   const next = Array.from(nextDocument.querySelectorAll<HTMLElement>("[data-tr-component]")).filter(node => node.dataset.trComponent === component);
-  if (current.length !== next.length) throw new Error(`HMR component count changed for ${component}`);
-  current.forEach((root, index) => {
+  const { pairs, removed, added } = pairComponentRoots(current, next);
+  const liveRoots = new Map<HTMLElement, HTMLElement>();
+  pairs.forEach(({ current: root, next: nextRoot }) => {
     const parent = root.parentNode;
     if (!parent) return;
     const formState = preserveFormState(root);
-    const patched = patch(vnodeFromDom(root), vnodeFromDom(next[index]), parent);
+    const context = hydrationContexts.get(root);
+    const patched = patch(vnodeFromDom(root), vnodeFromDom(nextRoot), parent);
     if (patched?.el instanceof Element) {
       restoreFormState(patched.el, formState);
-      const context = hydrationContexts.get(root);
-      if (context) hydrate(patched.el, context.state, context.handlers);
+      const liveRoot = patched.el as HTMLElement;
+      liveRoots.set(nextRoot, liveRoot);
+      if (context) hydrateComponentRoot(liveRoot, context);
     }
   });
+  removed.forEach(root => {
+    disposeHydration(root);
+    root.remove();
+  });
+  added.forEach(nextRoot => {
+    const insertion = insertionPointForAddedComponent(nextRoot, next, liveRoots);
+    if (!insertion) {
+      console.warn(`[thymeleaf-reactive] could not place added ${component} component instance; reload may be required`);
+      return;
+    }
+    const vnode = mount(vnodeFromDom(nextRoot), insertion.parent, insertion.anchor);
+    if (vnode.el instanceof HTMLElement) {
+      liveRoots.set(nextRoot, vnode.el);
+      hydrateComponentRoot(vnode.el);
+    }
+  });
+  reorderComponentRoots(next, liveRoots);
 }
 
 function readPath(source: any, expression: string): any {

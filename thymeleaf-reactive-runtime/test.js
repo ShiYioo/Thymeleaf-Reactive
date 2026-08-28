@@ -10,6 +10,7 @@ function installDom() {
   globalThis.Event = window.Event;
   globalThis.Node = window.Node;
   globalThis.Element = window.Element;
+  globalThis.HTMLElement = window.HTMLElement;
   globalThis.DOMParser = window.DOMParser;
   globalThis.HTMLInputElement = window.HTMLInputElement;
   return window.document;
@@ -103,6 +104,44 @@ test('component HMR patches server output while preserving field state', async (
   assert.equal(document.querySelector('strong').textContent, 'After');
   assert.equal(document.querySelector('input'), input);
   assert.equal(document.querySelector('input').value, 'typing');
+});
+
+test('component HMR reconciles keyed component instances across reorders, additions, and removals', async () => {
+  const document = installDom();
+  document.body.innerHTML = [
+    '<div id="components">',
+    '<section data-tr-component="row" data-tr-key="a" data-tr-state="{&quot;label&quot;:&quot;A&quot;}"><input data-tr-model="label"><strong data-tr-text="label"></strong></section>',
+    '<section data-tr-component="row" data-tr-key="b" data-tr-state="{&quot;label&quot;:&quot;B&quot;}"><input data-tr-model="label"><strong data-tr-text="label"></strong></section>',
+    '</div>'
+  ].join('');
+  const oldA = document.querySelector('[data-tr-key="a"]');
+  const oldB = document.querySelector('[data-tr-key="b"]');
+  hydrate(oldA, { label: 'A' });
+  hydrate(oldB, { label: 'B' });
+  oldB.querySelector('input').value = 'Typing B';
+  oldB.querySelector('input').dispatchEvent(new Event('input', { bubbles: true }));
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    text: async () => [
+      '<html><body><div id="components">',
+      '<section data-tr-component="row" data-tr-key="b" data-tr-state="{&quot;label&quot;:&quot;B server&quot;}"><input data-tr-model="label"><strong data-tr-text="label">stale</strong></section>',
+      '<section data-tr-component="row" data-tr-key="c" data-tr-state="{&quot;label&quot;:&quot;C&quot;}"><input data-tr-model="label"><strong data-tr-text="label">stale</strong></section>',
+      '</div></body></html>'
+    ].join('')
+  });
+  await refreshComponentsFromPage('row');
+  const rows = document.querySelectorAll('[data-tr-component="row"]');
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0], oldB);
+  assert.equal(document.querySelector('[data-tr-key="a"]'), null);
+  assert.equal(rows[0].querySelector('input').value, 'Typing B');
+  assert.equal(rows[0].querySelector('strong').textContent, 'Typing B');
+  assert.equal(rows[1].dataset.trKey, 'c');
+  assert.equal(rows[1].querySelector('strong').textContent, 'C');
+  rows[1].querySelector('input').value = 'C updated';
+  rows[1].querySelector('input').dispatchEvent(new Event('input', { bubbles: true }));
+  assert.equal(rows[1].querySelector('strong').textContent, 'C updated');
 });
 
 test('component HMR hydrates reactive bindings introduced by a changed template', async () => {
