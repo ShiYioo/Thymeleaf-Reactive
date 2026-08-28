@@ -402,6 +402,39 @@ test('SFC render tracks state, loops keyed children, and writes v-model values b
   assert.equal(state.name, 'Grace');
 });
 
+test('SFC v-model handles checkbox and radio values and event arguments', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const render = compileSfcComponent(`
+    <template>
+      <div>
+        <input type="checkbox" v-model="enabled">
+        <input type="radio" value="a" v-model="choice">
+        <input type="radio" value="b" v-model="choice">
+        <button @click="choose('done')">choose</button>
+      </div>
+    </template>
+  `);
+  const state = createApp(render, {
+    enabled: false,
+    choice: 'a',
+    result: '',
+    choose(value) { this.result = value; }
+  }).mount(root);
+  const [checkbox, radioA, radioB, button] = root.querySelectorAll('input,button');
+  assert.equal(checkbox.checked, false);
+  assert.equal(radioA.checked, true);
+  assert.equal(radioB.checked, false);
+  checkbox.checked = true;
+  checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+  radioB.checked = true;
+  radioB.dispatchEvent(new Event('change', { bubbles: true }));
+  button.dispatchEvent(new Event('click', { bubbles: true }));
+  assert.equal(state.enabled, true);
+  assert.equal(state.choice, 'b');
+  assert.equal(state.result, 'done');
+});
+
 test('hydrates Thymeleaf bindings and synchronizes model values', () => {
   const document = installDom();
   const root = document.createElement('section');

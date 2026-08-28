@@ -179,6 +179,11 @@ function sfcEventHandler(expression: string, scope: Record<string, unknown>): ((
     const method = readPath(scope, call[1]);
     return typeof method === "function" ? () => method.call(scope) : undefined;
   }
+  const callWithValue = normalized.match(/^([A-Za-z_$][\w$]*)\s*\(\s*(['"])(.*?)\2\s*\)$/);
+  if (callWithValue) {
+    const method = readPath(scope, callWithValue[1]);
+    return typeof method === "function" ? () => method.call(scope, callWithValue[3]) : undefined;
+  }
   const method = readPath(scope, normalized);
   return typeof method === "function" ? event => method.call(scope, event) : undefined;
 }
@@ -254,8 +259,23 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
     else if (name.startsWith("@")) props[sfcEventPropName(name.slice(1))] = sfcEventHandler(value, scope);
     else if (name.startsWith("v-on:")) props[sfcEventPropName(name.slice(5))] = sfcEventHandler(value, scope);
     else if (name === "v-model") {
-      props.value = readPath(scope, value);
-      props.onInput = (event: Event) => writePath(scope, value, (event.target as HTMLInputElement).value);
+      const inputType = element.tagName.toLowerCase() === "input"
+        ? (element.getAttribute("type") ?? "text").toLowerCase()
+        : "text";
+      const current = readPath(scope, value);
+      if (inputType === "checkbox") {
+        props.checked = Boolean(current);
+        props.onChange = (event: Event) => writePath(scope, value, (event.target as HTMLInputElement).checked);
+      } else if (inputType === "radio") {
+        const option = element.getAttribute("value") ?? "";
+        props.checked = String(current ?? "") === option;
+        props.onChange = (event: Event) => {
+          if ((event.target as HTMLInputElement).checked) writePath(scope, value, option);
+        };
+      } else {
+        props.value = current;
+        props.onInput = (event: Event) => writePath(scope, value, (event.target as HTMLInputElement).value);
+      }
     }
     else props[name] = value;
   });
