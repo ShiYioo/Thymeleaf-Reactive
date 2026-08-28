@@ -6,6 +6,8 @@ export type RenderFunction = (state: any) => VNode;
 const effectStack: Effect[] = [];
 const proxyCache = new WeakMap<object, object>();
 const reactiveProxies = new WeakSet<object>();
+const effectDeps = new WeakMap<Effect, Set<Set<Effect>>>();
+const ITERATE_KEY = Symbol("iterate");
 
 export function reactive<T extends object>(value: T): T {
   if (reactiveProxies.has(value)) return value;
@@ -18,21 +20,49 @@ export function reactive<T extends object>(value: T): T {
         let subscribers = deps.get(key);
         if (!subscribers) deps.set(key, subscribers = new Set());
         subscribers.add(active);
+        let tracked = effectDeps.get(active);
+        if (!tracked) effectDeps.set(active, tracked = new Set());
+        tracked.add(subscribers);
       }
       const result = Reflect.get(target, key, receiver);
       return result && typeof result === 'object' ? reactive(result) : result;
     },
     set(target, key, next, receiver) {
+      const oldLength = Array.isArray(target) ? target.length : 0;
       const changed = !Object.is(Reflect.get(target, key, receiver), next);
       const ok = Reflect.set(target, key, next, receiver);
-      if (changed) deps.get(key)?.forEach(run => run());
+      if (changed) {
+        const triggered = new Set<Effect>(deps.get(key) ?? []);
+        if (Array.isArray(target) && key !== "length") {
+          if (Number.isInteger(Number(key)) && Number(key) >= oldLength) deps.get("length")?.forEach(run => triggered.add(run));
+        }
+        deps.get(ITERATE_KEY)?.forEach(run => triggered.add(run));
+        triggered.forEach(run => run());
+      }
       return ok;
     },
     deleteProperty(target, key) {
       const existed = key in target;
       const ok = Reflect.deleteProperty(target, key);
-      if (existed) deps.get(key)?.forEach(run => run());
+      if (existed) {
+        const triggered = new Set<Effect>(deps.get(key));
+        deps.get(ITERATE_KEY)?.forEach(run => triggered.add(run));
+        if (Array.isArray(target)) deps.get("length")?.forEach(run => triggered.add(run));
+        triggered.forEach(run => run());
+      }
       return ok;
+    },
+    ownKeys(target) {
+      const active = effectStack.at(-1);
+      if (active) {
+        let subscribers = deps.get(ITERATE_KEY);
+        if (!subscribers) deps.set(ITERATE_KEY, subscribers = new Set());
+        subscribers.add(active);
+        let tracked = effectDeps.get(active);
+        if (!tracked) effectDeps.set(active, tracked = new Set());
+        tracked.add(subscribers);
+      }
+      return Reflect.ownKeys(target);
     }
   });
   proxyCache.set(value, proxy);
@@ -42,6 +72,8 @@ export function reactive<T extends object>(value: T): T {
 
 export function effect(fn: Effect): Effect {
   const run: Effect = () => {
+    effectDeps.get(run)?.forEach(subscribers => subscribers.delete(run));
+    effectDeps.delete(run);
     effectStack.push(run);
     try { fn(); } finally { effectStack.pop(); }
   };

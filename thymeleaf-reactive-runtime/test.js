@@ -26,6 +26,30 @@ test('reactive state tracks and reruns dependent effects', () => {
   assert.equal(value, 1);
 });
 
+test('reactive effects clean stale branches and track array length changes', () => {
+  const state = reactive({ enabled: true, first: 'A', second: 'B', items: ['x'] });
+  let value = '';
+  let runs = 0;
+  effect(() => {
+    runs++;
+    value = state.enabled ? state.first : state.second;
+  });
+  state.enabled = false;
+  assert.equal(value, 'B');
+  const branchRuns = runs;
+  state.first = 'ignored';
+  assert.equal(runs, branchRuns);
+  state.second = 'C';
+  assert.equal(value, 'C');
+
+  let length = 0;
+  effect(() => { length = state.items.length; });
+  state.items.push('y');
+  assert.equal(length, 2);
+  state.items.pop();
+  assert.equal(length, 1);
+});
+
 test('component HMR patches server output while preserving field state', async () => {
   const document = installDom();
   document.body.innerHTML = '<section data-tr-component="counter"><input data-tr-key="draft" value="server"><strong data-tr-key="label">Before</strong></section>';
