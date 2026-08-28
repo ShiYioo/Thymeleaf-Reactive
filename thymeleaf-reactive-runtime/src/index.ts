@@ -91,6 +91,7 @@ export function effect(fn: Effect): Effect {
 
 export const Text = Symbol("text");
 export const Comment = Symbol("comment");
+export const Fragment = Symbol("fragment");
 type ComponentInstance = {
   vnode: VNode;
   tree: VNode;
@@ -98,10 +99,11 @@ type ComponentInstance = {
   dispose: () => void;
 };
 export type VNode = {
-  type: string | typeof Text | typeof Comment | Component;
+  type: string | typeof Text | typeof Comment | typeof Fragment | Component;
   props: Record<string, unknown>;
   children: VNode[];
   el: Node | null;
+  anchor?: Node | null;
   key?: string | number;
   component?: VNode;
   instance?: ComponentInstance;
@@ -175,10 +177,19 @@ function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode
     container.insertBefore(vnode.el, anchor);
     return vnode;
   }
+  if (vnode.type === Fragment) {
+    const start = vnode.el = document.createComment("fragment");
+    const end = vnode.anchor = document.createComment("/fragment");
+    container.insertBefore(start, anchor);
+    container.insertBefore(end, anchor);
+    vnode.children.forEach(child => mount(child, container, end));
+    return vnode;
+  }
   if (typeof vnode.type === "function") {
     vnode.component = vnode.type(vnode.props, vnode.children);
     mount(vnode.component, container, anchor);
     vnode.el = vnode.component.el;
+    vnode.anchor = vnode.component.anchor;
     const name = componentNames.get(vnode.type);
     const entry = name ? hotComponents.get(name) : undefined;
     if (entry) {
@@ -191,6 +202,7 @@ function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode
         instance.tree = patch(instance.tree, nextTree, container) ?? instance.tree;
         current.component = instance.tree;
         current.el = instance.tree.el;
+        current.anchor = instance.tree.anchor;
       };
       instance.dispose = () => entry.instances.delete(instance.update);
       vnode.instance = instance;
@@ -211,11 +223,30 @@ function unmount(vnode: VNode, container: Node): void {
     if (vnode.component) unmount(vnode.component, container);
     return;
   }
+  if (vnode.type === Fragment) {
+    vnode.children.forEach(child => unmount(child, container));
+    if (vnode.el?.parentNode === container) container.removeChild(vnode.el);
+    if (vnode.anchor?.parentNode === container) container.removeChild(vnode.anchor);
+    return;
+  }
   if (vnode.type !== Text && vnode.type !== Comment) vnode.children.forEach(child => unmount(child, vnode.el ?? container));
   if (vnode.el?.parentNode === container) container.removeChild(vnode.el);
 }
 
-function patchChildren(el: Element, oldChildren: VNode[], newChildren: VNode[]): void {
+function moveVNode(vnode: VNode, container: Node, anchor: Node | null): void {
+  const start = vnode.el;
+  const end = vnode.anchor ?? start;
+  if (!start || !end) return;
+  let node: Node | null = start;
+  while (node) {
+    const next: Node | null = node === end ? null : node.nextSibling;
+    container.insertBefore(node, anchor);
+    if (!next) break;
+    node = next;
+  }
+}
+
+function patchChildren(container: Node, oldChildren: VNode[], newChildren: VNode[], endAnchor: Node | null = null): void {
   const oldKeyed = new Map<string | number, { child: VNode; index: number }>();
   const duplicateKeys = new Set<string | number>();
   oldChildren.forEach((child, index) => {
@@ -225,21 +256,21 @@ function patchChildren(el: Element, oldChildren: VNode[], newChildren: VNode[]):
   });
   duplicateKeys.forEach(key => oldKeyed.delete(key));
   const used = new Set<VNode>();
-  let anchor: Node | null = null;
+  let anchor: Node | null = endAnchor;
   for (let i = newChildren.length - 1; i >= 0; i--) {
     const next = newChildren[i];
     const identity = next.key ?? i;
     const match = !duplicateKeys.has(identity) ? oldKeyed.get(identity) : undefined;
     if (match) {
-      patch(match.child, next, el);
-      if (match.index !== i && next.el) el.insertBefore(next.el, anchor);
+      patch(match.child, next, container);
+      if (match.index !== i && next.el) moveVNode(next, container, anchor);
       oldKeyed.delete(identity);
       used.add(match.child);
-    } else mount(next, el, anchor);
+    } else mount(next, container, anchor);
     anchor = next.el;
   }
   oldKeyed.forEach(({ child }) => {
-    if (!used.has(child)) unmount(child, el);
+    if (!used.has(child)) unmount(child, container);
   });
 }
 
@@ -253,10 +284,15 @@ export function patch(oldVNode: VNode | undefined, newVNode: VNode | undefined, 
     return next;
   }
   newVNode.el = oldVNode.el;
+  newVNode.anchor = oldVNode.anchor;
   if (newVNode.type === Text || newVNode.type === Comment) {
     const oldText = oldVNode.text ?? "";
     const newText = newVNode.text ?? "";
     if (oldText !== newText && newVNode.el) newVNode.el.nodeValue = newText;
+    return newVNode;
+  }
+  if (newVNode.type === Fragment) {
+    patchChildren(container, oldVNode.children, newVNode.children, newVNode.anchor ?? null);
     return newVNode;
   }
   if (typeof newVNode.type === "function") {
@@ -268,10 +304,12 @@ export function patch(oldVNode: VNode | undefined, newVNode: VNode | undefined, 
       newVNode.component = instance.tree;
       newVNode.instance = instance;
       newVNode.el = instance.tree.el;
+      newVNode.anchor = instance.tree.anchor;
     } else {
       const nextComponent = newVNode.type(newVNode.props, newVNode.children);
       newVNode.component = patch(oldVNode.component, nextComponent, container) ?? nextComponent;
       newVNode.el = newVNode.component.el;
+      newVNode.anchor = newVNode.component.anchor;
     }
     return newVNode;
   }

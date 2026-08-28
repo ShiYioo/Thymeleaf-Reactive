@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { reactive, effect, createApp, defineComponent, h, hotUpdate, hydrate, refreshComponentsFromPage } from './dist/index.js';
+import { reactive, effect, createApp, defineComponent, Fragment, h, hotUpdate, hydrate, refreshComponentsFromPage } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -88,6 +88,47 @@ test('component HMR patches only mounted named component instances and cleans up
   app.unmount();
   hotUpdate('badge-hmr-test', () => h('strong', {}, 'Ignored'));
   assert.equal(root.textContent, '');
+});
+
+test('fragment components patch and hot-update multiple root nodes as one range', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Pair = defineComponent('fragment-hmr-test', () => h(Fragment, {}, [
+    h('strong', { key: 'title' }, 'Before'),
+    h('em', { key: 'detail' }, 'Detail')
+  ]));
+  const app = createApp(() => h('section', {}, [h(Pair), h('p', { key: 'outside' }, 'Outside')]));
+  app.mount(root);
+  const outside = root.querySelector('p');
+  const title = root.querySelector('strong');
+  assert.equal(hotUpdate('fragment-hmr-test', () => h(Fragment, {}, [
+    h('strong', { key: 'title' }, 'After'),
+    h('code', { key: 'detail' }, 'Replacement detail')
+  ])), true);
+  assert.equal(root.querySelector('strong'), title);
+  assert.equal(root.querySelector('strong').textContent, 'After');
+  assert.equal(root.querySelector('code').textContent, 'Replacement detail');
+  assert.equal(root.querySelector('p'), outside);
+  app.unmount();
+  assert.equal(root.textContent, '');
+});
+
+test('keyed fragment children move their full DOM ranges together', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const app = createApp(state => h('ul', {}, state.items.map(item => h(Fragment, { key: item.id }, [
+    h('li', { key: 'label' }, item.label),
+    h('li', { key: 'meta' }, item.meta)
+  ]))), { items: [{ id: 'a', label: 'A', meta: 'A*' }, { id: 'b', label: 'B', meta: 'B*' }] });
+  const state = app.mount(root);
+  const initial = root.querySelectorAll('li');
+  const firstB = initial[2];
+  const secondB = initial[3];
+  state.items = [{ id: 'b', label: 'B2', meta: 'B2*' }, { id: 'a', label: 'A', meta: 'A*' }];
+  const rows = root.querySelectorAll('li');
+  assert.equal(rows[0], firstB);
+  assert.equal(rows[1], secondB);
+  assert.deepEqual([...rows].map(row => row.textContent), ['B2', 'B2*', 'A', 'A*']);
 });
 
 test('component HMR patches server output while preserving field state', async () => {
