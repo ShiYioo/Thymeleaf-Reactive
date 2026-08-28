@@ -636,7 +636,8 @@ function hydrateComponentRoot(root: HTMLElement, context?: HydrationContext): vo
 function insertionPointForAddedComponent(
   nextRoot: HTMLElement,
   nextRoots: HTMLElement[],
-  liveRoots: Map<HTMLElement, HTMLElement>
+  liveRoots: Map<HTMLElement, HTMLElement>,
+  nextDocument: Document
 ): { parent: Node; anchor: Node | null } | undefined {
   const index = nextRoots.indexOf(nextRoot);
   for (let cursor = index + 1; cursor < nextRoots.length; cursor++) {
@@ -653,7 +654,27 @@ function insertionPointForAddedComponent(
     const parent = document.getElementById(nextRoot.parentElement.id);
     if (parent) return { parent, anchor: null };
   }
-  return undefined;
+  const nextBody = nextDocument.body;
+  const nextParent = nextRoot.parentElement;
+  if (!nextParent) return undefined;
+  const path: number[] = [];
+  let cursor: Element | null = nextParent;
+  while (cursor && cursor !== nextBody) {
+    const parent: Element | null = cursor.parentElement;
+    if (!parent) return undefined;
+    const index = Array.from(parent.children).indexOf(cursor);
+    if (index < 0) return undefined;
+    path.unshift(index);
+    cursor = parent;
+  }
+  if (cursor !== nextBody) return undefined;
+  let liveParent: Element = document.body;
+  for (const index of path) {
+    const child = liveParent.children.item(index);
+    if (!child) return undefined;
+    liveParent = child;
+  }
+  return { parent: liveParent, anchor: null };
 }
 
 function reorderComponentRoots(nextRoots: HTMLElement[], liveRoots: Map<HTMLElement, HTMLElement>): void {
@@ -700,7 +721,7 @@ export async function refreshComponentsFromPage(component: string): Promise<void
     root.remove();
   });
   added.forEach(nextRoot => {
-    const insertion = insertionPointForAddedComponent(nextRoot, next, liveRoots);
+    const insertion = insertionPointForAddedComponent(nextRoot, next, liveRoots, nextDocument);
     if (!insertion) {
       console.warn(`[thymeleaf-reactive] could not place added ${component} component instance; reload may be required`);
       return;

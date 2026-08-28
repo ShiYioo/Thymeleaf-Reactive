@@ -215,6 +215,18 @@ test('component HMR reconciles keyed component instances across reorders, additi
   assert.equal(rows[1].querySelector('strong').textContent, 'C updated');
 });
 
+test('component HMR inserts a first component instance into a structural parent match', async () => {
+  const document = installDom();
+  document.body.innerHTML = '<main><section class="slot"></section></main>';
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    text: async () => '<html><body><main><section class="slot"><article data-tr-component="alert" data-tr-state="{&quot;message&quot;:&quot;Ready&quot;}"><strong data-tr-text="message">stale</strong></article></section></main></body></html>'
+  });
+  await refreshComponentsFromPage('alert');
+  assert.equal(document.querySelector('[data-tr-component="alert"] strong').textContent, 'Ready');
+});
+
 test('component HMR hydrates reactive bindings introduced by a changed template', async () => {
   const document = installDom();
   document.body.innerHTML = '<section data-tr-component="profile" data-tr-state="{&quot;name&quot;:&quot;Ada&quot;}"><strong>Before</strong></section>';
