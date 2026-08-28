@@ -3,6 +3,7 @@ package io.github.shiyioo.thymeleafreactive
 import org.springframework.http.MediaType
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 import java.io.IOException
@@ -42,5 +43,6 @@ class HmrController(
     }
 
     @GetMapping("/status", produces = [MediaType.APPLICATION_JSON_VALUE])
-    fun status(): Map<String, Any?> = changes.status() + mapOf("clients" to clients.size)
+    fun status(@RequestParam(required = false) since: Long?): Map<String, Any?> =
+        changes.status(since) + mapOf("clients" to clients.size)
 }

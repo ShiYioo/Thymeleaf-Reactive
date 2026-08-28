@@ -387,13 +387,16 @@ export type ComponentHmrMessage = HmrMessage & {
 
 /** Connects the browser runtime to the Spring Boot SSE development channel. */
 export function connectHmr(
-  onTemplateChange: (message: HmrMessage) => void,
+  onTemplateChange: (message: HmrMessage) => void | Promise<void>,
   endpoint = "/__thymeleaf_reactive__/events"
 ): () => void {
   if (typeof EventSource === "undefined") return () => undefined;
   const source = new EventSource(endpoint);
   source.onmessage = event => {
-    try { onTemplateChange(JSON.parse(event.data) as HmrMessage); }
+    try {
+      void Promise.resolve(onTemplateChange(JSON.parse(event.data) as HmrMessage))
+        .catch(error => console.error("[thymeleaf-reactive] failed to apply HMR update", error));
+    }
     catch (error) { console.warn("[thymeleaf-reactive] invalid HMR message", error); }
   };
   source.onerror = () => console.warn("[thymeleaf-reactive] HMR connection lost; browser will retry");
@@ -411,37 +414,62 @@ export function connectComponentHmr(
 ): () => void {
   let seenVersion = 0;
   let pollingInitialized = false;
+  let polling = false;
   const applyChange = async (message: HmrMessage) => {
     const update = message as ComponentHmrMessage;
-    if (typeof update.version === "number") seenVersion = Math.max(seenVersion, update.version);
+    if (typeof update.version === "number" && update.version <= seenVersion) return;
     if (!update.component) {
       window.dispatchEvent(new CustomEvent("thymeleaf-reactive:template-change", { detail: update }));
-      return;
-    }
-    if (!update.moduleUrl) {
+    } else if (!update.moduleUrl) {
       await refreshComponentsFromPage(update.component);
-      return;
-    }
-    try {
+    } else {
       const module = await import(`${update.moduleUrl}?t=${Date.now()}`);
       const render = module.default ?? module.render;
       if (typeof render !== "function") throw new Error("HMR module has no render export");
       hotUpdate(update.component, render);
-    } catch (error) {
-      console.error(`[thymeleaf-reactive] failed to update ${update.component}`, error);
     }
+    if (typeof update.version === "number") seenVersion = update.version;
   };
-  const closeEvents = connectHmr(applyChange, endpoint);
+  let changeQueue = Promise.resolve();
+  const enqueueChange = (message: HmrMessage): Promise<void> => {
+    const work = changeQueue.then(() => applyChange(message));
+    changeQueue = work.catch(() => undefined);
+    return work;
+  };
+  const closeEvents = connectHmr(enqueueChange, endpoint);
   const poll = async () => {
+    if (polling) return;
+    polling = true;
     try {
-      const response = await fetch(statusEndpoint, { cache: "no-store" });
+      const separator = statusEndpoint.includes("?") ? "&" : "?";
+      const response = await fetch(`${statusEndpoint}${separator}since=${encodeURIComponent(seenVersion)}`, { cache: "no-store" });
       if (!response.ok) return;
-      const status = await response.json() as { version?: number; lastChange?: ComponentHmrMessage };
+      const status = await response.json() as {
+        version?: number;
+        lastChange?: ComponentHmrMessage;
+        changes?: ComponentHmrMessage[];
+        historyComplete?: boolean;
+      };
       const version = status.version ?? 0;
       if (!pollingInitialized) { pollingInitialized = true; seenVersion = Math.max(seenVersion, version); return; }
-      if (version > seenVersion && status.lastChange) await applyChange(status.lastChange);
+      if (version <= seenVersion) return;
+      if (status.historyComplete === false) {
+        console.warn("[thymeleaf-reactive] HMR history is incomplete; reloading the page");
+        window.location.reload();
+        return;
+      }
+      const changes = (status.changes?.length ? status.changes : status.lastChange ? [status.lastChange] : [])
+        .sort((left, right) => (left.version ?? 0) - (right.version ?? 0));
+      if (!changes.length) {
+        console.warn("[thymeleaf-reactive] missing HMR changes; reloading the page");
+        window.location.reload();
+        return;
+      }
+      for (const change of changes) await enqueueChange(change);
     } catch {
       // The EventSource channel remains the primary fast path; polling retries quietly.
+    } finally {
+      polling = false;
     }
   };
   void poll();

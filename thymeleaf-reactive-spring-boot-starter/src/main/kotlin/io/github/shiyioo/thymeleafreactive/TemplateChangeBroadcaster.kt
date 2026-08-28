@@ -37,6 +37,8 @@ class TemplateChangeBroadcaster(private val properties: ReactiveProperties) : Sm
     private val pending = mutableMapOf<String, ScheduledFuture<*>>()
     private val pendingLock = Any()
     private val templateStamps = ConcurrentHashMap<Path, Pair<Long, Long>>()
+    private val history = ArrayDeque<TemplateChange>()
+    private val historyLock = Any()
     @Volatile private var watcherReady = CountDownLatch(0)
     @Volatile private var watchedDirectory: Path? = null
     @Volatile private var pollTask: ScheduledFuture<*>? = null
@@ -86,14 +88,20 @@ class TemplateChangeBroadcaster(private val properties: ReactiveProperties) : Sm
 
     override fun isRunning(): Boolean = running
 
-    fun status(): Map<String, Any?> = mapOf(
-        "running" to running,
-        "directory" to watchedDirectory?.toString(),
-        "templatePath" to properties.templatePath,
-        "lastChange" to lastChange,
-        "version" to version.get(),
-        "listeners" to listeners.size
-    )
+    fun status(since: Long? = null): Map<String, Any?> {
+        val snapshot = synchronized(historyLock) { history.toList() }
+        val historyComplete = since == null || snapshot.isEmpty() || since >= snapshot.first().version - 1
+        return mapOf(
+            "running" to running,
+            "directory" to watchedDirectory?.toString(),
+            "templatePath" to properties.templatePath,
+            "lastChange" to lastChange,
+            "version" to version.get(),
+            "listeners" to listeners.size,
+            "historyComplete" to historyComplete,
+            "changes" to if (since == null) emptyList<TemplateChange>() else snapshot.filter { it.version > since }
+        )
+    }
 
     /** Schedules one normalized event; repeated saves of the same template collapse into one event. */
     internal fun notifyChange(relativePath: String, kind: String, source: Path? = null) {
@@ -106,6 +114,10 @@ class TemplateChangeBroadcaster(private val properties: ReactiveProperties) : Sm
             pending[normalized] = scheduler.schedule({
                 val change = TemplateChange(normalized, kind, componentFor(normalized, source), version = version.incrementAndGet())
                 lastChange = change
+                synchronized(historyLock) {
+                    history += change
+                    while (history.size > properties.hmrHistorySize.coerceAtLeast(1)) history.removeFirst()
+                }
                 listeners.forEach { it.accept(change) }
                 synchronized(pendingLock) { pending.remove(normalized) }
             }, delay, TimeUnit.MILLISECONDS)

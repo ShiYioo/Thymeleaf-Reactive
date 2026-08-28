@@ -52,6 +52,27 @@ class TemplateChangeBroadcasterTest {
     }
 
     @Test
+    fun `replays every retained change after a requested version`() {
+        val broadcaster = TemplateChangeBroadcaster(ReactiveProperties(debounceMillis = 0, hmrHistorySize = 2))
+        val latch = CountDownLatch(3)
+        val subscription = broadcaster.subscribe { latch.countDown() }
+        broadcaster.notifyChange("first.html", "ENTRY_MODIFY")
+        broadcaster.notifyChange("second.html", "ENTRY_MODIFY")
+        broadcaster.notifyChange("third.html", "ENTRY_MODIFY")
+
+        assertThat(latch.await(2, TimeUnit.SECONDS)).isTrue()
+        val status = broadcaster.status(1)
+        val changes = status["changes"] as List<TemplateChange>
+        assertThat(changes.map { it.path }).containsExactly("second.html", "third.html")
+        assertThat(status["historyComplete"]).isEqualTo(true)
+
+        val truncated = broadcaster.status(0)
+        assertThat(truncated["historyComplete"]).isEqualTo(false)
+        subscription.close()
+        broadcaster.stop()
+    }
+
+    @Test
     fun `discovers the declared component from a changed template`() {
         val source = createTempFile(suffix = ".html").apply {
             writeText("<main tr:component=\"counter\"><p>Counter</p></main>")

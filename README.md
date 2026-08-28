@@ -42,10 +42,12 @@ In development mode the starter injects `/__thymeleaf_reactive__/bootstrap.js` i
 ```properties
 thymeleaf.reactive.debounce-millis=150
 thymeleaf.reactive.poll-interval-millis=500
+thymeleaf.reactive.hmr-history-size=128
 thymeleaf.reactive.component-mappings.admin/dashboard.html=dashboard
 ```
 
 `component-mappings` accepts template paths relative to `thymeleaf.reactive.template-path`; without an explicit mapping, the HTML file name is used as the component name.
+The development status endpoint retains the latest `hmr-history-size` template changes, so the browser polling fallback can replay every missed update in order when an SSE connection is interrupted.
 
 Reactive lists can be rendered on the server with `tr:each`; repeated rows should use `tr:key` so HMR can preserve and move the corresponding DOM nodes:
 

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { reactive, effect, createApp, defineComponent, Fragment, h, hotUpdate, hydrate, refreshComponentsFromPage } from './dist/index.js';
+import { reactive, effect, connectComponentHmr, createApp, defineComponent, Fragment, h, hotUpdate, hydrate, refreshComponentsFromPage } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -11,6 +11,7 @@ function installDom() {
   globalThis.Node = window.Node;
   globalThis.Element = window.Element;
   globalThis.HTMLElement = window.HTMLElement;
+  globalThis.CustomEvent = window.CustomEvent;
   globalThis.DOMParser = window.DOMParser;
   globalThis.HTMLInputElement = window.HTMLInputElement;
   return window.document;
@@ -25,6 +26,33 @@ test('reactive state tracks and reruns dependent effects', () => {
   state.count++;
   assert.equal(runs, 2);
   assert.equal(value, 1);
+});
+
+test('HMR polling replays every missed version in order', async () => {
+  installDom();
+  globalThis.EventSource = undefined;
+  let phase = 0;
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => phase === 0
+      ? { version: 1, historyComplete: true, changes: [{ path: 'initial.html', kind: 'MODIFY', version: 1 }] }
+      : {
+          version: 3,
+          historyComplete: true,
+          changes: [
+            { path: 'profile.html', kind: 'MODIFY', version: 2 },
+            { path: 'counter.html', kind: 'MODIFY', version: 3 }
+          ]
+        }
+  });
+  const versions = [];
+  window.addEventListener('thymeleaf-reactive:template-change', event => versions.push(event.detail.version));
+  const close = connectComponentHmr('/events', '/status', 5);
+  await new Promise(resolve => setTimeout(resolve, 15));
+  phase = 1;
+  await new Promise(resolve => setTimeout(resolve, 35));
+  close();
+  assert.deepEqual(versions, [2, 3]);
 });
 
 test('reactive effects clean stale branches and track array length changes', () => {

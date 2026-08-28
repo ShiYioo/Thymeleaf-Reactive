@@ -10,5 +10,6 @@ data class ReactiveProperties(
     var runtimePath: String = "/__thymeleaf_reactive__/bootstrap.js",
     var debounceMillis: Long = 150,
     var pollIntervalMillis: Long = 500,
+    var hmrHistorySize: Int = 128,
     var componentMappings: Map<String, String> = emptyMap()
 )
