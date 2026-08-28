@@ -74,4 +74,22 @@ class ReactiveDialectTest {
         assertThat(output).contains("data-tr-style=\"styles\"")
         assertThat(output).contains("style=\"color: red; display: block\"")
     }
+
+    @Test
+    fun `renders each bindings on the server without leaving client templates behind`() {
+        val engine = TemplateEngine().apply {
+            setTemplateResolver(StringTemplateResolver())
+            addDialect(ReactiveDialect(ObjectMapper()))
+        }
+        val context = Context().apply {
+            setVariable("items", listOf(mapOf("id" to "a", "label" to "Alpha"), mapOf("id" to "b", "label" to "Beta")))
+        }
+        val output = engine.process(
+            """<ul><li tr:each="item, stat in items" tr:key="item.id"><span tr:text="item.label">stale</span></li></ul>""",
+            context
+        )
+        assertThat(output).contains("Alpha", "Beta")
+        assertThat(output).doesNotContain("stale", "tr:each", "data-tr-each")
+        assertThat(output).contains("data-tr-key=\"a\"", "data-tr-key=\"b\"")
+    }
 }

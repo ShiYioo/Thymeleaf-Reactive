@@ -46,6 +46,14 @@ thymeleaf.reactive.component-mappings.admin/dashboard.html=dashboard
 
 `component-mappings` accepts template paths relative to `thymeleaf.reactive.template-path`; without an explicit mapping, the HTML file name is used as the component name.
 
+Reactive lists can be rendered on the server with `tr:each`; repeated rows should use `tr:key` so HMR can preserve and move the corresponding DOM nodes:
+
+```html
+<li tr:each="item in items" tr:key="item.id">
+  <span tr:text="item.label">Item</span>
+</li>
+```
+
 ## License
 
 Apache-2.0

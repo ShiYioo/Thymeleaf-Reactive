@@ -14,7 +14,8 @@ import org.thymeleaf.standard.expression.StandardExpressions
 class ReactiveDialect(private val objectMapper: ObjectMapper) : AbstractProcessorDialect("Thymeleaf Reactive", "tr", 1000) {
     override fun getProcessors(dialectPrefix: String): Set<IProcessor> = setOf(
         ReactiveAttributeProcessor("component", "data-tr-component"),
-        ReactiveAttributeProcessor("key", "data-tr-key"),
+        ReactiveKeyProcessor(),
+        ReactiveEachProcessor(),
         ReactiveStateProcessor(objectMapper),
         ReactiveTextProcessor(),
         ReactiveAttributeProcessor("model", "data-tr-model"),
@@ -25,6 +26,43 @@ class ReactiveDialect(private val objectMapper: ObjectMapper) : AbstractProcesso
         ReactiveDynamicProcessor("class", "data-tr-class"),
         ReactiveDynamicProcessor("style", "data-tr-style")
     )
+}
+
+private class ReactiveEachProcessor : AbstractAttributeTagProcessor(
+    TemplateMode.HTML, "tr", null, false, "each", true, 900, true
+) {
+    private val syntax = Regex("^\\s*([A-Za-z_$][\\w$]*)(?:\\s*,\\s*([A-Za-z_$][\\w$]*))?\\s+in\\s+(.+?)\\s*$")
+
+    override fun doProcess(
+        context: ITemplateContext,
+        tag: IProcessableElementTag,
+        attributeName: AttributeName,
+        attributeValue: String,
+        structureHandler: IElementTagStructureHandler
+    ) {
+        val match = syntax.matchEntire(attributeValue) ?: return
+        val variable = match.groupValues[1]
+        val status = match.groupValues[2].ifBlank { null }
+        val collection = evaluate(context, match.groupValues[3]) ?: emptyList<Any>()
+        structureHandler.removeAttribute(attributeName)
+        structureHandler.iterateElement(variable, status, collection)
+    }
+}
+
+private class ReactiveKeyProcessor : AbstractAttributeTagProcessor(
+    TemplateMode.HTML, "tr", null, false, "key", true, 1000, true
+) {
+    override fun doProcess(
+        context: ITemplateContext,
+        tag: IProcessableElementTag,
+        attributeName: AttributeName,
+        attributeValue: String,
+        structureHandler: IElementTagStructureHandler
+    ) {
+        val shouldEvaluate = attributeValue.contains('.') || attributeValue.trim().startsWith("${'$'}{")
+        val key = if (shouldEvaluate) evaluate(context, attributeValue) ?: attributeValue else attributeValue
+        structureHandler.setAttribute("data-tr-key", key.toString())
+    }
 }
 
 private fun evaluate(context: ITemplateContext, expression: String): Any? {
