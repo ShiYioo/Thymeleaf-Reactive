@@ -65,6 +65,8 @@ For `tr:if` and `tr:show`, a false server value is emitted with the HTML `hidden
 
 Reactive binding expressions support safe member access plus common arithmetic, comparison, logical, and conditional operators. For example, `tr:text="count + 1"` and `tr:if="count > 0 && visible"` render consistently on the server and update in the browser.
 
+The browser runtime also exports `computed(() => ...)` for cached derived state when authoring render-function components.
+
 ## License
 
 Apache-2.0

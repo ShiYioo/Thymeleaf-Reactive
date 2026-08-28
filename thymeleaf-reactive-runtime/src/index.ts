@@ -2,6 +2,7 @@ import jsep from "jsep";
 
 type Primitive = string | number | boolean | null | undefined;
 export type Effect = (() => void) & { stop?: () => void };
+type EffectOptions = { lazy?: boolean; scheduler?: () => void };
 export type Component = (props: Record<string, unknown>, children: VNode[]) => VNode;
 export type RenderFunction = (state: any) => VNode;
 
@@ -9,7 +10,27 @@ const effectStack: Effect[] = [];
 const proxyCache = new WeakMap<object, object>();
 const reactiveProxies = new WeakSet<object>();
 const effectDeps = new WeakMap<Effect, Set<Set<Effect>>>();
+const effectSchedulers = new WeakMap<Effect, () => void>();
 const ITERATE_KEY = Symbol("iterate");
+
+function trackEffect(subscribers: Set<Effect>): void {
+  const active = effectStack.at(-1);
+  if (!active) return;
+  subscribers.add(active);
+  let tracked = effectDeps.get(active);
+  if (!tracked) effectDeps.set(active, tracked = new Set());
+  tracked.add(subscribers);
+}
+
+function triggerEffects(subscribers: Iterable<Effect>): void {
+  const active = effectStack.at(-1);
+  [...new Set(subscribers)].forEach(run => {
+    if (run === active) return;
+    const scheduler = effectSchedulers.get(run);
+    if (scheduler) scheduler();
+    else run();
+  });
+}
 
 export function reactive<T extends object>(value: T): T {
   if (reactiveProxies.has(value)) return value;
@@ -17,15 +38,9 @@ export function reactive<T extends object>(value: T): T {
   const deps = new Map<PropertyKey, Set<Effect>>();
   const proxy = new Proxy(value, {
     get(target, key, receiver) {
-      const active = effectStack.at(-1);
-      if (active) {
-        let subscribers = deps.get(key);
-        if (!subscribers) deps.set(key, subscribers = new Set());
-        subscribers.add(active);
-        let tracked = effectDeps.get(active);
-        if (!tracked) effectDeps.set(active, tracked = new Set());
-        tracked.add(subscribers);
-      }
+      let subscribers = deps.get(key);
+      if (!subscribers) deps.set(key, subscribers = new Set());
+      trackEffect(subscribers);
       const result = Reflect.get(target, key, receiver);
       return result && typeof result === 'object' ? reactive(result) : result;
     },
@@ -39,7 +54,7 @@ export function reactive<T extends object>(value: T): T {
           if (Number.isInteger(Number(key)) && Number(key) >= oldLength) deps.get("length")?.forEach(run => triggered.add(run));
         }
         deps.get(ITERATE_KEY)?.forEach(run => triggered.add(run));
-        [...triggered].forEach(run => run());
+        triggerEffects(triggered);
       }
       return ok;
     },
@@ -50,20 +65,14 @@ export function reactive<T extends object>(value: T): T {
         const triggered = new Set<Effect>(deps.get(key) ?? []);
         deps.get(ITERATE_KEY)?.forEach(run => triggered.add(run));
         if (Array.isArray(target)) deps.get("length")?.forEach(run => triggered.add(run));
-        [...triggered].forEach(run => run());
+        triggerEffects(triggered);
       }
       return ok;
     },
     ownKeys(target) {
-      const active = effectStack.at(-1);
-      if (active) {
-        let subscribers = deps.get(ITERATE_KEY);
-        if (!subscribers) deps.set(ITERATE_KEY, subscribers = new Set());
-        subscribers.add(active);
-        let tracked = effectDeps.get(active);
-        if (!tracked) effectDeps.set(active, tracked = new Set());
-        tracked.add(subscribers);
-      }
+      let subscribers = deps.get(ITERATE_KEY);
+      if (!subscribers) deps.set(ITERATE_KEY, subscribers = new Set());
+      trackEffect(subscribers);
       return Reflect.ownKeys(target);
     }
   });
@@ -72,7 +81,7 @@ export function reactive<T extends object>(value: T): T {
   return proxy as T;
 }
 
-export function effect(fn: Effect): Effect {
+export function effect(fn: Effect, options: EffectOptions = {}): Effect {
   let active = true;
   const run: Effect = () => {
     if (!active) return;
@@ -86,9 +95,39 @@ export function effect(fn: Effect): Effect {
     active = false;
     effectDeps.get(run)?.forEach(subscribers => subscribers.delete(run));
     effectDeps.delete(run);
+    effectSchedulers.delete(run);
   };
-  run();
+  if (options.scheduler) effectSchedulers.set(run, options.scheduler);
+  if (!options.lazy) run();
   return run;
+}
+
+export type ComputedRef<T> = { readonly value: T };
+
+/** Creates a lazily evaluated, cached value that invalidates when its dependencies change. */
+export function computed<T>(getter: () => T): ComputedRef<T> {
+  let dirty = true;
+  let cached: T;
+  const subscribers = new Set<Effect>();
+  const runner = effect(() => { cached = getter(); }, {
+    lazy: true,
+    scheduler: () => {
+      if (!dirty) {
+        dirty = true;
+        triggerEffects(subscribers);
+      }
+    }
+  });
+  return {
+    get value(): T {
+      trackEffect(subscribers);
+      if (dirty) {
+        dirty = false;
+        runner();
+      }
+      return cached!;
+    }
+  };
 }
 
 export const Text = Symbol("text");

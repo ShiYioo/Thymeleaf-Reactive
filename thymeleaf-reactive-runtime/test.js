@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { reactive, effect, connectComponentHmr, createApp, defineComponent, Fragment, h, hotUpdate, hydrate, refreshComponentsFromPage } from './dist/index.js';
+import { reactive, effect, computed, connectComponentHmr, createApp, defineComponent, Fragment, h, hotUpdate, hydrate, refreshComponentsFromPage } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -28,6 +28,27 @@ test('reactive state tracks and reruns dependent effects', () => {
   state.count++;
   assert.equal(runs, 2);
   assert.equal(value, 1);
+});
+
+test('computed values cache work and propagate invalidation to effects', () => {
+  const state = reactive({ count: 1 });
+  let evaluations = 0;
+  const doubled = computed(() => { evaluations++; return state.count * 2; });
+  assert.equal(evaluations, 0);
+  assert.equal(doubled.value, 2);
+  assert.equal(doubled.value, 2);
+  assert.equal(evaluations, 1);
+  let observed = 0;
+  const runner = effect(() => { observed = doubled.value; });
+  assert.equal(observed, 2);
+  state.count = 2;
+  assert.equal(observed, 4);
+  assert.equal(evaluations, 2);
+  runner.stop();
+  state.count = 3;
+  assert.equal(evaluations, 2);
+  assert.equal(doubled.value, 6);
+  assert.equal(evaluations, 3);
 });
 
 test('HMR polling replays every missed version in order', async () => {
