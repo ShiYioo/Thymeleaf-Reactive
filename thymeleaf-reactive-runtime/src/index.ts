@@ -179,10 +179,14 @@ function sfcEventHandler(expression: string, scope: Record<string, unknown>): ((
     const method = readPath(scope, call[1]);
     return typeof method === "function" ? () => method.call(scope) : undefined;
   }
-  const callWithValue = normalized.match(/^([A-Za-z_$][\w$]*)\s*\(\s*(['"])(.*?)\2\s*\)$/);
+  const callWithValue = normalized.match(/^([A-Za-z_$][\w$]*)\s*\(\s*(.+?)\s*\)$/);
   if (callWithValue) {
     const method = readPath(scope, callWithValue[1]);
-    return typeof method === "function" ? () => method.call(scope, callWithValue[3]) : undefined;
+    if (typeof method !== "function") return undefined;
+    return event => {
+      const argument = callWithValue[2] === "$event" ? event : readPath(scope, callWithValue[2]);
+      method.call(scope, argument);
+    };
   }
   const method = readPath(scope, normalized);
   return typeof method === "function" ? event => method.call(scope, event) : undefined;

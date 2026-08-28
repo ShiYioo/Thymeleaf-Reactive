@@ -435,6 +435,24 @@ test('SFC v-model handles checkbox and radio values and event arguments', () => 
   assert.equal(state.result, 'done');
 });
 
+test('SFC event handlers accept literal and $event arguments', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const render = compileSfcComponent('<template><div><button @click="setValue(7)">literal</button><button @click="setEvent($event)">event</button></div></template>');
+  const state = createApp(render, {
+    value: 0,
+    event: null,
+    setValue(value) { this.value = value; },
+    setEvent(value) { this.event = value; }
+  }).mount(root);
+  const [literal, eventButton] = root.querySelectorAll('button');
+  literal.dispatchEvent(new Event('click', { bubbles: true }));
+  const event = new Event('click', { bubbles: true });
+  eventButton.dispatchEvent(event);
+  assert.equal(state.value, 7);
+  assert.equal(state.event, event);
+});
+
 test('SFC resolves registered child components into the VDOM tree', () => {
   const document = installDom();
   const root = document.createElement('main');
