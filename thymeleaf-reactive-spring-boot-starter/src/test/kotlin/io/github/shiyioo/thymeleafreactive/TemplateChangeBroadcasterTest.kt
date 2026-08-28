@@ -84,6 +84,26 @@ class TemplateChangeBroadcasterTest {
     }
 
     @Test
+    fun `publishes a browser module url for vue source changes`() {
+        val source = createTempFile(prefix = "Counter", suffix = ".vue").apply {
+            writeText("<template><p>Counter</p></template>")
+        }
+        val broadcaster = TemplateChangeBroadcaster(ReactiveProperties(debounceMillis = 0))
+        val changes = CopyOnWriteArrayList<TemplateChange>()
+        val latch = CountDownLatch(1)
+        val subscription = broadcaster.subscribe { change -> changes += change; latch.countDown() }
+
+        broadcaster.notifyChange("components/Counter.vue", "ENTRY_MODIFY", source)
+
+        assertThat(latch.await(2, TimeUnit.SECONDS)).isTrue()
+        assertThat(changes.single().component).isEqualTo("Counter")
+        assertThat(changes.single().moduleUrl).isEqualTo("/__thymeleaf_reactive__/component?path=components%2FCounter.vue")
+        subscription.close()
+        broadcaster.stop()
+        source.toFile().delete()
+    }
+
+    @Test
     fun `watches a real template directory and broadcasts filesystem changes`() {
         val directory = createTempDirectory("thymeleaf-reactive-watch")
         val broadcaster = TemplateChangeBroadcaster(
