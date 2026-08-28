@@ -191,9 +191,14 @@ function sfcEventHandler(expression: string, scope: Record<string, unknown>): ((
 function resolveSfcComponent(tagName: string, scope: Record<string, unknown>): Component | undefined {
   const name = tagName.toLowerCase();
   if (["html", "head", "body", "div", "span", "p", "section", "main", "header", "footer", "nav", "ul", "ol", "li", "button", "input", "textarea", "select", "option", "form", "label", "a", "img", "table", "thead", "tbody", "tr", "th", "td", "strong", "em", "code", "small", "h1", "h2", "h3", "h4", "h5", "h6"].includes(name)) return undefined;
-  const pascal = tagName.replace(/(^|-)([a-z])/g, (_match, _dash, letter) => letter.toUpperCase());
+  const pascal = name.replace(/(^|-)([a-z])/g, (_match, _dash, letter) => letter.toUpperCase());
   const registry = scope.components;
-  const candidate = (registry && typeof registry === "object" ? (registry as Record<string, unknown>)[tagName] ?? (registry as Record<string, unknown>)[pascal] : undefined)
+  const registryCandidate = registry && typeof registry === "object"
+    ? (registry as Record<string, unknown>)[tagName]
+      ?? (registry as Record<string, unknown>)[pascal]
+      ?? Object.entries(registry as Record<string, unknown>).find(([key]) => key.toLowerCase() === name)?.[1]
+    : undefined;
+  const candidate = registryCandidate
     ?? scope[tagName]
     ?? scope[pascal];
   return typeof candidate === "function" ? candidate as Component : undefined;
