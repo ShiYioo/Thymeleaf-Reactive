@@ -230,6 +230,16 @@ function normalizeVNode(value: VNode | Primitive): VNode {
 
 const eventListeners = new WeakMap<Element, Map<string, EventListener>>();
 const componentNames = new WeakMap<Component, string>();
+const componentSources = new Map<string, string>();
+
+function normalizeComponentSource(source: string): string {
+  try {
+    const url = new URL(source, typeof window === "undefined" ? "http://localhost" : window.location.origin);
+    return url.searchParams.get("path") ?? url.pathname;
+  } catch {
+    return source.split("?")[0];
+  }
+}
 
 function setProp(el: Element, key: string, value: unknown, previous?: unknown): void {
   if (key === "key") return;
@@ -471,6 +481,11 @@ export function defineComponent(name: string, render: Component): Component {
   return component;
 }
 
+/** Associates a resource path with the component name used by the server-rendered root. */
+export function registerComponentSource(source: string, name: string): void {
+  componentSources.set(normalizeComponentSource(source), name);
+}
+
 /** Adopts a server-rendered component root so future SFC HMR updates patch it in place. */
 export function adoptComponentRoot(root: Element, component: Component, props: Record<string, unknown> = {}): void {
   const name = componentNames.get(component);
@@ -554,7 +569,11 @@ export function connectComponentHmr(
       const module = await import(moduleUrl.href);
       const render = module.default ?? module.render;
       if (typeof render !== "function") throw new Error("HMR module has no render export");
-      hotUpdate(update.component, render);
+      const source = moduleUrl.searchParams.get("path");
+      const target = source ? componentSources.get(normalizeComponentSource(source)) : undefined;
+      if (!hotUpdate(target ?? update.component, render)) {
+        console.warn(`[thymeleaf-reactive] no mounted component named ${target ?? update.component}`);
+      }
     }
     if (typeof update.version === "number") seenVersion = update.version;
   };

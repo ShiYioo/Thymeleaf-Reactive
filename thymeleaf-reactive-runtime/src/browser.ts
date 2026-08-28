@@ -1,4 +1,4 @@
-import { adoptComponentRoot, connectComponentHmr, defineComponent, hydrate } from "./index.js";
+import { adoptComponentRoot, connectComponentHmr, defineComponent, hydrate, registerComponentSource } from "./index.js";
 
 declare global {
   interface Window {
@@ -31,6 +31,7 @@ async function adoptSfcComponent(
   const module = await import(moduleUrl.href);
   const render = module.default ?? module.render;
   if (typeof render !== "function") throw new Error(`SFC ${source} has no component render export`);
+  registerComponentSource(source, name);
   adoptComponentRoot(root, defineComponent(name, render), Object.assign(Object.create(null), state, handlers));
 }
 
