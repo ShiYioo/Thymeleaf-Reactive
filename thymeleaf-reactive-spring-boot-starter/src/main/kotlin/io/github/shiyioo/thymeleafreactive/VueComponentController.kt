@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
+import org.springframework.core.io.ClassPathResource
 import tools.jackson.databind.ObjectMapper
 import java.nio.file.Files
 import java.nio.file.Path
@@ -33,8 +34,14 @@ class VueComponentController(
         if (!properties.developmentMode || !requestedPath.endsWith(".vue", ignoreCase = true)) return null
         val relative = Path.of(requestedPath).normalize()
         if (relative.isAbsolute || relative.startsWith("..")) return null
-        val root = runCatching { Path.of(properties.templatePath.removePrefix("file:")).toAbsolutePath().normalize() }.getOrNull()
-            ?: return null
+        val root = if (properties.templatePath.startsWith("classpath:")) {
+            runCatching {
+                ClassPathResource(properties.templatePath.removePrefix("classpath:")).file.toPath()
+                    .toAbsolutePath().normalize()
+            }.getOrNull()
+        } else {
+            runCatching { Path.of(properties.templatePath.removePrefix("file:")).toAbsolutePath().normalize() }.getOrNull()
+        } ?: return null
         val candidate = root.resolve(relative).normalize()
         return candidate.takeIf { it.startsWith(root) && Files.isRegularFile(it) }
     }
