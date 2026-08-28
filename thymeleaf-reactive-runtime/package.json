@@ -11,6 +11,7 @@
   },
   "devDependencies": {
     "happy-dom": "^20.11.8",
+    "jsep": "^1.4.0",
     "typescript": "^7.0.2"
   }
 }

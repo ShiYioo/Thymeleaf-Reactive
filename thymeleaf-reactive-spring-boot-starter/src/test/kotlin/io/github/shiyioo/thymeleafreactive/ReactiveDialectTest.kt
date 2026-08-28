@@ -79,6 +79,20 @@ class ReactiveDialectTest {
     }
 
     @Test
+    fun `renders common reactive expressions on the first paint`() {
+        val engine = TemplateEngine().apply {
+            setTemplateResolver(StringTemplateResolver())
+            addDialect(ReactiveDialect(ObjectMapper()))
+        }
+        val context = Context().apply { setVariable("count", 2) }
+        val output = engine.process(
+            """<section><strong tr:text="count + 1">stale</strong><p tr:if="count > 0">Visible</p><a tr:attr="title:count > 1 ? 'many' : 'one'">Link</a></section>""",
+            context
+        )
+        assertThat(output).contains(">3</strong>", "Visible", "title=\"many\"")
+    }
+
+    @Test
     fun `renders each bindings on the server while retaining client hydration metadata`() {
         val engine = TemplateEngine().apply {
             setTemplateResolver(StringTemplateResolver())

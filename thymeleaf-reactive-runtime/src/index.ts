@@ -1,3 +1,5 @@
+import jsep from "jsep";
+
 type Primitive = string | number | boolean | null | undefined;
 export type Effect = (() => void) & { stop?: () => void };
 export type Component = (props: Record<string, unknown>, children: VNode[]) => VNode;
@@ -712,8 +714,92 @@ export async function refreshComponentsFromPage(component: string): Promise<void
   reorderComponentRoots(next, liveRoots);
 }
 
+const expressionCache = new Map<string, any>();
+const unsafePropertyNames = new Set(["__proto__", "constructor", "prototype"]);
+
+function normalizedExpression(expression: string): string {
+  const trimmed = expression.trim();
+  return trimmed.startsWith("${") && trimmed.endsWith("}") ? trimmed.slice(2, -1).trim() : trimmed;
+}
+
+function readMember(source: any, property: any): any {
+  if (source == null || unsafePropertyNames.has(String(property))) return undefined;
+  return source[property];
+}
+
+function evaluateAst(node: any, scope: any): any {
+  switch (node?.type) {
+    case "Literal": return node.value;
+    case "Identifier": return node.name === "undefined" ? undefined : readMember(scope, node.name);
+    case "ThisExpression": return undefined;
+    case "MemberExpression": {
+      const target = evaluateAst(node.object, scope);
+      const property = node.computed ? evaluateAst(node.property, scope) : node.property.name;
+      return readMember(target, property);
+    }
+    case "ArrayExpression": return node.elements.map((element: any) => evaluateAst(element, scope));
+    case "ObjectExpression": {
+      const result: Record<string, any> = {};
+      node.properties.forEach((property: any) => {
+        const key = property.computed ? evaluateAst(property.key, scope) : property.key.name ?? property.key.value;
+        if (!unsafePropertyNames.has(String(key))) result[String(key)] = evaluateAst(property.value, scope);
+      });
+      return result;
+    }
+    case "UnaryExpression": {
+      const value = evaluateAst(node.argument, scope);
+      if (node.operator === "!") return !value;
+      if (node.operator === "+") return +value;
+      if (node.operator === "-") return -value;
+      if (node.operator === "~") return ~value;
+      return undefined;
+    }
+    case "ConditionalExpression": return evaluateAst(node.test, scope)
+      ? evaluateAst(node.consequent, scope)
+      : evaluateAst(node.alternate, scope);
+    case "BinaryExpression": {
+      const left = evaluateAst(node.left, scope);
+      if (node.operator === "&&") return left && evaluateAst(node.right, scope);
+      if (node.operator === "||") return left || evaluateAst(node.right, scope);
+      if (node.operator === "??") return left ?? evaluateAst(node.right, scope);
+      const right = evaluateAst(node.right, scope);
+      switch (node.operator) {
+        case "==": return left == right; // Expressions intentionally mirror JavaScript template semantics.
+        case "!=": return left != right;
+        case "===": return left === right;
+        case "!==": return left !== right;
+        case "+": return left + right;
+        case "-": return left - right;
+        case "*": return left * right;
+        case "/": return left / right;
+        case "%": return left % right;
+        case "**": return left ** right;
+        case "<": return left < right;
+        case "<=": return left <= right;
+        case ">": return left > right;
+        case ">=": return left >= right;
+        case "|": return left | right;
+        case "&": return left & right;
+        case "^": return left ^ right;
+        default: return undefined;
+      }
+    }
+    case "Compound": return node.body.reduce((value: any, entry: any) => evaluateAst(entry, scope), undefined);
+    default: return undefined;
+  }
+}
+
 function readPath(source: any, expression: string): any {
-  return expression.trim().split(".").filter(Boolean).reduce((value, key) => value?.[key], source);
+  const normalized = normalizedExpression(expression);
+  if (!normalized) return undefined;
+  try {
+    const ast = expressionCache.get(normalized) ?? jsep(normalized);
+    expressionCache.set(normalized, ast);
+    return evaluateAst(ast, source);
+  } catch (error) {
+    console.warn(`[thymeleaf-reactive] invalid expression: ${expression}`, error);
+    return undefined;
+  }
 }
 
 function writePath(source: any, expression: string, value: any): void {
@@ -726,11 +812,14 @@ function writePath(source: any, expression: string, value: any): void {
 
 function readDynamicObject(source: any, expression: string): any {
   const trimmed = expression.trim();
+  if (trimmed.startsWith("{")) return readPath(source, trimmed);
   const match = trimmed.match(/^([^:]+):(.+)$/);
   if (!match) return readPath(source, trimmed);
   const result: Record<string, any> = {};
   trimmed.split(",").forEach(binding => {
-    const [name, path] = binding.split(":", 2);
+    const separator = binding.indexOf(":");
+    const name = separator >= 0 ? binding.slice(0, separator) : "";
+    const path = separator >= 0 ? binding.slice(separator + 1) : "";
     if (name && path) result[name.trim()] = readPath(source, path);
   });
   return result;

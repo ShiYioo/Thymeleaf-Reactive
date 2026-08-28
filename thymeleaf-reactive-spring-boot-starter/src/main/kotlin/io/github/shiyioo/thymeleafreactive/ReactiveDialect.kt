@@ -1,6 +1,7 @@
 package io.github.shiyioo.thymeleafreactive
 
 import tools.jackson.databind.ObjectMapper
+import ognl.Ognl
 import org.thymeleaf.dialect.AbstractProcessorDialect
 import org.thymeleaf.processor.IProcessor
 import org.thymeleaf.templatemode.TemplateMode
@@ -70,6 +71,12 @@ private class ReactiveKeyProcessor : AbstractAttributeTagProcessor(
 private fun evaluate(context: ITemplateContext, expression: String): Any? {
     val normalized = expression.trim()
     if (!normalized.startsWith("${'$'}{")) {
+        val simplePath = Regex("^[A-Za-z_${'$'}][\\w${'$'}]*(?:\\.[A-Za-z_${'$'}][\\w${'$'}]*)*$")
+        if (!simplePath.matches(normalized)) {
+            return runCatching {
+                Ognl.getValue(Ognl.parseExpression(normalized), context.variableNames.associateWith { context.getVariable(it) })
+            }.getOrNull()
+        }
         val keys = normalized.split('.').filter(String::isNotBlank)
         fun descend(root: Any?): Any? = keys.drop(1).fold(root) { current, key ->
             when (current) {

@@ -418,6 +418,28 @@ test('hydrates dynamic attributes, classes, and styles reactively', () => {
   assert.equal(link.style.display, '');
 });
 
+test('evaluates safe arithmetic logical and conditional template expressions', () => {
+  const document = installDom();
+  const root = document.createElement('section');
+  root.innerHTML = [
+    '<strong data-tr-text="count + 1"></strong>',
+    '<p data-tr-if="count > 0 && visible">Visible count</p>',
+    '<a data-tr-attr="title:count > 1 ? \'many\' : \'one\'">Link</a>',
+    '<div data-tr-class="count > 0 && visible ? \'active\' : \'muted\'"></div>'
+  ].join('');
+  const state = hydrate(root, { count: 1, visible: true });
+  assert.equal(root.querySelector('strong').textContent, '2');
+  assert.equal(root.querySelector('p').textContent, 'Visible count');
+  assert.equal(root.querySelector('a').getAttribute('title'), 'one');
+  assert.equal(root.querySelector('div').className, 'active');
+  state.count = 2;
+  state.visible = false;
+  assert.equal(root.querySelector('strong').textContent, '3');
+  assert.equal(root.querySelector('p'), null);
+  assert.equal(root.querySelector('a').getAttribute('title'), 'many');
+  assert.equal(root.querySelector('div').className, 'muted');
+});
+
 test('hydrates conditional blocks by mounting and unmounting their DOM nodes', () => {
   const document = installDom();
   const root = document.createElement('section');
