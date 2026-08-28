@@ -25,4 +25,9 @@ class ReactiveAutoConfiguration
     @Bean
     @ConditionalOnMissingBean
     fun runtimeController(): RuntimeController = RuntimeController()
+
+    @Bean
+    @ConditionalOnMissingBean
+    fun reactiveRuntimeInjectionFilter(properties: ReactiveProperties): ReactiveRuntimeInjectionFilter =
+        ReactiveRuntimeInjectionFilter(properties)
 }

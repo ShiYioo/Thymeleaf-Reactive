@@ -7,5 +7,5 @@ data class ReactiveProperties(
     var enabled: Boolean = true,
     var developmentMode: Boolean = true,
     var templatePath: String = "classpath:/templates",
-    var runtimePath: String = "/thymeleaf-reactive/runtime.js"
+    var runtimePath: String = "/__thymeleaf_reactive__/bootstrap.js"
 )
