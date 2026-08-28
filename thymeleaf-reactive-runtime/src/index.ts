@@ -104,6 +104,13 @@ export function effect(fn: Effect, options: EffectOptions = {}): Effect {
 
 export type ComputedRef<T> = { readonly value: T };
 
+export type Ref<T> = { value: T };
+
+/** Creates a reactive scalar container for component state. */
+export function ref<T>(value: T): Ref<T> {
+  return reactive({ value });
+}
+
 /** Creates a lazily evaluated, cached value that invalidates when its dependencies change. */
 export function computed<T>(getter: () => T): ComputedRef<T> {
   let dirty = true;

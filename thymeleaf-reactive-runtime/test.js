@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { reactive, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineComponent, Fragment, h, hotUpdate, hydrate, refreshComponentsFromPage } from './dist/index.js';
+import { reactive, ref, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineComponent, Fragment, h, hotUpdate, hydrate, refreshComponentsFromPage } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -49,6 +49,15 @@ test('computed values cache work and propagate invalidation to effects', () => {
   assert.equal(evaluations, 2);
   assert.equal(doubled.value, 6);
   assert.equal(evaluations, 3);
+});
+
+test('ref values participate in dependency tracking', () => {
+  const count = ref(0);
+  let observed = -1;
+  effect(() => { observed = count.value; });
+  assert.equal(observed, 0);
+  count.value = 2;
+  assert.equal(observed, 2);
 });
 
 test('HMR polling replays every missed version in order', async () => {
