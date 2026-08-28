@@ -44,3 +44,12 @@ test('compiles dynamic attribute, class, and style bindings', () => {
     'data-tr-style': 'styles'
   });
 });
+
+test('compiles keyed each bindings into runtime metadata', () => {
+  const result = compileElementAttributes({ 'th:each': 'item in items', 'th:key': 'item.id' });
+  assert.deepEqual(result.bindings, [{ kind: 'each', expression: 'item in items' }]);
+  assert.deepEqual(result.runtimeAttrs, {
+    'data-tr-each': 'item in items',
+    'data-tr-key': 'item.id'
+  });
+});

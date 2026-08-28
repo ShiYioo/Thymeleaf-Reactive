@@ -446,6 +446,27 @@ function readDynamicObject(source: any, expression: string): any {
   return result;
 }
 
+type EachRecord = { element: HTMLElement; scope: any; key: string | number };
+
+function parseEach(expression: string): { item: string; index?: string; collection: string } | null {
+  const match = expression.trim().match(/^([A-Za-z_$][\w$]*)(?:\s*,\s*([A-Za-z_$][\w$]*))?\s+in\s+(.+)$/);
+  return match ? { item: match[1], index: match[2], collection: match[3] } : null;
+}
+
+function eachKey(element: Element, scope: any, index: number): string | number {
+  const expression = (element as HTMLElement).dataset.trKey;
+  const value = expression ? readPath(scope, expression) : index;
+  return typeof value === "string" || typeof value === "number" ? value : index;
+}
+
+function cloneEachTemplate(template: HTMLElement): HTMLElement {
+  const holder = document.createElement("template");
+  holder.innerHTML = template.outerHTML;
+  const clone = holder.content.firstElementChild as HTMLElement;
+  clone.removeAttribute("data-tr-each");
+  return clone;
+}
+
 /** Hydrates server-rendered Thymeleaf metadata into reactive DOM bindings. */
 export function hydrate(root: Element, state: object, handlers: Record<string, (...args: any[]) => any> = {}): object {
   const reactiveState = reactive(state);
@@ -454,6 +475,45 @@ export function hydrate(root: Element, state: object, handlers: Record<string, (
     ...(root.matches(selector) ? [root as T] : []),
     ...Array.from(root.querySelectorAll<T>(selector))
   ];
+  bindings<HTMLElement>("[data-tr-each]").forEach(template => {
+    if (bindingAlreadyHydrated(template, "each")) return;
+    const parsed = parseEach(template.dataset.trEach!);
+    const parent = template.parentNode;
+    if (!parsed || !parent) return;
+    const anchor = document.createComment("tr-each");
+    parent.insertBefore(anchor, template);
+    parent.removeChild(template);
+    const records = new Map<string | number, EachRecord>();
+    effect(() => {
+      const collection = readPath(reactiveState, parsed.collection);
+      const values = Array.isArray(collection) ? collection : collection && typeof collection === "object" ? Object.values(collection) : [];
+      const nextKeys = new Set<string | number>();
+      const nextRecords: EachRecord[] = [];
+      values.forEach((item, index) => {
+        const candidateScope = reactive({ [parsed.item]: item, ...(parsed.index ? { [parsed.index]: index } : {}) });
+        const candidateKey = eachKey(template, candidateScope, index);
+        const previous = records.get(candidateKey);
+        const scope = previous?.scope ?? candidateScope;
+        scope[parsed.item] = item;
+        if (parsed.index) scope[parsed.index] = index;
+        const key = eachKey(template, scope, index);
+        const record = previous ?? { element: cloneEachTemplate(template), scope, key };
+        if (!previous) hydrate(record.element, scope, handlers);
+        nextKeys.add(key);
+        nextRecords.push(record);
+      });
+      records.forEach((record, key) => {
+        if (!nextKeys.has(key) && record.element.parentNode === parent) parent.removeChild(record.element);
+      });
+      let cursor: Node = anchor;
+      nextRecords.forEach(record => {
+        parent.insertBefore(record.element, cursor.nextSibling);
+        cursor = record.element;
+      });
+      records.clear();
+      nextRecords.forEach(record => records.set(record.key, record));
+    });
+  });
   bindings<HTMLElement>("[data-tr-text]").forEach(element => {
     if (bindingAlreadyHydrated(element, "text")) return;
     const expression = element.dataset.trText!;

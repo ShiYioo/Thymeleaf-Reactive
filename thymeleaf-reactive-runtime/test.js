@@ -211,3 +211,21 @@ test('hydrates conditional blocks by mounting and unmounting their DOM nodes', (
   state.visible = false;
   assert.equal(root.querySelector('p'), null);
 });
+
+test('hydrates keyed each bindings with scoped reactive rows', () => {
+  const document = installDom();
+  const root = document.createElement('ul');
+  root.innerHTML = '<li data-tr-each="item in items" data-tr-key="item.id" data-tr-text="item.label"></li>';
+  const state = hydrate(root, { items: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] });
+  let rows = root.querySelectorAll('li');
+  const firstA = rows[0];
+  const firstB = rows[1];
+  assert.deepEqual([...rows].map(row => row.textContent), ['A', 'B']);
+  state.items = [{ id: 'b', label: 'B2' }, { id: 'a', label: 'A' }, { id: 'c', label: 'C' }];
+  rows = root.querySelectorAll('li');
+  assert.deepEqual([...rows].map(row => row.textContent), ['B2', 'A', 'C']);
+  assert.equal(rows[0], firstB);
+  assert.equal(rows[1], firstA);
+  state.items.pop();
+  assert.deepEqual([...root.querySelectorAll('li')].map(row => row.textContent), ['B2', 'A']);
+});

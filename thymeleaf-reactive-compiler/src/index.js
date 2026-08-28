@@ -24,6 +24,9 @@ export function compileElementAttributes(attributes) {
     } else if (name === 'th:style') {
       output.bindings.push({ kind: 'style', expression: value });
       output.runtimeAttrs['data-tr-style'] = value;
+    } else if (name === 'th:each') {
+      output.bindings.push({ kind: 'each', expression: value });
+      output.runtimeAttrs['data-tr-each'] = value;
     } else output.attrs[name] = value;
   }
   return output;
