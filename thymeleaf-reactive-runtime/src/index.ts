@@ -224,6 +224,7 @@ function renderSfcChildren(nodes: Node[], scope: Record<string, unknown>, slots:
       const element = node as Element;
       const condition = element.getAttribute("v-if");
       const alternate = element.hasAttribute("v-else");
+      const alternateIf = element.getAttribute("v-else-if");
       if (alternate) {
         if (previousIf) {
           previousIf = false;
@@ -234,6 +235,16 @@ function renderSfcChildren(nodes: Node[], scope: Record<string, unknown>, slots:
         const rendered = renderSfcNode(clone, scope, slots);
         if (rendered) output.push(...(Array.isArray(rendered) ? rendered : [rendered]));
         previousIf = true;
+        return;
+      }
+      if (alternateIf) {
+        if (previousIf) return;
+        previousIf = Boolean(readPath(scope, alternateIf));
+        if (!previousIf) return;
+        const clone = element.cloneNode(true) as Element;
+        clone.removeAttribute("v-else-if");
+        const rendered = renderSfcNode(clone, scope, slots);
+        if (rendered) output.push(...(Array.isArray(rendered) ? rendered : [rendered]));
         return;
       }
       if (condition) {
@@ -274,13 +285,13 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
   }
   const condition = element.getAttribute("v-if");
   if (condition && !readPath(scope, condition)) return { type: Comment, props: {}, children: [], el: null, text: "v-if" };
-  if (element.hasAttribute("v-else")) return undefined;
+  if (element.hasAttribute("v-else") || element.hasAttribute("v-else-if")) return undefined;
   const show = element.getAttribute("v-show");
 
   const props: Record<string, unknown> = {};
   Array.from(element.attributes).forEach(attribute => {
     const { name, value } = attribute;
-    if (name === "v-if" || name === "v-else" || name === "v-show" || name === "v-text") return;
+    if (name === "v-if" || name === "v-else" || name === "v-else-if" || name === "v-show" || name === "v-text") return;
     if (name === "v-bind") {
       const bound = readPath(scope, value);
       if (bound && typeof bound === "object") Object.assign(props, bound);

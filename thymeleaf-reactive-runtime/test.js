@@ -462,6 +462,18 @@ test('SFC event handlers accept literal and $event arguments', () => {
   assert.equal(state.event, event);
 });
 
+test('SFC evaluates v-else-if chains in sibling order', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const render = compileSfcComponent('<template><div><p v-if="mode === 1">one</p><p v-else-if="mode === 2">two</p><p v-else>other</p></div></template>');
+  const state = createApp(render, { mode: 1 }).mount(root);
+  assert.equal(root.querySelector('p').textContent, 'one');
+  state.mode = 2;
+  assert.equal(root.querySelector('p').textContent, 'two');
+  state.mode = 3;
+  assert.equal(root.querySelector('p').textContent, 'other');
+});
+
 test('SFC resolves registered child components into the VDOM tree', () => {
   const document = installDom();
   const root = document.createElement('main');
