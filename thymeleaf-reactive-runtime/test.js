@@ -401,6 +401,28 @@ test('hydrates keyed each bindings with scoped reactive rows', () => {
   assert.deepEqual([...root.querySelectorAll('li')].map(row => row.textContent), ['B2', 'A']);
 });
 
+test('hydrates server-rendered each rows without duplicating them', () => {
+  const document = installDom();
+  const root = document.createElement('ul');
+  root.innerHTML = [
+    '<li data-tr-each="item in items" data-tr-key="a" data-tr-key-expression="item.id" data-tr-text="item.label">A</li>',
+    '<li data-tr-each="item in items" data-tr-key="b" data-tr-key-expression="item.id" data-tr-text="item.label">B</li>'
+  ].join('');
+  const initialRows = root.querySelectorAll('li');
+  const firstA = initialRows[0];
+  const firstB = initialRows[1];
+  const state = hydrate(root, { items: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] });
+  let rows = root.querySelectorAll('li');
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0], firstA);
+  assert.equal(rows[1], firstB);
+  state.items = [{ id: 'b', label: 'B2' }, { id: 'a', label: 'A' }, { id: 'c', label: 'C' }];
+  rows = root.querySelectorAll('li');
+  assert.deepEqual([...rows].map(row => row.textContent), ['B2', 'A', 'C']);
+  assert.equal(rows[0], firstB);
+  assert.equal(rows[1], firstA);
+});
+
 test('browser bootstrap preserves existing handlers and hydrates encoded server state', async () => {
   const document = installDom();
   document.body.innerHTML = '<main data-tr-component="counter" data-tr-state="{&quot;count&quot;:2}"><p data-tr-text="count">stale</p></main>';

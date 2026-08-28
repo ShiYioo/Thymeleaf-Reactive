@@ -44,6 +44,7 @@ private class ReactiveEachProcessor : AbstractAttributeTagProcessor(
         val variable = match.groupValues[1]
         val status = match.groupValues[2].ifBlank { null }
         val collection = evaluate(context, match.groupValues[3]) ?: emptyList<Any>()
+        structureHandler.setAttribute("data-tr-each", attributeValue)
         structureHandler.removeAttribute(attributeName)
         structureHandler.iterateElement(variable, status, collection)
     }
@@ -62,6 +63,7 @@ private class ReactiveKeyProcessor : AbstractAttributeTagProcessor(
         val shouldEvaluate = attributeValue.contains('.') || attributeValue.trim().startsWith("${'$'}{")
         val key = if (shouldEvaluate) evaluate(context, attributeValue) ?: attributeValue else attributeValue
         structureHandler.setAttribute("data-tr-key", key.toString())
+        structureHandler.setAttribute("data-tr-key-expression", attributeValue)
     }
 }
 

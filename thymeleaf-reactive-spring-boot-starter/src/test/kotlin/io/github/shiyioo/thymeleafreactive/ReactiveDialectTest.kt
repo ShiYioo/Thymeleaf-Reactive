@@ -76,7 +76,7 @@ class ReactiveDialectTest {
     }
 
     @Test
-    fun `renders each bindings on the server without leaving client templates behind`() {
+    fun `renders each bindings on the server while retaining client hydration metadata`() {
         val engine = TemplateEngine().apply {
             setTemplateResolver(StringTemplateResolver())
             addDialect(ReactiveDialect(ObjectMapper()))
@@ -89,7 +89,9 @@ class ReactiveDialectTest {
             context
         )
         assertThat(output).contains("Alpha", "Beta")
-        assertThat(output).doesNotContain("stale", "tr:each", "data-tr-each")
+        assertThat(output).doesNotContain("stale", "tr:each")
+        assertThat(output).contains("data-tr-each=\"item, stat in items\"")
+        assertThat(output).contains("data-tr-key-expression=\"item.id\"")
         assertThat(output).contains("data-tr-key=\"a\"", "data-tr-key=\"b\"")
     }
 }

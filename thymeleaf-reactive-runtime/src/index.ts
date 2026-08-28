@@ -513,6 +513,7 @@ function disposeHydration(root: Element): void {
 }
 
 function belongsToNestedHydration(element: Element, root: Element): boolean {
+  if (element === root) return false;
   let ancestor = element.parentElement;
   while (ancestor && ancestor !== root) {
     if (hydrationContexts.has(ancestor)) return true;
@@ -737,7 +738,7 @@ function parseEach(expression: string): { item: string; index?: string; collecti
 }
 
 function eachKey(element: Element, scope: any, index: number): string | number {
-  const expression = (element as HTMLElement).dataset.trKey;
+  const expression = (element as HTMLElement).dataset.trKeyExpression ?? (element as HTMLElement).dataset.trKey;
   const value = expression ? readPath(scope, expression) : index;
   return typeof value === "string" || typeof value === "number" ? value : index;
 }
@@ -766,12 +767,20 @@ export function hydrate(root: Element, state: object, handlers: Record<string, (
     !belongsToNestedHydration(element, root)
   );
   bindings<HTMLElement>("[data-tr-each]").forEach(template => {
+    if (!template.parentNode || !template.dataset.trEach) return;
     const parsed = parseEach(template.dataset.trEach!);
     const parent = template.parentNode;
     if (!parsed || !parent) return;
+    const serverRows: HTMLElement[] = [template];
+    let sibling = template.nextElementSibling as HTMLElement | null;
+    while (sibling?.dataset.trEach === template.dataset.trEach) {
+      serverRows.push(sibling);
+      sibling = sibling.nextElementSibling as HTMLElement | null;
+    }
+    const blueprint = template.cloneNode(true) as HTMLElement;
+    serverRows.forEach(row => row.removeAttribute("data-tr-each"));
     const anchor = document.createComment("tr-each");
     parent.insertBefore(anchor, template);
-    parent.removeChild(template);
     const records = new Map<string | number, EachRecord>();
     const runner = effect(() => {
       const collection = readPath(reactiveState, parsed.collection);
@@ -779,14 +788,17 @@ export function hydrate(root: Element, state: object, handlers: Record<string, (
       const nextKeys = new Set<string | number>();
       const nextRecords: EachRecord[] = [];
       values.forEach((item, index) => {
-        const candidateScope = reactive({ [parsed.item]: item, ...(parsed.index ? { [parsed.index]: index } : {}) });
-        const candidateKey = eachKey(template, candidateScope, index);
+        const candidateScope = { [parsed.item]: item, ...(parsed.index ? { [parsed.index]: index } : {}) };
+        const candidateKey = eachKey(blueprint, candidateScope, index);
         const previous = records.get(candidateKey);
-        const scope = previous?.scope ?? candidateScope;
-        scope[parsed.item] = item;
-        if (parsed.index) scope[parsed.index] = index;
-        const key = eachKey(template, scope, index);
-        const record = previous ?? { element: cloneEachTemplate(template), scope, key };
+        const scope = previous?.scope ?? reactive(candidateScope);
+        if (previous) {
+          scope[parsed.item] = item;
+          if (parsed.index) scope[parsed.index] = index;
+        }
+        const key = eachKey(blueprint, scope, index);
+        const record = previous ?? { element: serverRows[index] ?? cloneEachTemplate(blueprint), scope, key };
+        record.element.dataset.trKey = String(key);
         if (!previous) hydrate(record.element, scope, handlers);
         nextKeys.add(key);
         nextRecords.push(record);
@@ -805,6 +817,7 @@ export function hydrate(root: Element, state: object, handlers: Record<string, (
     cleanup(() => {
       runner.stop?.();
       records.forEach(record => disposeHydration(record.element));
+      serverRows.forEach(row => row.remove());
       anchor.remove();
     });
   });

@@ -57,6 +57,8 @@ Reactive lists can be rendered on the server with `tr:each`; repeated rows shoul
 </li>
 ```
 
+The first response keeps the server-rendered rows. During browser hydration, those rows are adopted as the initial keyed list rather than rendered a second time, then continue to update when the component state changes.
+
 ## License
 
 Apache-2.0
