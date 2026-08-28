@@ -432,16 +432,27 @@ function vnodeFromDom(node: Node): VNode {
 }
 
 type FormState = { value?: string; checked?: boolean; start?: number | null; end?: number | null };
-type HydrationContext = { state: object; handlers: Record<string, (...args: any[]) => any> };
+type HydrationContext = {
+  state: object;
+  handlers: Record<string, (...args: any[]) => any>;
+  cleanups: Set<() => void>;
+};
 const hydrationContexts = new WeakMap<Element, HydrationContext>();
-const hydratedBindings = new WeakMap<Element, Set<string>>();
 
-function bindingAlreadyHydrated(element: Element, kind: string): boolean {
-  const bindings = hydratedBindings.get(element) ?? new Set<string>();
-  if (bindings.has(kind)) return true;
-  bindings.add(kind);
-  hydratedBindings.set(element, bindings);
-  return false;
+function disposeHydration(root: Element): void {
+  const context = hydrationContexts.get(root);
+  if (!context) return;
+  [...context.cleanups].reverse().forEach(cleanup => cleanup());
+  hydrationContexts.delete(root);
+}
+
+function belongsToNestedHydration(element: Element, root: Element): boolean {
+  let ancestor = element.parentElement;
+  while (ancestor && ancestor !== root) {
+    if (hydrationContexts.has(ancestor)) return true;
+    ancestor = ancestor.parentElement;
+  }
+  return hydrationContexts.has(element) && element !== root;
 }
 
 function fieldIdentity(field: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement, index: number): string {
@@ -544,14 +555,20 @@ function cloneEachTemplate(template: HTMLElement): HTMLElement {
 
 /** Hydrates server-rendered Thymeleaf metadata into reactive DOM bindings. */
 export function hydrate(root: Element, state: object, handlers: Record<string, (...args: any[]) => any> = {}): object {
+  disposeHydration(root);
   const reactiveState = reactive(state);
-  hydrationContexts.set(root, { state: reactiveState, handlers });
+  const context: HydrationContext = { state: reactiveState, handlers, cleanups: new Set() };
+  hydrationContexts.set(root, context);
+  const cleanup = (dispose: () => void): void => { context.cleanups.add(dispose); };
+  const componentRoot = root.matches("[data-tr-component]") ? root : undefined;
   const bindings = <T extends HTMLElement>(selector: string): T[] => [
     ...(root.matches(selector) ? [root as T] : []),
     ...Array.from(root.querySelectorAll<T>(selector))
-  ];
+  ].filter(element =>
+    (!componentRoot || element === componentRoot || element.closest("[data-tr-component]") === componentRoot) &&
+    !belongsToNestedHydration(element, root)
+  );
   bindings<HTMLElement>("[data-tr-each]").forEach(template => {
-    if (bindingAlreadyHydrated(template, "each")) return;
     const parsed = parseEach(template.dataset.trEach!);
     const parent = template.parentNode;
     if (!parsed || !parent) return;
@@ -559,7 +576,7 @@ export function hydrate(root: Element, state: object, handlers: Record<string, (
     parent.insertBefore(anchor, template);
     parent.removeChild(template);
     const records = new Map<string | number, EachRecord>();
-    effect(() => {
+    const runner = effect(() => {
       const collection = readPath(reactiveState, parsed.collection);
       const values = Array.isArray(collection) ? collection : collection && typeof collection === "object" ? Object.values(collection) : [];
       const nextKeys = new Set<string | number>();
@@ -588,21 +605,25 @@ export function hydrate(root: Element, state: object, handlers: Record<string, (
       records.clear();
       nextRecords.forEach(record => records.set(record.key, record));
     });
+    cleanup(() => {
+      runner.stop?.();
+      records.forEach(record => disposeHydration(record.element));
+      anchor.remove();
+    });
   });
   bindings<HTMLElement>("[data-tr-text]").forEach(element => {
-    if (bindingAlreadyHydrated(element, "text")) return;
     const expression = element.dataset.trText!;
-    effect(() => { element.textContent = String(readPath(reactiveState, expression) ?? ""); });
+    const runner = effect(() => { element.textContent = String(readPath(reactiveState, expression) ?? ""); });
+    cleanup(() => runner.stop?.());
   });
   bindings<HTMLElement>("[data-tr-show]").forEach(element => {
-    if (bindingAlreadyHydrated(element, "show")) return;
     const expression = element.dataset.trShow!;
-    effect(() => { element.hidden = !Boolean(readPath(reactiveState, expression)); });
+    const runner = effect(() => { element.hidden = !Boolean(readPath(reactiveState, expression)); });
+    cleanup(() => runner.stop?.());
   });
   bindings<HTMLElement>("[data-tr-attr]").forEach(element => {
-    if (bindingAlreadyHydrated(element, "attr")) return;
     const expression = element.dataset.trAttr!;
-    effect(() => {
+    const runner = effect(() => {
       const values = readDynamicObject(reactiveState, expression);
       if (!values || typeof values !== "object") return;
       Object.entries(values).forEach(([name, value]) => {
@@ -610,54 +631,65 @@ export function hydrate(root: Element, state: object, handlers: Record<string, (
         else element.setAttribute(name, value === true ? "" : String(value));
       });
     });
+    cleanup(() => runner.stop?.());
   });
   bindings<HTMLElement>("[data-tr-class]").forEach(element => {
-    if (bindingAlreadyHydrated(element, "class")) return;
     const expression = element.dataset.trClass!;
-    effect(() => {
+    const runner = effect(() => {
       const value = readPath(reactiveState, expression);
       element.className = value && typeof value === "object"
         ? Object.entries(value).filter(([, enabled]) => Boolean(enabled)).map(([name]) => name).join(" ")
         : String(value ?? "");
     });
+    cleanup(() => runner.stop?.());
   });
   bindings<HTMLElement>("[data-tr-style]").forEach(element => {
-    if (bindingAlreadyHydrated(element, "style")) return;
     const expression = element.dataset.trStyle!;
-    effect(() => {
+    const runner = effect(() => {
       const value = readPath(reactiveState, expression);
       const style = element.style;
       if (!value || typeof value !== "object") { element.removeAttribute("style"); return; }
       Array.from(style).forEach(name => style.removeProperty(name));
       Object.entries(value).forEach(([name, next]) => { if (next != null) style.setProperty(name, String(next)); });
     });
+    cleanup(() => runner.stop?.());
   });
   bindings<HTMLElement>("[data-tr-if]").forEach(element => {
-    if (bindingAlreadyHydrated(element, "if")) return;
     const expression = element.dataset.trIf!;
     const parent = element.parentNode;
     if (!parent) return;
     const anchor = document.createComment("tr-if");
     parent.insertBefore(anchor, element);
-    effect(() => {
+    const runner = effect(() => {
       if (readPath(reactiveState, expression)) {
         if (element.parentNode !== parent) parent.insertBefore(element, anchor.nextSibling);
       } else if (element.parentNode === parent) {
         parent.removeChild(element);
       }
     });
+    cleanup(() => {
+      runner.stop?.();
+      anchor.remove();
+    });
   });
   bindings<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("[data-tr-model]").forEach(element => {
-    if (bindingAlreadyHydrated(element, "model")) return;
     const expression = element.dataset.trModel!;
-    effect(() => { if (element.value !== String(readPath(reactiveState, expression) ?? "")) element.value = String(readPath(reactiveState, expression) ?? ""); });
-    element.addEventListener("input", () => writePath(reactiveState, expression, element.value));
+    const runner = effect(() => { if (element.value !== String(readPath(reactiveState, expression) ?? "")) element.value = String(readPath(reactiveState, expression) ?? ""); });
+    const listener = () => writePath(reactiveState, expression, element.value);
+    element.addEventListener("input", listener);
+    cleanup(() => {
+      runner.stop?.();
+      element.removeEventListener("input", listener);
+    });
   });
   bindings<HTMLElement>("[data-tr-on]").forEach(element => {
-    if (bindingAlreadyHydrated(element, "on")) return;
     const [event, name] = (element.dataset.trOn ?? "").split(":", 2);
     const handler = handlers[name];
-    if (event && handler) element.addEventListener(event, handler.bind(null, reactiveState));
+    if (event && handler) {
+      const listener = handler.bind(null, reactiveState);
+      element.addEventListener(event, listener);
+      cleanup(() => element.removeEventListener(event, listener));
+    }
   });
   return reactiveState;
 }

@@ -120,6 +120,38 @@ test('component HMR hydrates reactive bindings introduced by a changed template'
   assert.equal(document.querySelector('strong').textContent, 'Grace');
 });
 
+test('component HMR disposes bindings replaced by a template change', async () => {
+  const document = installDom();
+  document.body.innerHTML = '<section data-tr-component="profile"><strong data-tr-text="count">1</strong></section>';
+  const state = hydrate(document.querySelector('section'), { count: 1, message: 'Ada' });
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    text: async () => '<html><body><section data-tr-component="profile"><strong data-tr-text="message">stale</strong></section></body></html>'
+  });
+  await refreshComponentsFromPage('profile');
+  assert.equal(document.querySelector('strong').textContent, 'Ada');
+  state.count = 2;
+  assert.equal(document.querySelector('strong').textContent, 'Ada');
+  state.message = 'Grace';
+  assert.equal(document.querySelector('strong').textContent, 'Grace');
+});
+
+test('component hydration does not bind descendants owned by nested components', () => {
+  const document = installDom();
+  document.body.innerHTML = '<section data-tr-component="outer"><p data-tr-text="label"></p><section data-tr-component="inner"><p data-tr-text="label"></p></section></section>';
+  const outerRoot = document.querySelector('[data-tr-component="outer"]');
+  const innerRoot = document.querySelector('[data-tr-component="inner"]');
+  const outer = hydrate(outerRoot, { label: 'Outer' });
+  const inner = hydrate(innerRoot, { label: 'Inner' });
+  const labels = document.querySelectorAll('p');
+  assert.deepEqual([...labels].map(label => label.textContent), ['Outer', 'Inner']);
+  outer.label = 'Outer updated';
+  assert.deepEqual([...labels].map(label => label.textContent), ['Outer updated', 'Inner']);
+  inner.label = 'Inner updated';
+  assert.deepEqual([...labels].map(label => label.textContent), ['Outer updated', 'Inner updated']);
+});
+
 test('component HMR patches server conditional comment anchors', async () => {
   const document = installDom();
   document.body.innerHTML = '<section data-tr-component="counter"><!--tr-if--><p data-tr-if="visible">Before</p></section>';
