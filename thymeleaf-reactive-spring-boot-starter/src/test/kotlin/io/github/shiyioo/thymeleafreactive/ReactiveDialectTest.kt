@@ -50,4 +50,28 @@ class ReactiveDialectTest {
         assertThat(shownOutput).contains("data-tr-if=\"visible\"")
         assertThat(shownOutput).contains("Shown")
     }
+
+    @Test
+    fun `renders dynamic attributes classes and styles on first paint`() {
+        val engine = TemplateEngine().apply {
+            setTemplateResolver(StringTemplateResolver())
+            addDialect(ReactiveDialect(ObjectMapper()))
+        }
+        val context = Context().apply {
+            setVariable("user", mapOf("name" to "Ada"))
+            setVariable("classes", mapOf("active" to true, "muted" to false))
+            setVariable("styles", mapOf("color" to "red", "display" to "block"))
+        }
+        val output = engine.process(
+            """<a tr:attr="title:user.name,aria-label:user.name" tr:class="classes" tr:style="styles">Link</a>""",
+            context
+        )
+        assertThat(output).contains("data-tr-attr=\"title:user.name,aria-label:user.name\"")
+        assertThat(output).contains("title=\"Ada\"")
+        assertThat(output).contains("aria-label=\"Ada\"")
+        assertThat(output).contains("data-tr-class=\"classes\"")
+        assertThat(output).contains("class=\"active\"")
+        assertThat(output).contains("data-tr-style=\"styles\"")
+        assertThat(output).contains("style=\"color: red; display: block\"")
+    }
 }

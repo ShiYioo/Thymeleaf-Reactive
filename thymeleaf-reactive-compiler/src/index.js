@@ -15,6 +15,15 @@ export function compileElementAttributes(attributes) {
       const [event, handler] = String(value).split(':', 2);
       output.bindings.push({ kind: 'event', event, handler });
       output.runtimeAttrs['data-tr-on'] = `${event}:${handler}`;
+    } else if (name === 'th:attr') {
+      output.bindings.push({ kind: 'attr', expression: value });
+      output.runtimeAttrs['data-tr-attr'] = value;
+    } else if (name === 'th:class') {
+      output.bindings.push({ kind: 'class', expression: value });
+      output.runtimeAttrs['data-tr-class'] = value;
+    } else if (name === 'th:style') {
+      output.bindings.push({ kind: 'style', expression: value });
+      output.runtimeAttrs['data-tr-style'] = value;
     } else output.attrs[name] = value;
   }
   return output;

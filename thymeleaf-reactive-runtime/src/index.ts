@@ -359,7 +359,15 @@ function vnodeFromDom(node: Node): VNode {
 type FormState = { value?: string; checked?: boolean; start?: number | null; end?: number | null };
 type HydrationContext = { state: object; handlers: Record<string, (...args: any[]) => any> };
 const hydrationContexts = new WeakMap<Element, HydrationContext>();
-const hydratedBindings = new WeakSet<Element>();
+const hydratedBindings = new WeakMap<Element, Set<string>>();
+
+function bindingAlreadyHydrated(element: Element, kind: string): boolean {
+  const bindings = hydratedBindings.get(element) ?? new Set<string>();
+  if (bindings.has(kind)) return true;
+  bindings.add(kind);
+  hydratedBindings.set(element, bindings);
+  return false;
+}
 
 function fieldIdentity(field: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement, index: number): string {
   return (field.dataset.trModel ?? field.getAttribute("data-tr-key") ?? field.id ?? field.name) || `field-${index}`;
@@ -426,6 +434,18 @@ function writePath(source: any, expression: string, value: any): void {
   if (target && typeof target === "object") target[last] = value;
 }
 
+function readDynamicObject(source: any, expression: string): any {
+  const trimmed = expression.trim();
+  const match = trimmed.match(/^([^:]+):(.+)$/);
+  if (!match) return readPath(source, trimmed);
+  const result: Record<string, any> = {};
+  trimmed.split(",").forEach(binding => {
+    const [name, path] = binding.split(":", 2);
+    if (name && path) result[name.trim()] = readPath(source, path);
+  });
+  return result;
+}
+
 /** Hydrates server-rendered Thymeleaf metadata into reactive DOM bindings. */
 export function hydrate(root: Element, state: object, handlers: Record<string, (...args: any[]) => any> = {}): object {
   const reactiveState = reactive(state);
@@ -435,20 +455,50 @@ export function hydrate(root: Element, state: object, handlers: Record<string, (
     ...Array.from(root.querySelectorAll<T>(selector))
   ];
   bindings<HTMLElement>("[data-tr-text]").forEach(element => {
-    if (hydratedBindings.has(element)) return;
-    hydratedBindings.add(element);
+    if (bindingAlreadyHydrated(element, "text")) return;
     const expression = element.dataset.trText!;
     effect(() => { element.textContent = String(readPath(reactiveState, expression) ?? ""); });
   });
   bindings<HTMLElement>("[data-tr-show]").forEach(element => {
-    if (hydratedBindings.has(element)) return;
-    hydratedBindings.add(element);
+    if (bindingAlreadyHydrated(element, "show")) return;
     const expression = element.dataset.trShow!;
     effect(() => { element.hidden = !Boolean(readPath(reactiveState, expression)); });
   });
+  bindings<HTMLElement>("[data-tr-attr]").forEach(element => {
+    if (bindingAlreadyHydrated(element, "attr")) return;
+    const expression = element.dataset.trAttr!;
+    effect(() => {
+      const values = readDynamicObject(reactiveState, expression);
+      if (!values || typeof values !== "object") return;
+      Object.entries(values).forEach(([name, value]) => {
+        if (value == null || value === false) element.removeAttribute(name);
+        else element.setAttribute(name, value === true ? "" : String(value));
+      });
+    });
+  });
+  bindings<HTMLElement>("[data-tr-class]").forEach(element => {
+    if (bindingAlreadyHydrated(element, "class")) return;
+    const expression = element.dataset.trClass!;
+    effect(() => {
+      const value = readPath(reactiveState, expression);
+      element.className = value && typeof value === "object"
+        ? Object.entries(value).filter(([, enabled]) => Boolean(enabled)).map(([name]) => name).join(" ")
+        : String(value ?? "");
+    });
+  });
+  bindings<HTMLElement>("[data-tr-style]").forEach(element => {
+    if (bindingAlreadyHydrated(element, "style")) return;
+    const expression = element.dataset.trStyle!;
+    effect(() => {
+      const value = readPath(reactiveState, expression);
+      const style = element.style;
+      if (!value || typeof value !== "object") { element.removeAttribute("style"); return; }
+      Array.from(style).forEach(name => style.removeProperty(name));
+      Object.entries(value).forEach(([name, next]) => { if (next != null) style.setProperty(name, String(next)); });
+    });
+  });
   bindings<HTMLElement>("[data-tr-if]").forEach(element => {
-    if (hydratedBindings.has(element)) return;
-    hydratedBindings.add(element);
+    if (bindingAlreadyHydrated(element, "if")) return;
     const expression = element.dataset.trIf!;
     const parent = element.parentNode;
     if (!parent) return;
@@ -463,15 +513,13 @@ export function hydrate(root: Element, state: object, handlers: Record<string, (
     });
   });
   bindings<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("[data-tr-model]").forEach(element => {
-    if (hydratedBindings.has(element)) return;
-    hydratedBindings.add(element);
+    if (bindingAlreadyHydrated(element, "model")) return;
     const expression = element.dataset.trModel!;
     effect(() => { if (element.value !== String(readPath(reactiveState, expression) ?? "")) element.value = String(readPath(reactiveState, expression) ?? ""); });
     element.addEventListener("input", () => writePath(reactiveState, expression, element.value));
   });
   bindings<HTMLElement>("[data-tr-on]").forEach(element => {
-    if (hydratedBindings.has(element)) return;
-    hydratedBindings.add(element);
+    if (bindingAlreadyHydrated(element, "on")) return;
     const [event, name] = (element.dataset.trOn ?? "").split(":", 2);
     const handler = handlers[name];
     if (event && handler) element.addEventListener(event, handler.bind(null, reactiveState));

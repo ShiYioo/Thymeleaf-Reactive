@@ -20,7 +20,10 @@ class ReactiveDialect(private val objectMapper: ObjectMapper) : AbstractProcesso
         ReactiveAttributeProcessor("model", "data-tr-model"),
         ReactiveIfProcessor(),
         ReactiveAttributeProcessor("show", "data-tr-show"),
-        ReactiveAttributeProcessor("on", "data-tr-on")
+        ReactiveAttributeProcessor("on", "data-tr-on"),
+        ReactiveDynamicProcessor("attr", "data-tr-attr"),
+        ReactiveDynamicProcessor("class", "data-tr-class"),
+        ReactiveDynamicProcessor("style", "data-tr-style")
     )
 }
 
@@ -134,5 +137,45 @@ private class ReactiveAttributeProcessor(
         structureHandler: IElementTagStructureHandler
     ) {
         structureHandler.setAttribute(outputName, attributeValue)
+    }
+}
+
+private class ReactiveDynamicProcessor(
+    attributeName: String,
+    private val outputName: String
+) : AbstractAttributeTagProcessor(
+    TemplateMode.HTML, "tr", null, false, attributeName, true, 1000, true
+) {
+    override fun doProcess(
+        context: ITemplateContext,
+        tag: IProcessableElementTag,
+        attributeName: AttributeName,
+        attributeValue: String,
+        structureHandler: IElementTagStructureHandler
+    ) {
+        structureHandler.setAttribute(outputName, attributeValue)
+        when (outputName) {
+            "data-tr-attr" -> attributeValue.split(",").forEach { binding ->
+                val parts = binding.split(":", limit = 2)
+                if (parts.size == 2) {
+                    val name = parts[0].trim()
+                    val value = evaluate(context, parts[1])
+                    if (value == null || value == false) structureHandler.removeAttribute(name)
+                    else structureHandler.setAttribute(name, value.toString())
+                }
+            }
+            "data-tr-class" -> {
+                val value = evaluate(context, attributeValue)
+                if (value is Map<*, *>) {
+                    structureHandler.setAttribute("class", value.entries.filter { it.value == true }.joinToString(" ") { it.key.toString() })
+                } else if (value != null) structureHandler.setAttribute("class", value.toString())
+            }
+            "data-tr-style" -> {
+                val value = evaluate(context, attributeValue)
+                if (value is Map<*, *>) {
+                    structureHandler.setAttribute("style", value.entries.joinToString("; ") { "${it.key}: ${it.value}" })
+                } else if (value != null) structureHandler.setAttribute("style", value.toString())
+            }
+        }
     }
 }

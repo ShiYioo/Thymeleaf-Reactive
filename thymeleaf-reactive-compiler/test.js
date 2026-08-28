@@ -26,3 +26,21 @@ test('compiles reactive Thymeleaf attributes into metadata', () => {
     'data-tr-model': 'user.name'
   });
 });
+
+test('compiles dynamic attribute, class, and style bindings', () => {
+  const result = compileElementAttributes({
+    'th:attr': 'title:user.name',
+    'th:class': 'classes',
+    'th:style': 'styles'
+  });
+  assert.deepEqual(result.bindings, [
+    { kind: 'attr', expression: 'title:user.name' },
+    { kind: 'class', expression: 'classes' },
+    { kind: 'style', expression: 'styles' }
+  ]);
+  assert.deepEqual(result.runtimeAttrs, {
+    'data-tr-attr': 'title:user.name',
+    'data-tr-class': 'classes',
+    'data-tr-style': 'styles'
+  });
+});

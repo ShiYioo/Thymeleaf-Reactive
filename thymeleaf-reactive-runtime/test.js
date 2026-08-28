@@ -177,6 +177,29 @@ test('hydrates Thymeleaf bindings and synchronizes model values', () => {
   assert.equal(state.user.name, 'Lin');
 });
 
+test('hydrates dynamic attributes, classes, and styles reactively', () => {
+  const document = installDom();
+  const root = document.createElement('section');
+  root.innerHTML = '<a data-tr-attr="title:user.name,aria-label:user.name" data-tr-class="classes" data-tr-style="styles">Link</a>';
+  const state = hydrate(root, {
+    user: { name: 'Ada' },
+    classes: { active: true, muted: false },
+    styles: { color: 'red', display: 'block' }
+  });
+  const link = root.querySelector('a');
+  assert.equal(link.getAttribute('title'), 'Ada');
+  assert.equal(link.getAttribute('aria-label'), 'Ada');
+  assert.equal(link.className, 'active');
+  assert.equal(link.style.color, 'red');
+  state.user.name = 'Grace';
+  state.classes = { active: false, muted: true };
+  state.styles = { color: 'blue' };
+  assert.equal(link.getAttribute('title'), 'Grace');
+  assert.equal(link.className, 'muted');
+  assert.equal(link.style.color, 'blue');
+  assert.equal(link.style.display, '');
+});
+
 test('hydrates conditional blocks by mounting and unmounting their DOM nodes', () => {
   const document = installDom();
   const root = document.createElement('section');
