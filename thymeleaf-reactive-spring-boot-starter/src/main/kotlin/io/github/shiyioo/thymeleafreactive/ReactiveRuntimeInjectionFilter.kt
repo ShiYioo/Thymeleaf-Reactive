@@ -11,7 +11,7 @@ import java.nio.charset.Charset
 class ReactiveRuntimeInjectionFilter(
     private val properties: ReactiveProperties
 ) : OncePerRequestFilter() {
-    private val script = "<script type=\"module\" src=\"${properties.runtimePath}\"></script>"
+    private fun script(): String = "<script type=\"module\" src=\"${properties.runtimePath}?t=${System.currentTimeMillis()}\"></script>"
 
     override fun doFilterInternal(
         request: HttpServletRequest,
@@ -22,6 +22,9 @@ class ReactiveRuntimeInjectionFilter(
             filterChain.doFilter(request, response)
             return
         }
+        if (request.requestURI.startsWith("/thymeleaf-reactive/") || request.requestURI.startsWith("/__thymeleaf_reactive__/")) {
+            response.setHeader("Cache-Control", "no-store")
+        }
         val wrapper = ContentCachingResponseWrapper(response)
         try {
             filterChain.doFilter(request, wrapper)
@@ -31,10 +34,10 @@ class ReactiveRuntimeInjectionFilter(
                 val charset = runCatching { Charset.forName(wrapper.characterEncoding ?: "UTF-8") }
                     .getOrDefault(Charsets.UTF_8)
                 val html = body.toString(charset)
-                if (!html.contains("src=\"${properties.runtimePath}\"")) {
+                if (!html.contains(properties.runtimePath)) {
                     val index = html.lastIndexOf("</body>", ignoreCase = true)
                     if (index >= 0) {
-                        val injected = html.substring(0, index) + script + html.substring(index)
+                        val injected = html.substring(0, index) + script() + html.substring(index)
                         wrapper.resetBuffer()
                         wrapper.writer.write(injected)
                     }

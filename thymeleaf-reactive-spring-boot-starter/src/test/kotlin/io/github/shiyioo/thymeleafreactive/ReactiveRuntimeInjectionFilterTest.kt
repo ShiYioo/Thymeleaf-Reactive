@@ -22,7 +22,7 @@ class ReactiveRuntimeInjectionFilterTest {
         filter.doFilter(request, response, filterChain)
 
         val body = response.contentAsString
-        assertThat(body).contains("<script type=\"module\" src=\"/__thymeleaf_reactive__/bootstrap.js\"></script></body>")
+        assertThat(body).contains("<script type=\"module\" src=\"/__thymeleaf_reactive__/bootstrap.js?t=")
         assertThat(body.indexOf("<script")).isLessThan(body.indexOf("</body>"))
     }
 
@@ -38,7 +38,7 @@ class ReactiveRuntimeInjectionFilterTest {
         val htmlRequest = MockHttpServletRequest("GET", "/")
         val htmlResponse = MockHttpServletResponse()
         htmlResponse.contentType = "text/html"
-        val existing = "<html><body><script type=\"module\" src=\"/__thymeleaf_reactive__/bootstrap.js\"></script></body></html>"
+        val existing = "<html><body><script type=\"module\" src=\"/__thymeleaf_reactive__/bootstrap.js?t=1\"></script></body></html>"
         filter.doFilter(htmlRequest, htmlResponse, chain { it.writer.write(existing) })
         assertThat(htmlResponse.contentAsString).isEqualTo(existing)
     }
