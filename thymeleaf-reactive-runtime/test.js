@@ -113,6 +113,21 @@ test('post-flush watches batch updates behind nextTick', async () => {
   assert.deepEqual(values, [2]);
 });
 
+test('pre and post watchers observe the correct render boundary', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const events = [];
+  const state = reactive({ count: 0 });
+  watch(() => state.count, () => events.push(`pre:${root.textContent}`), { flush: 'pre' });
+  watch(() => state.count, () => events.push(`post:${root.textContent}`), { flush: 'post' });
+  createApp(() => h('span', {}, state.count), state).mount(root);
+  state.count = 1;
+  state.count = 2;
+  assert.deepEqual(events, []);
+  await nextTick();
+  assert.deepEqual(events, ['pre:0', 'post:2']);
+});
+
 test('nextTick accepts a callback after queued jobs flush', async () => {
   const state = reactive({ count: 0 });
   const values = [];

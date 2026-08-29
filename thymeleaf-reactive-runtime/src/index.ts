@@ -41,7 +41,9 @@ const reactiveProxies = new WeakSet<object>();
 const effectDeps = new WeakMap<Effect, Set<Set<Effect>>>();
 const effectSchedulers = new WeakMap<Effect, () => void>();
 const ITERATE_KEY = Symbol("iterate");
+const queuedPreJobs = new Set<() => void>();
 const queuedJobs = new Map<() => void, number>();
+const queuedPostJobs = new Set<() => void>();
 const refValues = new WeakSet<object>();
 let pendingFlush: Promise<void> | undefined;
 let activeEffectScope: EffectScope | undefined;
@@ -82,25 +84,47 @@ export function onScopeDispose(cleanup: () => void): void {
 
 function queueJob(job: () => void, order = Number.POSITIVE_INFINITY): void {
   if (!queuedJobs.has(job) || order < queuedJobs.get(job)!) queuedJobs.set(job, order);
+  queueFlush();
+}
+
+function queuePreJob(job: () => void): void {
+  queuedPreJobs.add(job);
+  queueFlush();
+}
+
+function queuePostJob(job: () => void): void {
+  queuedPostJobs.add(job);
+  queueFlush();
+}
+
+function queueFlush(): void {
   if (pendingFlush) return;
   pendingFlush = Promise.resolve().then(flushJobs);
 }
 
 function flushJobs(): void {
   try {
-    while (queuedJobs.size) {
+    while (queuedPreJobs.size || queuedJobs.size || queuedPostJobs.size) {
+      const preJobs = [...queuedPreJobs];
+      queuedPreJobs.clear();
+      preJobs.forEach(runScheduledJob);
       const jobs = [...queuedJobs.entries()]
         .sort((left, right) => left[1] - right[1])
         .map(([job]) => job);
       queuedJobs.clear();
-      jobs.forEach(job => {
-        try { job(); }
-        catch (error) { console.error("[thymeleaf-reactive] scheduler job failed", error); }
-      });
+      jobs.forEach(runScheduledJob);
+      const postJobs = [...queuedPostJobs];
+      queuedPostJobs.clear();
+      postJobs.forEach(runScheduledJob);
     }
   } finally {
     pendingFlush = undefined;
   }
+}
+
+function runScheduledJob(job: () => void): void {
+  try { job(); }
+  catch (error) { console.error("[thymeleaf-reactive] scheduler job failed", error); }
 }
 
 export function nextTick(): Promise<void>;
@@ -304,7 +328,7 @@ export function proxyRefs<T extends object>(value: T): T {
 }
 
 export type WatchSource<T> = (() => T) | Ref<T> | T;
-export type WatchOptions = { immediate?: boolean; deep?: boolean; flush?: "sync" | "post" };
+export type WatchOptions = { immediate?: boolean; deep?: boolean; flush?: "sync" | "pre" | "post" };
 
 function traverse(value: unknown, seen = new Set<object>()): unknown {
   if (!value || typeof value !== "object" || seen.has(value)) return value;
@@ -331,7 +355,7 @@ export function watch<T>(
   const runGetter = effect(() => {
     value = getter();
     if (options.deep || (!isRef(source) && typeof source === "object")) traverse(value);
-  }, { lazy: true, scheduler: options.flush === "post" ? () => queueJob(job) : job });
+  }, { lazy: true, scheduler: options.flush === "pre" ? () => queuePreJob(job) : options.flush === "post" ? () => queuePostJob(job) : job });
   function job(): void {
     runGetter();
     if (forceTrigger || options.deep || !Object.is(value, previous)) {
