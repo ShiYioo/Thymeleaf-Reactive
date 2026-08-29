@@ -1419,6 +1419,17 @@ test('hydrates tr:on handlers with event arguments and modifiers', () => {
   assert.equal(event.defaultPrevented, true);
 });
 
+test('hydrates tr:html content reactively', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  root.innerHTML = '<section data-tr-html="content">stale</section>';
+  const state = hydrate(root, { content: '<strong>Ready</strong>' });
+  const section = root.querySelector('section');
+  assert.equal(section.innerHTML, '<strong>Ready</strong>');
+  state.content = '<em>Updated</em>';
+  assert.equal(section.innerHTML, '<em>Updated</em>');
+});
+
 test('Suspense renders fallback until an async component resolves', async () => {
   const document = installDom();
   const root = document.createElement('main');

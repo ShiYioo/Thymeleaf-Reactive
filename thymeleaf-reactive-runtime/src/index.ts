@@ -2474,6 +2474,11 @@ export function hydrate(root: Element, state: object, handlers: Record<string, (
     const runner = effect(() => { element.textContent = String(readPath(reactiveState, expression) ?? ""); });
     cleanup(() => runner.stop?.());
   });
+  bindings<HTMLElement>("[data-tr-html]").forEach(element => {
+    const expression = element.dataset.trHtml!;
+    const runner = effect(() => { element.innerHTML = String(readPath(reactiveState, expression) ?? ""); });
+    cleanup(() => runner.stop?.());
+  });
   bindings<HTMLElement>("[data-tr-show]").forEach(element => {
     const expression = element.dataset.trShow!;
     const runner = effect(() => { element.hidden = !Boolean(readPath(reactiveState, expression)); });

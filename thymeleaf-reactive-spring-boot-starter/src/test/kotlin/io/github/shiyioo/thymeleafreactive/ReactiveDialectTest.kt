@@ -165,4 +165,19 @@ class ReactiveDialectTest {
         assertThat(output).contains("class=\"active\"", "style=\"color: red\"")
         assertThat(output).doesNotContain("muted", "display: null")
     }
+
+    @Test
+    fun `renders reactive html content on the server`() {
+        val engine = TemplateEngine().apply {
+            setTemplateResolver(StringTemplateResolver())
+            addDialect(ReactiveDialect(ObjectMapper()))
+        }
+        val context = Context().apply { setVariable("content", "<strong>Ready</strong>") }
+        val output = engine.process(
+            """<section tr:html="content">stale</section>""",
+            context
+        )
+        assertThat(output).contains("data-tr-html=\"content\"", "<strong>Ready</strong>")
+        assertThat(output).doesNotContain("stale", "tr:html")
+    }
 }

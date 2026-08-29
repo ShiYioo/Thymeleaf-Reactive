@@ -20,6 +20,7 @@ class ReactiveDialect(private val objectMapper: ObjectMapper) : AbstractProcesso
         ReactiveEachProcessor(),
         ReactiveStateProcessor(objectMapper),
         ReactiveTextProcessor(),
+        ReactiveHtmlProcessor(),
         ReactiveAttributeProcessor("model", "data-tr-model"),
         ReactiveIfProcessor(),
         ReactiveShowProcessor(),
@@ -128,6 +129,21 @@ private class ReactiveTextProcessor : AbstractAttributeTagProcessor(
         structureHandler: IElementTagStructureHandler
     ) {
         structureHandler.setAttribute("data-tr-text", attributeValue)
+        structureHandler.setBody((evaluate(context, attributeValue) ?: "").toString(), false)
+    }
+}
+
+private class ReactiveHtmlProcessor : AbstractAttributeTagProcessor(
+    TemplateMode.HTML, "tr", null, false, "html", true, 1000, true
+) {
+    override fun doProcess(
+        context: ITemplateContext,
+        tag: IProcessableElementTag,
+        attributeName: AttributeName,
+        attributeValue: String,
+        structureHandler: IElementTagStructureHandler
+    ) {
+        structureHandler.setAttribute("data-tr-html", attributeValue)
         structureHandler.setBody((evaluate(context, attributeValue) ?: "").toString(), false)
     }
 }
