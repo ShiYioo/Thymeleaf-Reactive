@@ -552,24 +552,39 @@ function sfcEventPropName(name: string): string {
   return `on${name.slice(0, 1).toUpperCase()}${name.slice(1)}`;
 }
 
-function sfcEventHandler(expression: string, scope: Record<string, unknown>): ((event: Event) => void) | undefined {
+function sfcEventHandler(expression: string, scope: Record<string, unknown>, modifiers: string[] = []): ((event: Event) => void) | undefined {
+  const wrap = (handler: (event: Event) => void): ((event: Event) => void) =>
+    modifiers.length ? sfcEventModifierHandler(handler, modifiers) : handler;
   const normalized = expression.trim();
   const call = normalized.match(/^([A-Za-z_$][\w$]*)\s*\(\s*\)$/);
   if (call) {
     const method = readPath(scope, call[1]);
-    return typeof method === "function" ? () => method.call(scope) : undefined;
+    return typeof method === "function" ? wrap(() => method.call(scope)) : undefined;
   }
   const callWithValue = normalized.match(/^([A-Za-z_$][\w$]*)\s*\(\s*(.+?)\s*\)$/);
   if (callWithValue) {
     const method = readPath(scope, callWithValue[1]);
     if (typeof method !== "function") return undefined;
-    return event => {
+    return wrap(event => {
       const argument = callWithValue[2] === "$event" ? event : readPath(scope, callWithValue[2]);
       method.call(scope, argument);
-    };
+    });
   }
   const method = readPath(scope, normalized);
-  return typeof method === "function" ? event => method.call(scope, event) : undefined;
+  if (typeof method !== "function") return undefined;
+  return wrap((event: Event) => method.call(scope, event));
+}
+
+function sfcEventModifierHandler(handler: (event: Event) => void, modifiers: string[]): (event: Event) => void {
+  let called = false;
+  return event => {
+    if (modifiers.includes("self") && event.target !== event.currentTarget) return;
+    if (modifiers.includes("once") && called) return;
+    called = true;
+    if (modifiers.includes("prevent")) event.preventDefault();
+    if (modifiers.includes("stop")) event.stopPropagation();
+    handler(event);
+  };
 }
 
 function resolveSfcComponent(tagName: string, scope: Record<string, unknown>): Component | undefined {
@@ -715,8 +730,14 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
       if (bound && typeof bound === "object") Object.assign(props, bound);
     } else if (name.startsWith(":")) props[name.slice(1)] = readPath(scope, value);
     else if (name.startsWith("v-bind:")) props[name.slice(7)] = readPath(scope, value);
-    else if (name.startsWith("@")) props[sfcEventPropName(name.slice(1))] = sfcEventHandler(value, scope);
-    else if (name.startsWith("v-on:")) props[sfcEventPropName(name.slice(5))] = sfcEventHandler(value, scope);
+     else if (name.startsWith("@")) {
+       const [eventName, ...modifiers] = name.slice(1).split(".");
+       props[sfcEventPropName(eventName)] = sfcEventHandler(value, scope, modifiers);
+     }
+     else if (name.startsWith("v-on:")) {
+       const [eventName, ...modifiers] = name.slice(5).split(".");
+       props[sfcEventPropName(eventName)] = sfcEventHandler(value, scope, modifiers);
+     }
     else if (name === "v-model") {
       const inputType = element.tagName.toLowerCase() === "input"
         ? (element.getAttribute("type") ?? "text").toLowerCase()

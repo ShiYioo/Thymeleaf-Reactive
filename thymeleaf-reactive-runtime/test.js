@@ -790,6 +790,36 @@ test('SFC event handlers accept literal and $event arguments', () => {
   assert.equal(state.event, event);
 });
 
+test('SFC event modifiers prevent, stop, filter, and limit handlers', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const render = compileSfcComponent(`
+    <template>
+      <div @click="parent" @click.self="self">
+        <button @click.prevent.stop="child">Child</button>
+        <button v-on:click.once="once">Once</button>
+      </div>
+    </template>
+  `);
+  const state = createApp(render, {
+    parentRuns: 0, selfRuns: 0, childRuns: 0, onceRuns: 0,
+    parent() { this.parentRuns++; },
+    self() { this.selfRuns++; },
+    child() { this.childRuns++; },
+    once() { this.onceRuns++; }
+  }).mount(root);
+  const [child, once] = root.querySelectorAll('button');
+  const childEvent = new Event('click', { bubbles: true, cancelable: true });
+  child.dispatchEvent(childEvent);
+  assert.equal(childEvent.defaultPrevented, true);
+  assert.equal(state.childRuns, 1);
+  assert.equal(state.parentRuns, 0);
+  assert.equal(state.selfRuns, 0);
+  once.dispatchEvent(new Event('click', { bubbles: true }));
+  once.dispatchEvent(new Event('click', { bubbles: true }));
+  assert.equal(state.onceRuns, 1);
+});
+
 test('SFC v-model supports checkbox arrays and select values', () => {
   const document = installDom();
   const root = document.createElement('main');
