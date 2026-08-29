@@ -552,6 +552,18 @@ function sfcEventPropName(name: string): string {
   return `on${name.slice(0, 1).toUpperCase()}${name.slice(1)}`;
 }
 
+function resolveSfcDynamicName(name: string, scope: Record<string, unknown>): string {
+  const match = name.match(/^\[([\s\S]+)\]$/);
+  if (!match) return name;
+  const expression = match[1].trim();
+  let value = readPath(scope, expression);
+  if (value === undefined && /^[A-Za-z_$][\w$]*$/.test(expression)) {
+    const key = Object.keys(scope).find(candidate => candidate.toLowerCase() === expression.toLowerCase());
+    if (key) value = scope[key];
+  }
+  return String(value ?? "");
+}
+
 function sfcEventHandler(expression: string, scope: Record<string, unknown>, modifiers: string[] = []): ((event: Event) => void) | undefined {
   const wrap = (handler: (event: Event) => void): ((event: Event) => void) =>
     modifiers.length ? sfcEventModifierHandler(handler, modifiers) : handler;
@@ -752,15 +764,15 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
     if (name === "v-bind") {
       const bound = readPath(scope, value);
       if (bound && typeof bound === "object") Object.assign(props, bound);
-    } else if (name.startsWith(":")) props[name.slice(1)] = readPath(scope, value);
-    else if (name.startsWith("v-bind:")) props[name.slice(7)] = readPath(scope, value);
+    } else if (name.startsWith(":")) props[resolveSfcDynamicName(name.slice(1), scope)] = readPath(scope, value);
+    else if (name.startsWith("v-bind:")) props[resolveSfcDynamicName(name.slice(7), scope)] = readPath(scope, value);
      else if (name.startsWith("@")) {
        const [eventName, ...modifiers] = name.slice(1).split(".");
-       addSfcEventHandler(props, eventName, sfcEventHandler(value, scope, modifiers));
+       addSfcEventHandler(props, resolveSfcDynamicName(eventName, scope), sfcEventHandler(value, scope, modifiers));
      }
      else if (name.startsWith("v-on:")) {
        const [eventName, ...modifiers] = name.slice(5).split(".");
-       addSfcEventHandler(props, eventName, sfcEventHandler(value, scope, modifiers));
+       addSfcEventHandler(props, resolveSfcDynamicName(eventName, scope), sfcEventHandler(value, scope, modifiers));
      }
     else if (name === "v-model") {
       const inputType = element.tagName.toLowerCase() === "input"

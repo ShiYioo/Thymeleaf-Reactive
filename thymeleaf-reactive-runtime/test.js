@@ -848,6 +848,27 @@ test('SFC event modifiers filter keyboard, mouse, and system inputs', () => {
   assert.equal(state.rightRuns, 1);
 });
 
+test('SFC resolves dynamic attribute and event arguments', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const render = compileSfcComponent('<template><button :[attribute]="value" v-on:[eventName]="handle">Dynamic</button></template>');
+  const state = createApp(render, {
+    attribute: 'title', value: 'First', eventName: 'click', runs: 0,
+    handle() { this.runs++; }
+  }).mount(root);
+  const button = root.querySelector('button');
+  assert.equal(button.title, 'First');
+  button.dispatchEvent(new Event('click'));
+  assert.equal(state.runs, 1);
+  state.attribute = 'aria-label';
+  state.value = 'Second';
+  state.eventName = 'dblclick';
+  assert.equal(button.getAttribute('aria-label'), 'Second');
+  button.dispatchEvent(new Event('click'));
+  button.dispatchEvent(new Event('dblclick'));
+  assert.equal(state.runs, 2);
+});
+
 test('SFC v-model supports checkbox arrays and select values', () => {
   const document = installDom();
   const root = document.createElement('main');
