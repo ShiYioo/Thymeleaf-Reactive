@@ -998,6 +998,28 @@ test('virtual DOM removes stale event listeners and style properties', async () 
   assert.equal(button.style.background, '');
 });
 
+test('runtime-dom normalizes class and style values and invokes event arrays', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  let calls = 0;
+  const first = h('button', {
+    class: ['base', { active: true }, ['nested']],
+    style: [{ color: 'red' }, 'display: block;'],
+    onClick: [() => calls++, () => calls += 2]
+  }, 'Run');
+  render(first, root);
+  const button = root.querySelector('button');
+  assert.equal(button.className, 'base active nested');
+  assert.equal(button.style.color, 'red');
+  assert.equal(button.style.display, 'block');
+  button.dispatchEvent(new Event('click'));
+  assert.equal(calls, 3);
+  render(h('button', { class: { active: false, next: true }, style: 'color: blue;' }, 'Run'), root);
+  assert.equal(button.className, 'next');
+  assert.equal(button.style.color, 'blue');
+  assert.equal(button.style.display, '');
+});
+
 test('SFC render tracks state, loops keyed children, and writes v-model values back', async () => {
   const document = installDom();
   const root = document.createElement('main');

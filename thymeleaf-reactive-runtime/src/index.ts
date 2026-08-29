@@ -1201,6 +1201,35 @@ const componentNames = new WeakMap<Component, string>();
 const componentSources = new Map<string, string>();
 const booleanAttributes = new Set(["allowfullscreen", "async", "autofocus", "autoplay", "checked", "controls", "defer", "disabled", "formnovalidate", "hidden", "inert", "ismap", "itemscope", "loop", "multiple", "muted", "nomodule", "novalidate", "open", "playsinline", "readonly", "required", "reversed", "selected"]);
 
+function normalizeClass(value: unknown): string {
+  if (typeof value === "string" || typeof value === "number") return String(value);
+  if (Array.isArray(value)) return value.map(normalizeClass).filter(Boolean).join(" ");
+  if (value && typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>)
+      .filter(([, enabled]) => Boolean(enabled))
+      .map(([name]) => name)
+      .join(" ");
+  }
+  return "";
+}
+
+function normalizeStyle(value: unknown): Record<string, unknown> | string {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    return value.reduce<Record<string, unknown>>((result, entry) => {
+      const normalized = normalizeStyle(entry);
+      if (typeof normalized === "string") {
+        normalized.split(";").forEach(declaration => {
+          const separator = declaration.indexOf(":");
+          if (separator > 0) result[declaration.slice(0, separator).trim()] = declaration.slice(separator + 1).trim();
+        });
+      } else Object.assign(result, normalized);
+      return result;
+    }, {});
+  }
+  return value && typeof value === "object" ? { ...(value as Record<string, unknown>) } : {};
+}
+
 function normalizeComponentSource(source: string): string {
   try {
     const url = new URL(source, typeof window === "undefined" ? "http://localhost" : window.location.origin);
@@ -1221,8 +1250,11 @@ function setProp(el: Element, key: string, value: unknown, previous?: unknown): 
     const listeners = eventListeners.get(el) ?? new Map<string, EventListener>();
     const registered = listeners.get(event);
     if (registered) el.removeEventListener(event, registered);
-    if (typeof value === "function") {
-      const listener = value as EventListener;
+    const handlers = Array.isArray(value) ? value.filter(handler => typeof handler === "function") : [value];
+    if (handlers.length) {
+      const listener = ((eventValue: Event) => {
+        handlers.forEach(handler => (handler as EventListener).call(el, eventValue));
+      }) as EventListener;
       el.addEventListener(event, listener);
       listeners.set(event, listener);
     } else {
@@ -1230,19 +1262,25 @@ function setProp(el: Element, key: string, value: unknown, previous?: unknown): 
     }
     if (listeners.size) eventListeners.set(el, listeners);
     else eventListeners.delete(el);
-  } else if (key === "class" && value && typeof value === "object") {
-    const classes = Object.entries(value as Record<string, unknown>)
-      .filter(([, enabled]) => Boolean(enabled)).map(([name]) => name).join(" ");
-    el.className = classes;
-  } else if (key === "style" && value && typeof value === "object") {
+  } else if (key === "class") {
+    const classes = normalizeClass(value);
+    if (el.namespaceURI === svgNamespace) el.setAttribute("class", classes);
+    else el.className = classes;
+  } else if (key === "style") {
+    const normalized = normalizeStyle(value);
     const style = (el as HTMLElement).style;
-    if (previous && typeof previous === "object") {
-      Object.keys(previous as object).forEach(name => style.removeProperty(name));
+    if (typeof normalized === "string") style.cssText = normalized;
+    else {
+      const previousStyle = normalizeStyle(previous);
+      if (typeof previousStyle === "string") style.cssText = "";
+      else Object.keys(previousStyle).forEach(name => {
+        if (!(name in normalized)) style.removeProperty(name);
+      });
+      Object.entries(normalized).forEach(([name, styleValue]) => {
+        if (styleValue == null) style.removeProperty(name);
+        else style.setProperty(name, String(styleValue));
+      });
     }
-    Object.entries(value as Record<string, unknown>).forEach(([name, styleValue]) => {
-      if (styleValue == null) style.removeProperty(name);
-      else style.setProperty(name, String(styleValue));
-    });
   } else if (value == null || value === false) el.removeAttribute(key);
   else if (value === true) {
     el.setAttribute(key, "");
