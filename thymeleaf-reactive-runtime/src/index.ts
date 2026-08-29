@@ -1254,6 +1254,43 @@ function keepAliveKey(vnode: VNode): unknown {
   return vnode.key ?? vnode.type;
 }
 
+function isSameVNodeType(oldVNode: VNode, newVNode: VNode): boolean {
+  return oldVNode.type === newVNode.type && oldVNode.key === newVNode.key;
+}
+
+function getSequence(values: number[]): number[] {
+  const predecessors = values.slice();
+  const result: number[] = [];
+  for (let index = 0; index < values.length; index++) {
+    const value = values[index];
+    if (value === 0) continue;
+    const last = result.at(-1);
+    if (last === undefined || values[last] < value) {
+      predecessors[index] = last ?? -1;
+      result.push(index);
+      continue;
+    }
+    let low = 0;
+    let high = result.length - 1;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (values[result[middle]] < value) low = middle + 1;
+      else high = middle;
+    }
+    if (value < values[result[low]]) {
+      predecessors[index] = low > 0 ? result[low - 1] : -1;
+      result[low] = index;
+    }
+  }
+  let cursor = result.length;
+  let index = result.at(-1);
+  while (cursor-- > 0 && index !== undefined) {
+    result[cursor] = index;
+    index = predecessors[index] === -1 ? undefined : predecessors[index];
+  }
+  return result;
+}
+
 function pruneKeepAliveCache(vnode: VNode, cache: Map<unknown, VNode>, activeKey: unknown, container: Node): void {
   const rawMax = Number(vnode.props.max);
   if (!Number.isFinite(rawMax)) return;
@@ -1556,6 +1593,10 @@ function patchChildren(
   endAnchor: Node | null = null,
   transitionProps?: Record<string, unknown>
 ): void {
+  if (oldChildren.some(child => child.key != null) || newChildren.some(child => child.key != null)) {
+    patchKeyedChildren(container, oldChildren, newChildren, endAnchor, transitionProps);
+    return;
+  }
   const oldKeyed = new Map<string | number, { child: VNode; index: number }>();
   const duplicateKeys = new Set<string | number>();
   oldChildren.forEach((child, index) => {
@@ -2169,6 +2210,91 @@ function parseComponentState(root: HTMLElement): object {
   catch {
     console.error("[thymeleaf-reactive] invalid data-tr-state JSON during HMR");
     return {};
+  }
+}
+
+function patchKeyedChildren(
+  container: Node,
+  oldChildren: VNode[],
+  newChildren: VNode[],
+  endAnchor: Node | null,
+  transitionProps?: Record<string, unknown>
+): void {
+  let oldStart = 0;
+  let newStart = 0;
+  let oldEnd = oldChildren.length - 1;
+  let newEnd = newChildren.length - 1;
+
+  while (oldStart <= oldEnd && newStart <= newEnd && isSameVNodeType(oldChildren[oldStart], newChildren[newStart])) {
+    patch(oldChildren[oldStart++], newChildren[newStart++], container);
+  }
+  while (oldStart <= oldEnd && newStart <= newEnd && isSameVNodeType(oldChildren[oldEnd], newChildren[newEnd])) {
+    patch(oldChildren[oldEnd--], newChildren[newEnd--], container);
+  }
+  if (oldStart > oldEnd) {
+    const anchor = newChildren[newEnd + 1]?.el ?? endAnchor;
+    while (newStart <= newEnd) mount(newChildren[newStart++], container, anchor);
+    return;
+  }
+  if (newStart > newEnd) {
+    while (oldStart <= oldEnd) {
+      if (transitionProps) transitionLeave(childWithTransitionProps(oldChildren[oldStart], transitionProps), () => unmount(oldChildren[oldStart], container));
+      else unmount(oldChildren[oldStart], container);
+      oldStart++;
+    }
+    return;
+  }
+
+  const newIndexByKey = new Map<string | number, number>();
+  for (let index = newStart; index <= newEnd; index++) {
+    const key = newChildren[index].key;
+    if (key != null) newIndexByKey.set(key, index);
+  }
+  const toBePatched = newEnd - newStart + 1;
+  const newIndexToOldIndex = new Array(toBePatched).fill(0);
+  let moved = false;
+  let maxOldIndex = 0;
+  for (let oldIndex = oldStart; oldIndex <= oldEnd; oldIndex++) {
+    const oldChild = oldChildren[oldIndex];
+    let newIndex = oldChild.key == null ? undefined : newIndexByKey.get(oldChild.key);
+    if (newIndex === undefined && oldChild.key == null) {
+      for (let candidate = newStart; candidate <= newEnd; candidate++) {
+        if (newIndexToOldIndex[candidate - newStart] === 0 && isSameVNodeType(oldChild, newChildren[candidate])) {
+          newIndex = candidate;
+          break;
+        }
+      }
+    }
+    if (newIndex === undefined) {
+      if (transitionProps) transitionLeave(childWithTransitionProps(oldChild, transitionProps), () => unmount(oldChild, container));
+      else unmount(oldChild, container);
+      continue;
+    }
+    const offset = newIndex - newStart;
+    if (newIndexToOldIndex[offset] !== 0) {
+      if (transitionProps) transitionLeave(childWithTransitionProps(oldChild, transitionProps), () => unmount(oldChild, container));
+      else unmount(oldChild, container);
+      continue;
+    }
+    newIndexToOldIndex[offset] = oldIndex + 1;
+    if (newIndex < maxOldIndex) moved = true;
+    else maxOldIndex = newIndex;
+    patch(oldChild, newChildren[newIndex], container);
+  }
+
+  const stable = moved ? getSequence(newIndexToOldIndex) : [];
+  let stableIndex = stable.length - 1;
+  for (let index = toBePatched - 1; index >= 0; index--) {
+    const newIndex = newStart + index;
+    const anchor = newChildren[newIndex + 1]?.el ?? endAnchor;
+    if (newIndexToOldIndex[index] === 0) {
+      mount(newChildren[newIndex], container, anchor);
+      if (transitionProps) transitionEnter(childWithTransitionProps(newChildren[newIndex], transitionProps));
+    } else if (moved && (stableIndex < 0 || index !== stable[stableIndex])) {
+      moveVNode(newChildren[newIndex], container, anchor);
+    } else {
+      stableIndex--;
+    }
   }
 }
 
