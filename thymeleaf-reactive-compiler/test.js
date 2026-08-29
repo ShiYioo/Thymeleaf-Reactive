@@ -53,3 +53,23 @@ test('compiles keyed each bindings into runtime metadata', () => {
     'data-tr-key': 'item.id'
   });
 });
+
+test('compiles tr aliases used by the Thymeleaf starter', () => {
+  const result = compileElementAttributes({
+    'tr:component': 'counter',
+    'tr:component-src': 'components/Counter.vue',
+    'tr:show': 'visible',
+    'tr:each': 'item of items'
+  });
+  assert.equal(result.component, 'counter');
+  assert.equal(result.componentSrc, 'components/Counter.vue');
+  assert.deepEqual(result.bindings, [
+    { kind: 'show', expression: 'visible' },
+    { kind: 'each', expression: 'item of items' }
+  ]);
+  assert.deepEqual(result.runtimeAttrs, {
+    'data-tr-component-src': 'components/Counter.vue',
+    'data-tr-show': 'visible',
+    'data-tr-each': 'item of items'
+  });
+});
