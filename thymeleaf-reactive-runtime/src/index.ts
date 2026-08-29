@@ -9,9 +9,13 @@ export type ComponentSlots = Record<string, () => VNode[]>;
 export type ComponentContext = {
   children: VNode[];
   slots: ComponentSlots;
+  attrs: Record<string, unknown>;
   emit: (event: string, ...args: unknown[]) => void;
 };
 export type ComponentOptions = {
+  props?: string[];
+  emits?: string[];
+  inheritAttrs?: boolean;
   setup?: (props: Record<string, unknown>, context: ComponentContext) => ComponentRender | void;
   render?: ComponentRender;
   hmrRender?: (scope: Record<string, unknown>, children: VNode[]) => VNode;
@@ -481,6 +485,8 @@ type ComponentInstance = {
   update: Effect;
   dispose: () => void;
   props?: Record<string, unknown>;
+  attrs?: Record<string, unknown>;
+  listeners?: Record<string, unknown>;
   children?: VNode[];
   render?: HotReloadableRender;
   parent?: ComponentInstance;
@@ -587,9 +593,12 @@ function isObjectComponent(type: VNode["type"]): type is ComponentOptions {
   return typeof type === "object" && type !== null;
 }
 
-function emitComponentEvent(props: Record<string, unknown>, event: string, args: unknown[]): void {
-  const listener = props[`on${event.slice(0, 1).toUpperCase()}${event.slice(1)}`];
-  if (typeof listener === "function") listener(...args);
+function emitComponentEvent(listeners: Record<string, unknown>, event: string, args: unknown[]): void {
+  const listener = listeners[`on${event.slice(0, 1).toUpperCase()}${event.slice(1)}`];
+  const candidates = Array.isArray(listener) ? listener : [listener];
+  candidates.forEach(candidate => {
+    if (typeof candidate === "function") candidate(...args);
+  });
 }
 
 function attachComponentOwner(vnode: VNode, owner: ComponentInstance): void {
@@ -614,6 +623,38 @@ function syncComponentProps(target: Record<string, unknown>, next: Record<string
   return changed;
 }
 
+function isEmitListener(key: string, emits: string[]): boolean {
+  if (!key.startsWith("on") || key.length < 3) return false;
+  const event = key.slice(2).replace(/^./, letter => letter.toLowerCase());
+  return emits.some(name => name === event || name.replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase()) === event);
+}
+
+function splitComponentProps(definition: ComponentOptions, source: Record<string, unknown>): { props: Record<string, unknown>; attrs: Record<string, unknown>; listeners: Record<string, unknown> } {
+  if (!definition.props) return { props: source, attrs: {}, listeners: source };
+  const props: Record<string, unknown> = {};
+  const attrs: Record<string, unknown> = {};
+  const listeners: Record<string, unknown> = {};
+  Object.entries(source).forEach(([key, value]) => {
+    if (definition.props!.includes(key)) props[key] = value;
+    else if (isEmitListener(key, definition.emits ?? [])) listeners[key] = value;
+    else attrs[key] = value;
+  });
+  return { props, attrs, listeners };
+}
+
+function mergeFallthroughProps(tree: VNode, attrs: Record<string, unknown>): VNode {
+  if (!Object.keys(attrs).length || typeof tree.type !== "string") return tree;
+  const props = { ...tree.props };
+  Object.entries(attrs).forEach(([key, value]) => {
+    const existing = props[key];
+    if (key === "class") props[key] = [existing, value];
+    else if (key === "style") props[key] = [existing, value];
+    else if (key.startsWith("on") && existing) props[key] = [...(Array.isArray(existing) ? existing : [existing]), ...(Array.isArray(value) ? value : [value])];
+    else props[key] = value;
+  });
+  return { ...tree, props };
+}
+
 function componentSlots(instance: ComponentInstance): ComponentSlots {
   return new Proxy({}, {
     get: (_target, name: string | symbol) => typeof name === "string"
@@ -635,11 +676,14 @@ function renderObjectComponent(instance: ComponentInstance): VNode {
       instance.render = definition.setup?.(instance.props!, {
         children: instance.children!,
         slots: componentSlots(instance),
-        emit: (event, ...args) => emitComponentEvent(instance.props!, event, args)
+        attrs: instance.attrs!,
+        emit: (event, ...args) => emitComponentEvent(instance.listeners!, event, args)
       }) ?? definition.render;
       if (!instance.render) throw new Error("Component requires setup() or render()");
     }
-    const tree = instance.render(instance.props!, instance.children!);
+    const rendered = instance.render(instance.props!, instance.children!);
+    const definition = instance.vnode.type as ComponentOptions;
+    const tree = definition.inheritAttrs === false ? rendered : mergeFallthroughProps(rendered, instance.attrs!);
     attachComponentOwner(tree, instance);
     return tree;
   } finally {
@@ -1487,7 +1531,10 @@ function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode
     const instance = {} as ComponentInstance;
     instance.vnode = vnode;
     instance.parent = vnode.owner;
-    instance.props = reactive({ ...vnode.props });
+    const inputs = splitComponentProps(definition, vnode.props);
+    instance.props = reactive({ ...inputs.props });
+    instance.attrs = reactive({ ...inputs.attrs });
+    instance.listeners = inputs.listeners;
     instance.children = vnode.children;
     instance.provides = Object.create(instance.parent?.provides ?? null);
     instance.beforeMountHooks = definition.beforeMount ? [definition.beforeMount] : [];
@@ -1856,8 +1903,11 @@ export function patch(oldVNode: VNode | undefined, newVNode: VNode | undefined, 
     newVNode.instance = instance;
     instance.vnode = newVNode;
     instance.children = newVNode.children;
-    const propsChanged = syncComponentProps(instance.props!, newVNode.props);
-    if (!propsChanged) instance.update();
+    const inputs = splitComponentProps(newVNode.type, newVNode.props);
+    const propsChanged = syncComponentProps(instance.props!, inputs.props);
+    const attrsChanged = syncComponentProps(instance.attrs!, inputs.attrs);
+    instance.listeners = inputs.listeners;
+    if (!propsChanged && !attrsChanged) instance.update();
     newVNode.component = instance.tree;
     newVNode.el = instance.tree.el;
     newVNode.anchor = instance.tree.anchor;
@@ -1977,7 +2027,10 @@ export function adoptComponentRoot(root: Element, component: Component, props: R
     const vnode: VNode = { type: definition, props, children: tree.children, el: tree.el, anchor: tree.anchor, component: tree };
     const instance = {} as ComponentInstance;
     instance.vnode = vnode;
-    instance.props = reactive({ ...props });
+    const inputs = splitComponentProps(definition, props);
+    instance.props = reactive({ ...inputs.props });
+    instance.attrs = reactive({ ...inputs.attrs });
+    instance.listeners = inputs.listeners;
     instance.children = vnode.children;
     instance.provides = Object.create(null);
     instance.beforeMountHooks = definition.beforeMount ? [definition.beforeMount] : [];

@@ -907,6 +907,47 @@ test('object components retain setup state and support lifecycle, emits, and inj
   assert.equal(hooks.includes('parent-unmounted'), true);
 });
 
+test('object components separate declared props, attrs, and emits', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const emitted = [];
+  const Child = {
+    props: ['label'],
+    emits: ['save'],
+    setup(props, { attrs, emit }) {
+      return () => h('button', {
+        ...attrs,
+        onClick: () => emit('save', props.label)
+      }, props.label);
+    }
+  };
+  const app = createApp(() => h(Child, {
+    label: 'Ready',
+    id: 'child',
+    title: 'Child',
+    onSave: value => emitted.push(value)
+  }));
+  app.mount(root);
+  const button = root.querySelector('button');
+  assert.equal(button.textContent, 'Ready');
+  assert.equal(button.id, 'child');
+  assert.equal(button.title, 'Child');
+  button.dispatchEvent(new Event('click'));
+  assert.deepEqual(emitted, ['Ready']);
+  app.unmount();
+
+  const NoFallthrough = {
+    props: ['label'],
+    inheritAttrs: false,
+    setup(props, { attrs }) {
+      return () => h('span', {}, `${props.label}:${Object.keys(attrs).length}`);
+    }
+  };
+  render(h(NoFallthrough, { label: 'Hidden', id: 'ignored' }), root);
+  assert.equal(root.querySelector('span').id, '');
+  assert.equal(root.textContent, 'Hidden:1');
+});
+
 test('object component setup exposes reactive default and named slots', async () => {
   const document = installDom();
   const root = document.createElement('main');
