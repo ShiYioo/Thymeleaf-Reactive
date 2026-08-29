@@ -128,4 +128,23 @@ class ReactiveDialectTest {
         assertThat(output).contains(">Alpha<", ">Beta<", "data-tr-each=\"item of items\"")
         assertThat(output).doesNotContain("stale", "tr:each")
     }
+
+    @Test
+    fun `uses reactive truthiness for if and show`() {
+        val engine = TemplateEngine().apply {
+            setTemplateResolver(StringTemplateResolver())
+            addDialect(ReactiveDialect(ObjectMapper()))
+        }
+        val context = Context().apply {
+            setVariable("name", "Alpha")
+            setVariable("empty", "")
+            setVariable("count", 1)
+        }
+        val output = engine.process(
+            """<p tr:if="name">Name</p><p tr:if="empty">Empty</p><p tr:if="count">Count</p><aside tr:show="name">Shown</aside>""",
+            context
+        )
+        assertThat(output).contains("Name", "Count", "Shown")
+        assertThat(output).contains("data-tr-if=\"empty\"", "hidden=\"hidden\"")
+    }
 }

@@ -109,6 +109,14 @@ private fun evaluate(context: ITemplateContext, expression: String): Any? {
     }.getOrNull()
 }
 
+private fun isTruthy(value: Any?): Boolean = when (value) {
+    null -> false
+    is Boolean -> value
+    is Number -> value.toDouble() != 0.0 && !value.toDouble().isNaN()
+    is CharSequence -> value.isNotEmpty()
+    else -> true
+}
+
 private class ReactiveTextProcessor : AbstractAttributeTagProcessor(
     TemplateMode.HTML, "tr", null, false, "text", true, 1000, true
 ) {
@@ -135,7 +143,7 @@ private class ReactiveIfProcessor : AbstractAttributeTagProcessor(
         structureHandler: IElementTagStructureHandler
     ) {
         structureHandler.setAttribute("data-tr-if", attributeValue)
-        if (evaluate(context, attributeValue) != true) structureHandler.setAttribute("hidden", "hidden")
+        if (!isTruthy(evaluate(context, attributeValue))) structureHandler.setAttribute("hidden", "hidden")
     }
 }
 
@@ -150,7 +158,7 @@ private class ReactiveShowProcessor : AbstractAttributeTagProcessor(
         structureHandler: IElementTagStructureHandler
     ) {
         structureHandler.setAttribute("data-tr-show", attributeValue)
-        if (evaluate(context, attributeValue) != true) structureHandler.setAttribute("hidden", "hidden")
+        if (!isTruthy(evaluate(context, attributeValue))) structureHandler.setAttribute("hidden", "hidden")
     }
 }
 
