@@ -121,6 +121,14 @@ h(Suspense, { fallback: h("p", {}, "Loading") }, [
 ]);
 ```
 
+## Virtual DOM Transition
+
+The runtime exports `Transition` for single-child enter and leave transitions. It applies the `v-enter-*` and `v-leave-*` class phases and supports `onBeforeEnter`, `onEnter`, `onAfterEnter`, `onBeforeLeave`, `onLeave`, and `onAfterLeave` hooks. Hooks accepting a second argument can complete asynchronously by calling `done`.
+
+```js
+h(Transition, { name: "fade" }, [h("p", {}, "Content")]);
+```
+
 ## Virtual DOM KeepAlive
 
 The render-function runtime exports `KeepAlive` for caching keyed component instances while switching between views. Cached instances leave the active DOM but keep their local state and effect scope; switching back patches and reuses the cached instance. Unmounting `KeepAlive` disposes every cached component normally.

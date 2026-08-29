@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { adoptComponentRoot, reactive, ref, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, h, hotUpdate, hydrate, nextTick, onActivated, onDeactivated, onScopeDispose, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRef, toRefs, unref, watch, watchEffect } from './dist/index.js';
+import { adoptComponentRoot, reactive, ref, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, h, hotUpdate, hydrate, nextTick, onActivated, onDeactivated, onScopeDispose, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRef, toRefs, unref, watch, watchEffect } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -1405,5 +1405,31 @@ test('Suspense renders fallback until an async component resolves', async () => 
   await Promise.resolve();
   assert.equal(root.textContent, 'Ready');
   assert.equal(root.querySelector('p'), null);
+  app.unmount();
+});
+
+test('Transition runs enter and leave lifecycle hooks around keyed replacement', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const state = reactive({ showFirst: true });
+  const events = [];
+  const app = createApp(() => h(Transition, {
+    name: 'fade',
+    onBeforeEnter: () => events.push('before-enter'),
+    onAfterEnter: () => events.push('after-enter'),
+    onBeforeLeave: () => events.push('before-leave'),
+    onAfterLeave: () => events.push('after-leave')
+  }, [h('p', { key: state.showFirst ? 'first' : 'second' }, state.showFirst ? 'First' : 'Second')]));
+  app.mount(root);
+  assert.equal(root.textContent, 'First');
+  assert.deepEqual(events, ['before-enter']);
+  await new Promise(resolve => setTimeout(resolve, 5));
+  assert.deepEqual(events, ['before-enter', 'after-enter']);
+  state.showFirst = false;
+  assert.equal(root.textContent, 'SecondFirst');
+  assert.deepEqual(events.slice(-1), ['before-leave']);
+  await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(root.textContent, 'Second');
+  assert.deepEqual(events.slice(-2), ['after-enter', 'after-leave']);
   app.unmount();
 });

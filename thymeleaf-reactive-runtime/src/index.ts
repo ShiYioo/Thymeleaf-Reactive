@@ -420,6 +420,7 @@ export const Fragment = Symbol("fragment");
 export const Teleport = Symbol("teleport");
 export const KeepAlive = Symbol("keep-alive");
 export const Suspense = Symbol("suspense");
+export const Transition = Symbol("transition");
 type ComponentInstance = {
   vnode: VNode;
   tree: VNode;
@@ -441,7 +442,7 @@ type ComponentInstance = {
 type HotReloadableRender = ComponentRender & { hmrUpdate?: (next: ComponentOptions) => boolean };
 const componentInstanceStack: ComponentInstance[] = [];
 export type VNode = {
-  type: string | typeof Text | typeof Comment | typeof Fragment | typeof Teleport | typeof KeepAlive | typeof Suspense | Component;
+  type: string | typeof Text | typeof Comment | typeof Fragment | typeof Teleport | typeof KeepAlive | typeof Suspense | typeof Transition | Component;
   props: Record<string, unknown>;
   children: VNode[];
   el: Node | null;
@@ -1072,6 +1073,79 @@ function suspenseFallback(vnode: VNode): VNode {
   return normalizeVNode(vnode.props.fallback as VNode | Primitive ?? "");
 }
 
+function transitionElement(vnode: VNode): Element | null {
+  return vnode.el instanceof Element ? vnode.el : null;
+}
+
+function childWithTransitionProps(child: VNode, props: Record<string, unknown>): VNode {
+  return { ...child, props: { ...child.props, ...props } };
+}
+
+function transitionClassName(vnode: VNode): string {
+  return String(vnode.props.name ?? "v");
+}
+
+function transitionHook(vnode: VNode, name: string, element: Element, done: () => void): void {
+  const hook = vnode.props[name];
+  if (typeof hook !== "function") {
+    done();
+    return;
+  }
+  if (hook.length >= 2) hook(element, done);
+  else {
+    hook(element);
+    done();
+  }
+}
+
+function transitionEnter(vnode: VNode): void {
+  const element = transitionElement(vnode);
+  if (!element) return;
+  const name = transitionClassName(vnode);
+  const from = `${name}-enter-from`;
+  const active = `${name}-enter-active`;
+  const to = `${name}-enter-to`;
+  const finish = () => {
+    element.classList.remove(from, active, to);
+    const hook = vnode.props.onAfterEnter;
+    if (typeof hook === "function") hook(element);
+  };
+  const before = vnode.props.onBeforeEnter;
+  if (typeof before === "function") before(element);
+  element.classList.add(from, active);
+  setTimeout(() => {
+    element.classList.remove(from);
+    element.classList.add(to);
+    transitionHook(vnode, "onEnter", element, finish);
+  }, 0);
+}
+
+function transitionLeave(vnode: VNode, done: () => void): void {
+  const element = transitionElement(vnode);
+  if (!element) {
+    done();
+    return;
+  }
+  const name = transitionClassName(vnode);
+  const from = `${name}-leave-from`;
+  const active = `${name}-leave-active`;
+  const to = `${name}-leave-to`;
+  const finish = () => {
+    element.classList.remove(from, active, to);
+    const hook = vnode.props.onAfterLeave;
+    if (typeof hook === "function") hook(element);
+    done();
+  };
+  const before = vnode.props.onBeforeLeave;
+  if (typeof before === "function") before(element);
+  element.classList.add(from, active);
+  setTimeout(() => {
+    element.classList.remove(from);
+    element.classList.add(to);
+    transitionHook(vnode, "onLeave", element, finish);
+  }, 0);
+}
+
 const eventListeners = new WeakMap<Element, Map<string, EventListener>>();
 const svgNamespace = "http://www.w3.org/2000/svg";
 const componentNames = new WeakMap<Component, string>();
@@ -1205,6 +1279,15 @@ function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode
     vnode.anchor = active.anchor;
     return vnode;
   }
+  if (vnode.type === Transition) {
+    const child = vnode.children[0] ?? normalizeVNode("");
+    vnode.component = child;
+    mount(child, container, anchor);
+    vnode.el = child.el;
+    vnode.anchor = child.anchor;
+    transitionEnter(childWithTransitionProps(child, vnode.props));
+    return vnode;
+  }
   if (vnode.type === KeepAlive) {
     vnode.cache = new Map();
     const child = vnode.children[0];
@@ -1326,6 +1409,10 @@ function unmount(vnode: VNode, container: Node): void {
     if (vnode.component) unmount(vnode.component, container);
     return;
   }
+  if (vnode.type === Transition) {
+    if (vnode.component) transitionLeave(childWithTransitionProps(vnode.component, vnode.props), () => unmount(vnode.component!, container));
+    return;
+  }
   if (vnode.type === KeepAlive) {
     const cache = vnode.cache;
     if (cache) {
@@ -1359,6 +1446,10 @@ function unmount(vnode: VNode, container: Node): void {
 }
 
 function moveVNode(vnode: VNode, container: Node, anchor: Node | null): void {
+  if (vnode.type === Transition) {
+    if (vnode.component) moveVNode(vnode.component, container, anchor);
+    return;
+  }
   if (vnode.type === Suspense) {
     if (vnode.component) moveVNode(vnode.component, container, anchor);
     return;
@@ -1448,6 +1539,23 @@ export function patch(oldVNode: VNode | undefined, newVNode: VNode | undefined, 
     newVNode.component = active;
     newVNode.el = active.el;
     newVNode.anchor = active.anchor;
+    return newVNode;
+  }
+  if (newVNode.type === Transition) {
+    const oldChild = oldVNode.component;
+    const nextChild = newVNode.children[0] ?? normalizeVNode("");
+    if (oldChild && oldChild.type === nextChild.type && oldChild.key === nextChild.key) {
+      newVNode.component = patch(oldChild, nextChild, container) ?? nextChild;
+    } else {
+      if (nextChild) {
+        mount(nextChild, container, oldChild?.el ?? null);
+        transitionEnter(childWithTransitionProps(nextChild, newVNode.props));
+      }
+      if (oldChild) transitionLeave(childWithTransitionProps(oldChild, oldVNode.props), () => unmount(oldChild, container));
+      newVNode.component = nextChild;
+    }
+    newVNode.el = newVNode.component.el;
+    newVNode.anchor = newVNode.component.anchor;
     return newVNode;
   }
   if (newVNode.type === KeepAlive) {
