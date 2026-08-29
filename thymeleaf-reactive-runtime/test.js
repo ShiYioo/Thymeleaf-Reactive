@@ -113,6 +113,16 @@ test('post-flush watches batch updates behind nextTick', async () => {
   assert.deepEqual(values, [2]);
 });
 
+test('nextTick accepts a callback after queued jobs flush', async () => {
+  const state = reactive({ count: 0 });
+  const values = [];
+  effect(() => state.count, { scheduler: () => values.push(state.count) });
+  state.count = 1;
+  const result = await nextTick(() => `${state.count}:done`);
+  assert.deepEqual(values, [1]);
+  assert.equal(result, '1:done');
+});
+
 test('watchEffect cleans up stale work and can be stopped', () => {
   const state = reactive({ count: 0 });
   const events = [];

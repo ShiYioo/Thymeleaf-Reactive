@@ -101,8 +101,11 @@ function flushJobs(): void {
   }
 }
 
-export function nextTick(): Promise<void> {
-  return pendingFlush ?? Promise.resolve();
+export function nextTick(): Promise<void>;
+export function nextTick<T>(callback: () => T | Promise<T>): Promise<T>;
+export function nextTick<T>(callback?: () => T | Promise<T>): Promise<void | T> {
+  const promise = pendingFlush ?? Promise.resolve();
+  return callback ? promise.then(callback) : promise;
 }
 
 function isReactiveValue(value: unknown): value is object {
