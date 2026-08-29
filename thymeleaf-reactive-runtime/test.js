@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { reactive, ref, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineComponent, effectScope, Fragment, h, hotUpdate, hydrate, onScopeDispose, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, unref, watch } from './dist/index.js';
+import { reactive, ref, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineComponent, effectScope, Fragment, h, hotUpdate, hydrate, onScopeDispose, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRef, toRefs, unref, watch } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -89,6 +89,20 @@ test('proxyRefs unwraps values and writes through existing refs', () => {
   state.label = 'After';
   assert.equal(count.value, 2);
   assert.equal(state.label, 'After');
+});
+
+test('toRef and toRefs retain reactive property links', () => {
+  const state = reactive({ count: 1, label: 'Before', items: ['a'] });
+  const count = toRef(state, 'count');
+  const { label, items } = toRefs(state);
+  let observed = '';
+  effect(() => { observed = `${count.value}:${label.value}:${items.value.length}`; });
+  count.value = 2;
+  state.label = 'After';
+  items.value.push('b');
+  assert.equal(state.count, 2);
+  assert.equal(label.value, 'After');
+  assert.equal(observed, '2:After:2');
 });
 
 test('effect scopes stop nested effects and run registered cleanup', () => {

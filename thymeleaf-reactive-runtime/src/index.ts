@@ -173,6 +173,28 @@ export function unref<T>(value: T | Ref<T>): T {
   return isRef(value) ? value.value as T : value as T;
 }
 
+/** Creates a ref that remains linked to one property of a reactive object. */
+export function toRef<T extends object, Key extends keyof T>(source: T, key: Key, defaultValue?: T[Key]): Ref<T[Key]> {
+  return {
+    get value(): T[Key] {
+      const value = source[key];
+      return value === undefined ? defaultValue as T[Key] : value;
+    },
+    set value(value: T[Key]) {
+      source[key] = value;
+    }
+  };
+}
+
+/** Converts every enumerable property of a reactive object into a linked ref. */
+export function toRefs<T extends object>(source: T): { [Key in keyof T]: Ref<T[Key]> } {
+  const result = (Array.isArray(source) ? new Array(source.length) : {}) as { [Key in keyof T]: Ref<T[Key]> };
+  Object.keys(source).forEach(key => {
+    (result as Record<string, Ref<unknown>>)[key] = toRef(source, key as keyof T);
+  });
+  return result;
+}
+
 /** Exposes refs as ordinary values while preserving assignments to their value field. */
 export function proxyRefs<T extends object>(value: T): T {
   return new Proxy(value, {
