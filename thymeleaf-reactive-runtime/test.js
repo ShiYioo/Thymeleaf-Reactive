@@ -328,6 +328,32 @@ test('component HMR preserves script setup local refs while replacing its templa
   app.unmount();
 });
 
+test('component HMR recreates script setup state when its script changes', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Counter = defineComponent('script-setup-hmr-script-change-test', compileSfcComponent(`
+    <template><button @click="increment">Count: {{ count }}</button></template>
+    <script setup>
+      const count = ref(1);
+      function increment() { count.value++; }
+    </script>
+  `));
+  const app = createApp(() => h(Counter));
+  app.mount(root);
+  root.querySelector('button').dispatchEvent(new Event('click', { bubbles: true }));
+  assert.equal(root.textContent, 'Count: 2');
+
+  assert.equal(hotUpdate('script-setup-hmr-script-change-test', compileSfcComponent(`
+    <template><button @click="increment">Changed count: {{ count }}</button></template>
+    <script setup>
+      const count = ref(10);
+      function increment() { count.value++; }
+    </script>
+  `)), true);
+  assert.equal(root.textContent, 'Changed count: 10');
+  app.unmount();
+});
+
 test('adopted script setup components preserve local refs across HMR', () => {
   const document = installDom();
   document.body.innerHTML = '<section data-tr-component="counter"><button>Server</button></section>';

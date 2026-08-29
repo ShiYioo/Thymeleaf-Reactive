@@ -12,6 +12,7 @@ export type ComponentOptions = {
   setup?: (props: Record<string, unknown>, context: ComponentContext) => ComponentRender | void;
   render?: ComponentRender;
   hmrRender?: (scope: Record<string, unknown>, children: VNode[]) => VNode;
+  hmrSignature?: string;
   mounted?: () => void;
   updated?: () => void;
   unmounted?: () => void;
@@ -919,6 +920,7 @@ export function compileSfcComponent(source: string): Component {
   };
   return {
     hmrRender,
+    hmrSignature: script.trim(),
     setup(props, context) {
       const local = Object.create(props) as Record<string, unknown>;
       setup.bindings.forEach(binding => {
@@ -933,7 +935,7 @@ export function compileSfcComponent(source: string): Component {
       let activeRender = hmrRender;
       const render: HotReloadableRender = (_props, children) => activeRender(scope, children);
       render.hmrUpdate = next => {
-        if (!next.hmrRender) return false;
+        if (!next.hmrRender || next.hmrSignature !== script.trim()) return false;
         activeRender = next.hmrRender;
         return true;
       };
