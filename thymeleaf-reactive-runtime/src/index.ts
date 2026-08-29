@@ -2805,23 +2805,26 @@ export function hydrate(root: Element, state: object, handlers: Record<string, (
   });
   bindings<HTMLElement>("[data-tr-attr]").forEach(element => {
     const expression = element.dataset.trAttr!;
+    const applied = new Set<string>();
     const runner = hydrationEffect(context, () => {
       const values = readDynamicObject(reactiveState, expression);
-      if (!values || typeof values !== "object") return;
-      Object.entries(values).forEach(([name, value]) => {
+      const next = values && typeof values === "object" ? values as Record<string, unknown> : {};
+      applied.forEach(name => {
+        if (!(name in next)) element.removeAttribute(name);
+      });
+      Object.entries(next).forEach(([name, value]) => {
         if (value == null || value === false) element.removeAttribute(name);
         else element.setAttribute(name, value === true ? "" : String(value));
       });
+      applied.clear();
+      Object.keys(next).forEach(name => applied.add(name));
     });
-    cleanup(() => runner.stop?.());
+    cleanup(() => { runner.stop?.(); applied.clear(); });
   });
   bindings<HTMLElement>("[data-tr-class]").forEach(element => {
     const expression = element.dataset.trClass!;
     const runner = hydrationEffect(context, () => {
-      const value = readPath(reactiveState, expression);
-      element.className = value && typeof value === "object"
-        ? Object.entries(value).filter(([, enabled]) => Boolean(enabled)).map(([name]) => name).join(" ")
-        : String(value ?? "");
+      element.className = normalizeClass(readPath(reactiveState, expression));
     });
     cleanup(() => runner.stop?.());
   });

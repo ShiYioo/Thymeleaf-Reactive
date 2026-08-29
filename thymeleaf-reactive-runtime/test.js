@@ -1582,6 +1582,30 @@ test('hydrates dynamic attributes, classes, and styles reactively', async () => 
   assert.equal(link.style.display, '');
 });
 
+test('hydration removes stale dynamic attrs and normalizes nested class values', async () => {
+  const document = installDom();
+  const root = document.createElement('section');
+  root.innerHTML = '<a data-tr-attr="attrs" data-tr-class="classes" data-tr-style="styles" data-static="keep">Link</a>';
+  const state = hydrate(root, {
+    attrs: { title: 'Before', 'aria-label': 'Before' },
+    classes: ['base', { active: true }, ['nested']],
+    styles: { color: 'red' }
+  });
+  const link = root.querySelector('a');
+  assert.equal(link.getAttribute('title'), 'Before');
+  assert.equal(link.getAttribute('aria-label'), 'Before');
+  assert.equal(link.className, 'base active nested');
+  state.attrs = { title: 'After' };
+  state.classes = ['base', { active: false, next: true }];
+  state.styles = null;
+  await nextTick();
+  assert.equal(link.getAttribute('title'), 'After');
+  assert.equal(link.hasAttribute('aria-label'), false);
+  assert.equal(link.getAttribute('data-static'), 'keep');
+  assert.equal(link.className, 'base next');
+  assert.equal(link.hasAttribute('style'), false);
+});
+
 test('evaluates safe arithmetic logical and conditional template expressions', async () => {
   const document = installDom();
   const root = document.createElement('section');

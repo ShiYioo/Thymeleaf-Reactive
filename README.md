@@ -77,7 +77,7 @@ For `tr:if` and `tr:show`, a false server value is emitted with the HTML `hidden
 
 `tr:model` supports text fields, checkboxes (including array values), radio groups, and multiple selects. `tr:html` and SFC `v-html` assign trusted HTML directly and must not receive untrusted user input. SFC `v-model` additionally supports `.trim`, `.number`, and `.lazy` modifiers. The runtime preserves their current values while patching a component during HMR.
 
-Reactive binding expressions support safe member access plus common arithmetic, comparison, logical, and conditional operators. For example, `tr:text="count + 1"` and `tr:if="count > 0 && visible"` render consistently on the server and update in the browser.
+Reactive binding expressions support safe member access plus common arithmetic, comparison, logical, and conditional operators. For example, `tr:text="count + 1"` and `tr:if="count > 0 && visible"` render consistently on the server and update in the browser. During hydration, dynamic attribute bindings reconcile both additions and removals, so a stale server attribute cannot survive a later client-state update.
 
 The browser runtime also exports `computed(() => ...)` for cached derived state when authoring render-function components. `watch` supports explicit `flush: "sync"`, `flush: "pre"`, and `flush: "post"` scheduling; queued watchers are deduplicated and run around the component render queue.
 
