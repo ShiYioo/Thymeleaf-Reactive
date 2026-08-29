@@ -1585,7 +1585,7 @@ test('hydrates dynamic attributes, classes, and styles reactively', async () => 
 test('hydration removes stale dynamic attrs and normalizes nested class values', async () => {
   const document = installDom();
   const root = document.createElement('section');
-  root.innerHTML = '<a data-tr-attr="attrs" data-tr-class="classes" data-tr-style="styles" data-static="keep">Link</a>';
+  root.innerHTML = '<a class="server-class" style="font-weight: bold" data-tr-attr="attrs" data-tr-class="classes" data-tr-style="styles" data-static="keep">Link</a>';
   const state = hydrate(root, {
     attrs: { title: 'Before', 'aria-label': 'Before' },
     classes: ['base', { active: true }, ['nested']],
@@ -1594,7 +1594,8 @@ test('hydration removes stale dynamic attrs and normalizes nested class values',
   const link = root.querySelector('a');
   assert.equal(link.getAttribute('title'), 'Before');
   assert.equal(link.getAttribute('aria-label'), 'Before');
-  assert.equal(link.className, 'base active nested');
+  assert.equal(link.className, 'server-class base active nested');
+  assert.equal(link.style.fontWeight, 'bold');
   state.attrs = { title: 'After' };
   state.classes = ['base', { active: false, next: true }];
   state.styles = null;
@@ -1602,8 +1603,9 @@ test('hydration removes stale dynamic attrs and normalizes nested class values',
   assert.equal(link.getAttribute('title'), 'After');
   assert.equal(link.hasAttribute('aria-label'), false);
   assert.equal(link.getAttribute('data-static'), 'keep');
-  assert.equal(link.className, 'base next');
-  assert.equal(link.hasAttribute('style'), false);
+  assert.equal(link.className, 'server-class base next');
+  assert.equal(link.style.fontWeight, 'bold');
+  assert.equal(link.style.color, '');
 });
 
 test('evaluates safe arithmetic logical and conditional template expressions', async () => {

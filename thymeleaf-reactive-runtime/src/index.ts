@@ -2823,21 +2823,35 @@ export function hydrate(root: Element, state: object, handlers: Record<string, (
   });
   bindings<HTMLElement>("[data-tr-class]").forEach(element => {
     const expression = element.dataset.trClass!;
+    const staticClass = element.className;
     const runner = hydrationEffect(context, () => {
-      element.className = normalizeClass(readPath(reactiveState, expression));
+      const dynamicClass = normalizeClass(readPath(reactiveState, expression));
+      element.className = [staticClass, dynamicClass].filter(Boolean).join(" ");
     });
     cleanup(() => runner.stop?.());
   });
   bindings<HTMLElement>("[data-tr-style]").forEach(element => {
     const expression = element.dataset.trStyle!;
+    const staticStyle = element.getAttribute("style") ?? "";
+    const dynamicStyleKeys = new Set<string>();
     const runner = hydrationEffect(context, () => {
-      const value = readPath(reactiveState, expression);
+      const value = normalizeStyle(readPath(reactiveState, expression));
       const style = element.style;
-      if (!value || typeof value !== "object") { element.removeAttribute("style"); return; }
-      Array.from(style).forEach(name => style.removeProperty(name));
-      Object.entries(value).forEach(([name, next]) => { if (next != null) style.setProperty(name, String(next)); });
+      dynamicStyleKeys.forEach(name => style.removeProperty(name));
+      dynamicStyleKeys.clear();
+      if (typeof value === "string") {
+        element.setAttribute("style", [staticStyle, value].filter(Boolean).join(";"));
+        return;
+      }
+      element.setAttribute("style", staticStyle);
+      Object.entries(value).forEach(([name, next]) => {
+        if (next != null) {
+          style.setProperty(name, String(next));
+          dynamicStyleKeys.add(name);
+        }
+      });
     });
-    cleanup(() => runner.stop?.());
+    cleanup(() => { runner.stop?.(); dynamicStyleKeys.clear(); });
   });
   bindings<HTMLElement>("[data-tr-if]").forEach(element => {
     const expression = element.dataset.trIf!;
