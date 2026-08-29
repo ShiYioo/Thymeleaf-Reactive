@@ -717,6 +717,33 @@ test('hydrateRender creates component instances on top of SSR roots', async () =
   assert.equal(button.textContent, 'Count:1');
 });
 
+test('hydrateRender registers named component instances for state-preserving HMR', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  root.innerHTML = '<button>Server</button>';
+  const Counter = defineComponent('hydrated-component-hmr-test', compileSfcComponent(`
+    <template><button @click="increment">Count: {{ count }}</button></template>
+    <script setup>
+      const count = ref(1);
+      function increment() { count.value++; }
+    </script>
+  `));
+  hydrateRender(h(Counter), root);
+  const button = root.querySelector('button');
+  button.dispatchEvent(new Event('click'));
+  await nextTick();
+  assert.equal(button.textContent, 'Count: 2');
+  assert.equal(hotUpdate('hydrated-component-hmr-test', compileSfcComponent(`
+    <template><button @click="increment">Updated count: {{ count }}</button></template>
+    <script setup>
+      const count = ref(1);
+      function increment() { count.value++; }
+    </script>
+  `)), true);
+  assert.equal(root.querySelector('button'), button);
+  assert.equal(button.textContent, 'Updated count: 2');
+});
+
 test('VNode children normalize nested arrays as Fragment ranges', () => {
   const document = installDom();
   const root = document.createElement('main');

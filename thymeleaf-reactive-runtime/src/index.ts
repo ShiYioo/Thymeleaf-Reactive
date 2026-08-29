@@ -2017,6 +2017,32 @@ function hydrateVNode(vnode: VNode, node: Node | null, container: Node): VNode {
     vnode.component = hydrateVNode(component, node, container);
     vnode.el = vnode.component.el;
     vnode.anchor = vnode.component.anchor;
+    const name = componentNames.get(vnode.type);
+    const entry = name ? hotComponents.get(name) : undefined;
+    if (entry) {
+      const instance = {} as ComponentInstance;
+      instance.vnode = vnode;
+      instance.tree = vnode.component;
+      instance.update = () => {
+        const current = instance.vnode;
+        if (isObjectComponent(entry.render) && hotUpdateObjectComponent(instance.tree, entry.render)) {
+          current.component = instance.tree;
+          current.el = instance.tree.el;
+          current.anchor = instance.tree.anchor;
+          return;
+        }
+        const nextTree = typeof entry.render === "function"
+          ? entry.render(current.props, current.children)
+          : h(entry.render, current.props, current.children);
+        instance.tree = patch(instance.tree, nextTree, container) ?? instance.tree;
+        current.component = instance.tree;
+        current.el = instance.tree.el;
+        current.anchor = instance.tree.anchor;
+      };
+      instance.dispose = () => entry.instances.delete(instance.update);
+      vnode.instance = instance;
+      entry.instances.add(instance.update);
+    }
     return vnode;
   }
   if (vnode.type === Fragment) return hydrateFragment(vnode, node, container);
