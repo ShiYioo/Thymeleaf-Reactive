@@ -1015,7 +1015,9 @@ function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode
       instance.tree = vnode.component;
       instance.update = () => {
         const current = instance.vnode;
-        const nextTree = entry.render(current.props, current.children);
+        const nextTree = typeof entry.render === "function"
+          ? entry.render(current.props, current.children)
+          : h(entry.render, current.props, current.children);
         instance.tree = patch(instance.tree, nextTree, container) ?? instance.tree;
         current.component = instance.tree;
         current.el = instance.tree.el;
@@ -1240,18 +1242,19 @@ export function createApp(render: (state: any) => VNode, state: object = {}) {
   };
 }
 
-type HotComponent = { render: ComponentRender; instances: Set<() => void> };
+type HotComponent = { render: Component; instances: Set<() => void> };
 const hotComponents = new Map<string, HotComponent>();
 const mountedApps = new Set<Effect>();
 
 /** Registers a named component so a compiler can replace its render function in development. */
-export function defineComponent(name: string, render: ComponentRender): ComponentRender {
+export function defineComponent(name: string, render: Component): ComponentRender {
   const existing = hotComponents.get(name);
   if (existing) existing.render = render;
   else hotComponents.set(name, { render, instances: new Set() });
   const component: ComponentRender = (props, children) => {
     const entry = hotComponents.get(name);
-    return (entry?.render ?? render)(props, children);
+    const definition = entry?.render ?? render;
+    return typeof definition === "function" ? definition(props, children) : h(definition, props, children);
   };
   componentNames.set(component, name);
   return component;
@@ -1304,7 +1307,9 @@ export function adoptComponentRoot(root: Element, component: Component, props: R
   instance.tree = tree;
   instance.update = () => {
     const current = instance.vnode;
-    const nextTree = entry.render(current.props, current.children);
+    const nextTree = typeof entry.render === "function"
+      ? entry.render(current.props, current.children)
+      : h(entry.render, current.props, current.children);
     instance.tree = patch(instance.tree, nextTree, container) ?? instance.tree;
     current.component = instance.tree;
     current.el = instance.tree.el;
@@ -1320,7 +1325,7 @@ export function adoptComponentRoot(root: Element, component: Component, props: R
 }
 
 /** Replaces one component's render function while preserving its mounted DOM/state. */
-export function hotUpdate(name: string, render: ComponentRender): boolean {
+export function hotUpdate(name: string, render: Component): boolean {
   const entry = hotComponents.get(name);
   if (!entry) return false;
   entry.render = render;
@@ -1377,12 +1382,7 @@ export function connectComponentHmr(
       moduleUrl.searchParams.set("t", String(Date.now()));
       const module = await import(moduleUrl.href);
       const render = module.default ?? module.render;
-      if (typeof render !== "function") {
-        if (render && typeof render === "object") {
-          console.warn("[thymeleaf-reactive] script-setup SFC update requires a page reload");
-          window.location.reload();
-          return;
-        }
+      if (typeof render !== "function" && (!render || typeof render !== "object")) {
         throw new Error("HMR module has no component export");
       }
       const source = moduleUrl.searchParams.get("path");

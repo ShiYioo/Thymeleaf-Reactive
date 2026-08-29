@@ -37,7 +37,7 @@ async function adoptSfcComponent(
   Object.assign(state, handlers);
   adoptComponentRoot(
     root,
-    typeof component === "function" ? defineComponent(name, component) : component as Component,
+    defineComponent(name, component as Component),
     state as Record<string, unknown>
   );
 }
