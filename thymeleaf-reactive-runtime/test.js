@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { reactive, ref, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineComponent, effectScope, Fragment, h, hotUpdate, hydrate, onScopeDispose, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRef, toRefs, unref, watch } from './dist/index.js';
+import { reactive, ref, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineComponent, effectScope, Fragment, h, hotUpdate, hydrate, nextTick, onScopeDispose, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRef, toRefs, unref, watch } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -98,6 +98,17 @@ test('watch tracks getters and reactive objects while running registered cleanup
   state.nested.enabled = true;
   assert.equal(nestedRuns, 1);
   stopNested();
+});
+
+test('post-flush watches batch updates behind nextTick', async () => {
+  const state = reactive({ count: 0 });
+  const values = [];
+  watch(() => state.count, value => values.push(value), { flush: 'post' });
+  state.count = 1;
+  state.count = 2;
+  assert.deepEqual(values, []);
+  await nextTick();
+  assert.deepEqual(values, [2]);
 });
 
 test('proxyRefs unwraps values and writes through existing refs', () => {

@@ -24,6 +24,8 @@ const reactiveProxies = new WeakSet<object>();
 const effectDeps = new WeakMap<Effect, Set<Set<Effect>>>();
 const effectSchedulers = new WeakMap<Effect, () => void>();
 const ITERATE_KEY = Symbol("iterate");
+const queuedJobs = new Set<() => void>();
+let pendingFlush: Promise<void> | undefined;
 let activeEffectScope: EffectScope | undefined;
 
 export class EffectScope {
@@ -57,6 +59,19 @@ export function effectScope(): EffectScope {
 export function onScopeDispose(cleanup: () => void): void {
   if (!activeEffectScope) throw new Error("onScopeDispose() must be called inside an active effect scope");
   activeEffectScope.cleanups.add(cleanup);
+}
+
+function queueJob(job: () => void): void {
+  queuedJobs.add(job);
+  if (pendingFlush) return;
+  pendingFlush = Promise.resolve().then(() => {
+    try { queuedJobs.forEach(run => run()); }
+    finally { queuedJobs.clear(); pendingFlush = undefined; }
+  });
+}
+
+export function nextTick(): Promise<void> {
+  return pendingFlush ?? Promise.resolve();
 }
 
 function isReactiveValue(value: unknown): value is object {
@@ -249,7 +264,7 @@ export function proxyRefs<T extends object>(value: T): T {
 }
 
 export type WatchSource<T> = (() => T) | Ref<T> | T;
-export type WatchOptions = { immediate?: boolean; deep?: boolean };
+export type WatchOptions = { immediate?: boolean; deep?: boolean; flush?: "sync" | "post" };
 
 function traverse(value: unknown, seen = new Set<object>()): unknown {
   if (!value || typeof value !== "object" || seen.has(value)) return value;
@@ -276,7 +291,7 @@ export function watch<T>(
   const runGetter = effect(() => {
     value = getter();
     if (options.deep || (!isRef(source) && typeof source === "object")) traverse(value);
-  }, { lazy: true, scheduler: job });
+  }, { lazy: true, scheduler: options.flush === "post" ? () => queueJob(job) : job });
   function job(): void {
     runGetter();
     if (forceTrigger || options.deep || !Object.is(value, previous)) {
