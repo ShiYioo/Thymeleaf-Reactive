@@ -111,6 +111,8 @@ Changing `to` moves the existing teleported DOM range to the new target instead 
 
 The VDOM creates `<svg>` roots and descendants in the SVG namespace and patches SVG attributes without replacing existing nodes.
 
+For render-function applications, `hydrateRender(vnode, container)` adopts compatible server-rendered native DOM nodes, patches their props and descendants, removes stale server nodes, and locally replaces structural mismatches. The adopted tree remains registered for later `render()` patches.
+
 ## Virtual DOM Suspense
 
 The render-function runtime exports `Suspense` for async component boundaries. Its `fallback` VNode is rendered while a descendant created by `defineAsyncComponent` is pending; once the loader resolves, the fallback is patched into the resolved content in place.

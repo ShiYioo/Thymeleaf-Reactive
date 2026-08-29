@@ -1947,6 +1947,43 @@ export function patch(oldVNode: VNode | undefined, newVNode: VNode | undefined, 
 
 const renderedTrees = new WeakMap<Node, VNode>();
 
+function hydrateVNode(vnode: VNode, node: Node | null, container: Node): VNode {
+  if (vnode.type === Text || vnode.type === Comment) {
+    if (!node || (vnode.type === Text ? node.nodeType !== Node.TEXT_NODE : node.nodeType !== Node.COMMENT_NODE)) {
+      return mount(vnode, container, node);
+    }
+    vnode.el = node;
+    const text = vnode.text ?? "";
+    if (node.nodeValue !== text) node.nodeValue = text;
+    return vnode;
+  }
+  if (typeof vnode.type !== "string" || !node || node.nodeType !== Node.ELEMENT_NODE || (node as Element).tagName.toLowerCase() !== vnode.type.toLowerCase()) {
+    const mounted = mount(vnode, container, node);
+    if (node?.parentNode === container) container.removeChild(node);
+    return mounted;
+  }
+  const element = vnode.el = node;
+  const existingProps = Object.fromEntries(Array.from((element as Element).attributes).map(attribute => [attribute.name, attribute.value]));
+  Object.keys(existingProps).forEach(key => {
+    if (!(key in vnode.props)) setProp(element as Element, key, undefined, existingProps[key]);
+  });
+  Object.entries(vnode.props).forEach(([key, value]) => {
+    if (existingProps[key] !== value) setProp(element as Element, key, value, existingProps[key]);
+  });
+  const serverChildren = Array.from(element.childNodes);
+  vnode.children.forEach((child, index) => hydrateVNode(child, serverChildren[index] ?? null, element));
+  serverChildren.slice(vnode.children.length).forEach(child => child.parentNode === element && element.removeChild(child));
+  return vnode;
+}
+
+/** Hydrates a native VNode tree against existing server-rendered DOM. */
+export function hydrateRender(vnode: VNode, container: Node): VNode {
+  const current = container.firstChild;
+  const hydrated = hydrateVNode(vnode, current, container);
+  renderedTrees.set(container, hydrated);
+  return hydrated;
+}
+
 /** Renders a VNode into a container, retaining the previous tree for subsequent patches. */
 export function render(vnode: VNode | null, container: Node): VNode | null {
   const patched = patch(renderedTrees.get(container), vnode ?? undefined, container);

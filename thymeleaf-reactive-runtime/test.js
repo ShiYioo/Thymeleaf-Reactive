@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { adoptComponentRoot, reactive, ref, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onScopeDispose, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRef, toRefs, unref, watch, watchEffect } from './dist/index.js';
+import { adoptComponentRoot, reactive, ref, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onScopeDispose, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRef, toRefs, unref, watch, watchEffect } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -647,6 +647,24 @@ test('render retains the previous tree and supports explicit unmounting', () => 
   assert.equal(root.textContent, 'After');
   render(null, root);
   assert.equal(root.childNodes.length, 0);
+});
+
+test('hydrateRender adopts compatible SSR nodes and recovers structural mismatches', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  root.innerHTML = '<section class="server"><span>stale</span><i>remove me</i></section>';
+  const section = root.firstElementChild;
+  const span = section.firstElementChild;
+  const tree = hydrateRender(h('section', { class: 'client' }, [h('span', {}, 'ready'), h('strong', {}, 'added')]), root);
+  assert.equal(tree.el, section);
+  assert.equal(section.className, 'client');
+  assert.equal(section.firstElementChild, span);
+  assert.equal(section.textContent, 'readyadded');
+  assert.equal(section.querySelector('i'), null);
+  const next = render(h('section', { class: 'updated' }, [h('span', {}, 'done')]), root);
+  assert.equal(next.el, section);
+  assert.equal(section.className, 'updated');
+  assert.equal(section.textContent, 'done');
 });
 
 test('VNode children normalize nested arrays as Fragment ranges', () => {
