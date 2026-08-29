@@ -2026,6 +2026,7 @@ export function connectComponentHmr(
   let seenVersion = 0;
   let pollingInitialized = false;
   let polling = false;
+  let hasEnqueuedChanges = false;
   const applyChange = async (message: HmrMessage) => {
     const update = message as ComponentHmrMessage;
     if (typeof update.version === "number" && update.version <= seenVersion) return;
@@ -2051,6 +2052,7 @@ export function connectComponentHmr(
   };
   let changeQueue = Promise.resolve();
   const enqueueChange = (message: HmrMessage): Promise<void> => {
+    hasEnqueuedChanges = true;
     const work = changeQueue.then(() => applyChange(message));
     changeQueue = work.catch(() => undefined);
     return work;
@@ -2070,7 +2072,11 @@ export function connectComponentHmr(
         historyComplete?: boolean;
       };
       const version = status.version ?? 0;
-      if (!pollingInitialized) { pollingInitialized = true; seenVersion = Math.max(seenVersion, version); return; }
+      if (!pollingInitialized) {
+        pollingInitialized = true;
+        if (!hasEnqueuedChanges) seenVersion = Math.max(seenVersion, version);
+        return;
+      }
       if (version <= seenVersion) return;
       if (status.historyComplete === false) {
         console.warn("[thymeleaf-reactive] HMR history is incomplete; reloading the page");
