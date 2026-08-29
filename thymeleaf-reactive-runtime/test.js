@@ -358,7 +358,7 @@ test('component HMR recreates script setup state when its script changes', async
   app.unmount();
 });
 
-test('adopted script setup components preserve local refs across HMR', () => {
+test('adopted script setup components preserve local refs across HMR', async () => {
   const document = installDom();
   document.body.innerHTML = '<section data-tr-component="counter"><button>Server</button></section>';
   const root = document.querySelector('section');
@@ -372,6 +372,7 @@ test('adopted script setup components preserve local refs across HMR', () => {
   adoptComponentRoot(root, Counter);
   const button = document.querySelector('button');
   button.dispatchEvent(new Event('click', { bubbles: true }));
+  await nextTick();
   assert.equal(button.textContent, 'Count: 2');
 
   assert.equal(hotUpdate('adopted-script-setup-hmr-state-test', compileSfcComponent(`

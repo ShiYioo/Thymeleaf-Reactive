@@ -1906,9 +1906,11 @@ export function adoptComponentRoot(root: Element, component: Component, props: R
     instance.activatedHooks = definition.activated ? [definition.activated] : [];
     instance.deactivatedHooks = definition.deactivated ? [definition.deactivated] : [];
     instance.isMounted = false;
+    instance.uid = nextComponentUid++;
     instance.tree = tree;
     instance.scope = effectScope();
-    instance.update = instance.scope.run(() => effect(() => {
+    let componentUpdate!: Effect;
+    componentUpdate = instance.scope.run(() => effect(() => {
       const nextTree = renderObjectComponent(instance);
       if (!instance.isMounted) instance.beforeMountHooks!.forEach(hook => hook());
       else instance.beforeUpdateHooks!.forEach(hook => hook());
@@ -1922,7 +1924,8 @@ export function adoptComponentRoot(root: Element, component: Component, props: R
       instance.vnode.component = instance.tree;
       instance.vnode.el = instance.tree.el;
       instance.vnode.anchor = instance.tree.anchor;
-    }))!;
+    }, { scheduler: () => queueJob(componentUpdate, instance.uid) }))!;
+    instance.update = componentUpdate;
     const update = () => {
       if (entry && isObjectComponent(entry.render) && hotUpdateObjectComponent(vnode, entry.render)) return;
       instance.update();
