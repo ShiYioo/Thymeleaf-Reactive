@@ -241,13 +241,13 @@ private class ReactiveDynamicProcessor(
             "data-tr-class" -> {
                 val value = evaluate(context, attributeValue)
                 if (value is Map<*, *>) {
-                    structureHandler.setAttribute("class", value.entries.filter { it.value == true }.joinToString(" ") { it.key.toString() })
+                    structureHandler.setAttribute("class", value.entries.filter { isTruthy(it.value) }.joinToString(" ") { it.key.toString() })
                 } else if (value != null) structureHandler.setAttribute("class", value.toString())
             }
             "data-tr-style" -> {
                 val value = evaluate(context, attributeValue)
                 if (value is Map<*, *>) {
-                    structureHandler.setAttribute("style", value.entries.joinToString("; ") { "${it.key}: ${it.value}" })
+                    structureHandler.setAttribute("style", value.entries.filter { it.value != null }.joinToString("; ") { "${it.key}: ${it.value}" })
                 } else if (value != null) structureHandler.setAttribute("style", value.toString())
             }
         }

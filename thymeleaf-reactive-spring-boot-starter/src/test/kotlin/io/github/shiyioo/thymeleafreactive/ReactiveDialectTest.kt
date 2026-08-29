@@ -147,4 +147,22 @@ class ReactiveDialectTest {
         assertThat(output).contains("Name", "Count", "Shown")
         assertThat(output).contains("data-tr-if=\"empty\"", "hidden=\"hidden\"")
     }
+
+    @Test
+    fun `matches client truthiness for dynamic class and style maps`() {
+        val engine = TemplateEngine().apply {
+            setTemplateResolver(StringTemplateResolver())
+            addDialect(ReactiveDialect(ObjectMapper()))
+        }
+        val context = Context().apply {
+            setVariable("classes", mapOf("active" to "yes", "muted" to ""))
+            setVariable("styles", mapOf("color" to "red", "display" to null))
+        }
+        val output = engine.process(
+            """<div tr:class="classes" tr:style="styles">Content</div>""",
+            context
+        )
+        assertThat(output).contains("class=\"active\"", "style=\"color: red\"")
+        assertThat(output).doesNotContain("muted", "display: null")
+    }
 }
