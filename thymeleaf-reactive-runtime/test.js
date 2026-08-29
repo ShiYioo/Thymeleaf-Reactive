@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { reactive, ref, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineComponent, Fragment, h, hotUpdate, hydrate, refreshComponentsFromPage, render } from './dist/index.js';
+import { reactive, ref, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineComponent, Fragment, h, hotUpdate, hydrate, refreshComponentsFromPage, render, Teleport } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -342,6 +342,40 @@ test('render retains the previous tree and supports explicit unmounting', () => 
   assert.equal(root.textContent, 'After');
   render(null, root);
   assert.equal(root.childNodes.length, 0);
+});
+
+test('Teleport patches and moves its child range without recreating keyed fields', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const firstTarget = document.createElement('aside');
+  const secondTarget = document.createElement('aside');
+  firstTarget.id = 'first-target';
+  secondTarget.id = 'second-target';
+  document.body.append(firstTarget, secondTarget);
+  const app = createApp(state => h('section', {}, [
+    h('p', {}, 'Host'),
+    state.visible && h(Teleport, { to: state.target }, [
+      h('input', { key: 'draft', value: state.draft }),
+      h('strong', { key: 'label' }, state.label)
+    ])
+  ]), { visible: true, target: '#first-target', draft: 'Initial', label: 'Before' });
+  const state = app.mount(root);
+  const input = firstTarget.querySelector('input');
+  assert.equal(root.textContent, 'Host');
+  assert.equal(firstTarget.querySelector('strong').textContent, 'Before');
+
+  state.label = 'After';
+  assert.equal(firstTarget.querySelector('input'), input);
+  assert.equal(firstTarget.querySelector('strong').textContent, 'After');
+
+  state.target = '#second-target';
+  assert.equal(firstTarget.querySelector('input'), null);
+  assert.equal(secondTarget.querySelector('input'), input);
+  assert.equal(secondTarget.querySelector('strong').textContent, 'After');
+
+  state.visible = false;
+  assert.equal(secondTarget.childNodes.length, 0);
+  app.unmount();
 });
 
 test('virtual DOM performs keyed moves and insertions while updating props and listeners', () => {

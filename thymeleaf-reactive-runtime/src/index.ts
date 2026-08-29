@@ -147,6 +147,7 @@ export function computed<T>(getter: () => T): ComputedRef<T> {
 export const Text = Symbol("text");
 export const Comment = Symbol("comment");
 export const Fragment = Symbol("fragment");
+export const Teleport = Symbol("teleport");
 type ComponentInstance = {
   vnode: VNode;
   tree: VNode;
@@ -154,11 +155,12 @@ type ComponentInstance = {
   dispose: () => void;
 };
 export type VNode = {
-  type: string | typeof Text | typeof Comment | typeof Fragment | Component;
+  type: string | typeof Text | typeof Comment | typeof Fragment | typeof Teleport | Component;
   props: Record<string, unknown>;
   children: VNode[];
   el: Node | null;
   anchor?: Node | null;
+  target?: Node | null;
   key?: string | number;
   component?: VNode;
   instance?: ComponentInstance;
@@ -454,6 +456,15 @@ function syncMultipleSelect(el: Element, value: unknown): void {
   });
 }
 
+function resolveTeleportTarget(to: unknown): Element {
+  if (to instanceof Element) return to;
+  if (typeof to === "string") {
+    const target = document.querySelector(to);
+    if (target) return target;
+  }
+  throw new Error("Teleport requires a valid `to` selector or Element target");
+}
+
 function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode {
   if (vnode.type === Text) {
     vnode.el = document.createTextNode(vnode.text ?? "");
@@ -471,6 +482,16 @@ function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode
     container.insertBefore(start, anchor);
     container.insertBefore(end, anchor);
     vnode.children.forEach(child => mount(child, container, end));
+    return vnode;
+  }
+  if (vnode.type === Teleport) {
+    const placeholder = vnode.el = document.createComment("teleport");
+    const target = resolveTeleportTarget(vnode.props.to);
+    const targetAnchor = vnode.anchor = document.createComment("/teleport");
+    container.insertBefore(placeholder, anchor);
+    target.appendChild(targetAnchor);
+    vnode.target = target;
+    vnode.children.forEach(child => mount(child, target, targetAnchor));
     return vnode;
   }
   if (typeof vnode.type === "function") {
@@ -527,11 +548,24 @@ function unmount(vnode: VNode, container: Node): void {
     if (vnode.anchor?.parentNode === container) container.removeChild(vnode.anchor);
     return;
   }
+  if (vnode.type === Teleport) {
+    const target = vnode.target;
+    if (target) {
+      vnode.children.forEach(child => unmount(child, target));
+      if (vnode.anchor?.parentNode === target) target.removeChild(vnode.anchor);
+    }
+    if (vnode.el?.parentNode === container) container.removeChild(vnode.el);
+    return;
+  }
   if (vnode.type !== Text && vnode.type !== Comment) vnode.children.forEach(child => unmount(child, vnode.el ?? container));
   if (vnode.el?.parentNode === container) container.removeChild(vnode.el);
 }
 
 function moveVNode(vnode: VNode, container: Node, anchor: Node | null): void {
+  if (vnode.type === Teleport) {
+    if (vnode.el) container.insertBefore(vnode.el, anchor);
+    return;
+  }
   const start = vnode.el;
   const end = vnode.anchor ?? start;
   if (!start || !end) return;
@@ -591,6 +625,19 @@ export function patch(oldVNode: VNode | undefined, newVNode: VNode | undefined, 
   }
   if (newVNode.type === Fragment) {
     patchChildren(container, oldVNode.children, newVNode.children, newVNode.anchor ?? null);
+    return newVNode;
+  }
+  if (newVNode.type === Teleport) {
+    const oldTarget = oldVNode.target;
+    const nextTarget = resolveTeleportTarget(newVNode.props.to);
+    newVNode.target = nextTarget;
+    if (oldTarget !== nextTarget) {
+      const targetAnchor = newVNode.anchor = document.createComment("/teleport");
+      nextTarget.appendChild(targetAnchor);
+      oldVNode.children.forEach(child => moveVNode(child, nextTarget, targetAnchor));
+      if (oldTarget && oldVNode.anchor?.parentNode === oldTarget) oldTarget.removeChild(oldVNode.anchor);
+    }
+    patchChildren(nextTarget, oldVNode.children, newVNode.children, newVNode.anchor ?? null);
     return newVNode;
   }
   if (typeof newVNode.type === "function") {

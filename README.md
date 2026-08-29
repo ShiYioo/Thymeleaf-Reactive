@@ -79,6 +79,20 @@ Reactive binding expressions support safe member access plus common arithmetic, 
 
 The browser runtime also exports `computed(() => ...)` for cached derived state when authoring render-function components.
 
+## Virtual DOM Teleport
+
+The render-function runtime exports `Teleport` for rendering a VNode subtree into a different DOM target while retaining keyed updates and component state. Its `to` property accepts a CSS selector or an `Element`.
+
+```js
+import { Teleport, h } from "@thymeleaf-reactive/runtime";
+
+const modal = h(Teleport, { to: "#modal-root" }, [
+  h("section", { class: "dialog" }, "Saved")
+]);
+```
+
+Changing `to` moves the existing teleported DOM range to the new target instead of recreating it.
+
 ## License
 
 Apache-2.0
