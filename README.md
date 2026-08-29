@@ -75,7 +75,7 @@ The first response keeps the server-rendered rows. During browser hydration, tho
 
 For `tr:if` and `tr:show`, a false server value is emitted with the HTML `hidden` attribute and reactive metadata. That keeps the first paint hidden without JavaScript while preserving the DOM necessary for the browser runtime to reveal the block later.
 
-`tr:model` supports text fields, checkboxes (including array values), radio groups, and multiple selects. The runtime preserves their current values while patching a component during HMR.
+`tr:model` supports text fields, checkboxes (including array values), radio groups, and multiple selects. SFC `v-model` additionally supports `.trim`, `.number`, and `.lazy` modifiers. The runtime preserves their current values while patching a component during HMR.
 
 Reactive binding expressions support safe member access plus common arithmetic, comparison, logical, and conditional operators. For example, `tr:text="count + 1"` and `tr:if="count > 0 && visible"` render consistently on the server and update in the browser.
 

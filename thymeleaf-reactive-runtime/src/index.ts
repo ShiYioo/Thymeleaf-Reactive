@@ -721,6 +721,17 @@ function renderSfcSlots(nodes: Node[], scope: Record<string, unknown>, slots: VN
   return output;
 }
 
+function normalizeSfcModelValue(value: unknown, modifiers: string[]): unknown {
+  if (Array.isArray(value)) return value.map(item => normalizeSfcModelValue(item, modifiers));
+  let normalized = value;
+  if (modifiers.includes("trim") && typeof normalized === "string") normalized = normalized.trim();
+  if (modifiers.includes("number") && normalized !== "" && normalized != null) {
+    const number = Number(normalized);
+    if (!Number.isNaN(number)) normalized = number;
+  }
+  return normalized;
+}
+
 function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[]): VNode | VNode[] | undefined {
   if (node.nodeType === Node.TEXT_NODE) {
     const text = node.textContent ?? "";
@@ -774,11 +785,14 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
        const [eventName, ...modifiers] = name.slice(5).split(".");
        addSfcEventHandler(props, resolveSfcDynamicName(eventName, scope), sfcEventHandler(value, scope, modifiers));
      }
-    else if (name === "v-model") {
+    else if (name === "v-model" || name.startsWith("v-model.")) {
+      const modelModifiers = name.slice("v-model".length).split(".").filter(Boolean);
+      const modelPath = value;
+      const writeModel = (next: unknown) => writePath(scope, modelPath, normalizeSfcModelValue(next, modelModifiers));
       const inputType = element.tagName.toLowerCase() === "input"
         ? (element.getAttribute("type") ?? "text").toLowerCase()
         : "text";
-      const current = readPath(scope, value);
+      const current = readPath(scope, modelPath);
       if (inputType === "checkbox") {
         const option = element.getAttribute("value");
         props.checked = Array.isArray(current) && option != null
@@ -788,16 +802,16 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
           const checked = (event.target as HTMLInputElement).checked;
           if (Array.isArray(current) && option != null) {
             const values = current.map(String);
-            writePath(scope, value, checked
-              ? values.includes(option) ? values : [...values, option]
-              : values.filter(item => item !== option));
-          } else writePath(scope, value, checked);
+             writeModel(checked
+               ? values.includes(option) ? values : [...values, option]
+               : values.filter(item => item !== option));
+           } else writeModel(checked);
         };
       } else if (inputType === "radio") {
         const option = element.getAttribute("value") ?? "";
         props.checked = String(current ?? "") === option;
         props.onChange = (event: Event) => {
-          if ((event.target as HTMLInputElement).checked) writePath(scope, value, option);
+           if ((event.target as HTMLInputElement).checked) writeModel(option);
         };
       } else if (element.tagName.toLowerCase() === "select") {
         const select = element as HTMLSelectElement;
@@ -806,16 +820,17 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
           props.value = current;
           props.onChange = (event: Event) => {
             const target = event.target as HTMLSelectElement;
-            writePath(scope, value, Array.from(target.selectedOptions).map(option => option.value));
+             writeModel(Array.from(target.selectedOptions).map(option => option.value));
           };
           Array.from(select.options).forEach(optionNode => { optionNode.selected = selected.has(optionNode.value); });
         } else {
           props.value = current;
-          props.onChange = (event: Event) => writePath(scope, value, (event.target as HTMLSelectElement).value);
+           props.onChange = (event: Event) => writeModel((event.target as HTMLSelectElement).value);
         }
       } else {
         props.value = current;
-        props.onInput = (event: Event) => writePath(scope, value, (event.target as HTMLInputElement).value);
+        const eventProp = modelModifiers.includes("lazy") ? "onChange" : "onInput";
+        props[eventProp] = (event: Event) => writeModel((event.target as HTMLInputElement).value);
       }
     }
     else props[name] = value;

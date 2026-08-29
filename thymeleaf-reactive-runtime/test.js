@@ -774,6 +774,34 @@ test('SFC v-model handles checkbox and radio values and event arguments', () => 
   assert.equal(state.result, 'done');
 });
 
+test('SFC v-model modifiers trim, coerce numbers, and defer lazy updates', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const render = compileSfcComponent(`
+    <template>
+      <div>
+        <input v-model.trim.number="amount">
+        <input v-model.lazy="draft">
+        <select v-model.number="choice"><option value="1">One</option><option value="2">Two</option></select>
+      </div>
+    </template>
+  `);
+  const state = createApp(render, { amount: 0, draft: 'old', choice: 1 }).mount(root);
+  const [amount, draft] = root.querySelectorAll('input');
+  const select = root.querySelector('select');
+  amount.value = ' 42 ';
+  amount.dispatchEvent(new Event('input', { bubbles: true }));
+  assert.equal(state.amount, 42);
+  draft.value = 'new';
+  draft.dispatchEvent(new Event('input', { bubbles: true }));
+  assert.equal(state.draft, 'old');
+  draft.dispatchEvent(new Event('change', { bubbles: true }));
+  assert.equal(state.draft, 'new');
+  select.value = '2';
+  select.dispatchEvent(new Event('change', { bubbles: true }));
+  assert.equal(state.choice, 2);
+});
+
 test('SFC event handlers accept literal and $event arguments', () => {
   const document = installDom();
   const root = document.createElement('main');
