@@ -111,4 +111,21 @@ class ReactiveDialectTest {
         assertThat(output).contains("data-tr-key-expression=\"item.id\"")
         assertThat(output).contains("data-tr-key=\"a\"", "data-tr-key=\"b\"")
     }
+
+    @Test
+    fun `renders of syntax on the server`() {
+        val engine = TemplateEngine().apply {
+            setTemplateResolver(StringTemplateResolver())
+            addDialect(ReactiveDialect(ObjectMapper()))
+        }
+        val context = Context().apply {
+            setVariable("items", listOf("Alpha", "Beta"))
+        }
+        val output = engine.process(
+            """<ul><li tr:each="item of items" tr:text="item">stale</li></ul>""",
+            context
+        )
+        assertThat(output).contains(">Alpha<", ">Beta<", "data-tr-each=\"item of items\"")
+        assertThat(output).doesNotContain("stale", "tr:each")
+    }
 }

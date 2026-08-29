@@ -33,7 +33,7 @@ class ReactiveDialect(private val objectMapper: ObjectMapper) : AbstractProcesso
 private class ReactiveEachProcessor : AbstractAttributeTagProcessor(
     TemplateMode.HTML, "tr", null, false, "each", true, 900, true
 ) {
-    private val syntax = Regex("^\\s*([A-Za-z_$][\\w$]*)(?:\\s*,\\s*([A-Za-z_$][\\w$]*))?\\s+in\\s+(.+?)\\s*$")
+    private val syntax = Regex("^\\s*([A-Za-z_$][\\w$]*)(?:\\s*,\\s*([A-Za-z_$][\\w$]*))?\\s+(?:in|of)\\s+(.+?)\\s*$")
 
     override fun doProcess(
         context: ITemplateContext,
