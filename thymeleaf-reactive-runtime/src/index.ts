@@ -130,6 +130,81 @@ export function ref<T>(value: T): Ref<T> {
   return reactive({ value });
 }
 
+export function isRef(value: unknown): value is Ref<unknown> {
+  return Boolean(value && typeof value === "object" && "value" in value);
+}
+
+export function unref<T>(value: T | Ref<T>): T {
+  return isRef(value) ? value.value as T : value as T;
+}
+
+/** Exposes refs as ordinary values while preserving assignments to their value field. */
+export function proxyRefs<T extends object>(value: T): T {
+  return new Proxy(value, {
+    get(target, key, receiver) {
+      return unref(Reflect.get(target, key, receiver));
+    },
+    set(target, key, next, receiver) {
+      const previous = Reflect.get(target, key, receiver);
+      if (isRef(previous) && !isRef(next)) {
+        previous.value = next;
+        return true;
+      }
+      return Reflect.set(target, key, next, receiver);
+    }
+  });
+}
+
+export type WatchSource<T> = (() => T) | Ref<T> | T;
+export type WatchOptions = { immediate?: boolean; deep?: boolean };
+
+function traverse(value: unknown, seen = new Set<object>()): unknown {
+  if (!value || typeof value !== "object" || seen.has(value)) return value;
+  seen.add(value);
+  Object.values(value).forEach(entry => traverse(entry, seen));
+  return value;
+}
+
+/** Watches a ref, getter, or reactive object and returns a cleanup function. */
+export function watch<T>(
+  source: WatchSource<T>,
+  callback: (value: T, previous: T | undefined, onCleanup: (cleanup: () => void) => void) => void,
+  options: WatchOptions = {}
+): () => void {
+  const getter = typeof source === "function"
+    ? source as () => T
+    : isRef(source)
+      ? () => source.value as T
+      : () => source;
+  const forceTrigger = !isRef(source) && typeof source === "object";
+  let value!: T;
+  let previous: T | undefined;
+  let cleanup: (() => void) | undefined;
+  const runGetter = effect(() => {
+    value = getter();
+    if (options.deep || (!isRef(source) && typeof source === "object")) traverse(value);
+  }, { lazy: true, scheduler: job });
+  function job(): void {
+    runGetter();
+    if (forceTrigger || options.deep || !Object.is(value, previous)) {
+      cleanup?.();
+      let nextCleanup: (() => void) | undefined;
+      callback(value, previous, next => { nextCleanup = next; });
+      cleanup = nextCleanup;
+      previous = value;
+    }
+  }
+  if (options.immediate) job();
+  else {
+    runGetter();
+    previous = value;
+  }
+  return () => {
+    cleanup?.();
+    runGetter.stop?.();
+  };
+}
+
 /** Creates a lazily evaluated, cached value that invalidates when its dependencies change. */
 export function computed<T>(getter: () => T): ComputedRef<T> {
   let dirty = true;

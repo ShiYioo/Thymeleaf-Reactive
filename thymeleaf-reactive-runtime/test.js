@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { reactive, ref, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineComponent, Fragment, h, hotUpdate, hydrate, refreshComponentsFromPage, render, Teleport, inject, onMounted, onUnmounted, onUpdated, provide } from './dist/index.js';
+import { reactive, ref, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineComponent, Fragment, h, hotUpdate, hydrate, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, unref, watch } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -58,6 +58,37 @@ test('ref values participate in dependency tracking', () => {
   assert.equal(observed, 0);
   count.value = 2;
   assert.equal(observed, 2);
+});
+
+test('watch tracks getters and reactive objects while running registered cleanup', () => {
+  const state = reactive({ count: 0, nested: { enabled: false } });
+  const changes = [];
+  const stop = watch(() => state.count, (value, previous, onCleanup) => {
+    changes.push([value, previous]);
+    onCleanup(() => changes.push(['cleanup', value]));
+  }, { immediate: true });
+  state.count = 1;
+  state.count = 2;
+  stop();
+  assert.deepEqual(changes, [[0, undefined], ['cleanup', 0], [1, 0], ['cleanup', 1], [2, 1], ['cleanup', 2]]);
+
+  let nestedRuns = 0;
+  const stopNested = watch(state, () => { nestedRuns++; });
+  state.nested.enabled = true;
+  assert.equal(nestedRuns, 1);
+  stopNested();
+});
+
+test('proxyRefs unwraps values and writes through existing refs', () => {
+  const count = ref(1);
+  const state = proxyRefs({ count, label: 'Before' });
+  assert.equal(isRef(count), true);
+  assert.equal(unref(count), 1);
+  assert.equal(state.count, 1);
+  state.count = 2;
+  state.label = 'After';
+  assert.equal(count.value, 2);
+  assert.equal(state.label, 'After');
 });
 
 test('HMR polling replays every missed version in order', async () => {

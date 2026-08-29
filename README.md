@@ -81,7 +81,7 @@ The browser runtime also exports `computed(() => ...)` for cached derived state 
 
 ## Component API
 
-Alongside function components, the runtime supports object components with `setup`, `render`, `mounted`, `updated`, and `unmounted`. `setup` receives reactive props plus an `emit` function, and can use `ref`, `provide`, `inject`, `onMounted`, `onUpdated`, and `onUnmounted` to keep local component state and coordinate with ancestor components.
+Alongside function components, the runtime supports object components with `setup`, `render`, `mounted`, `updated`, and `unmounted`. `setup` receives reactive props plus an `emit` function, and can use `ref`, `computed`, `watch`, `provide`, `inject`, `onMounted`, `onUpdated`, and `onUnmounted` to keep local component state and coordinate with ancestor components. `watch` accepts a getter, ref, or reactive object, supports `immediate` and `deep`, and returns a stop function. `proxyRefs` automatically unwraps refs for render-oriented scopes.
 
 ```js
 const Counter = {
