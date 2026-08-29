@@ -688,6 +688,35 @@ test('hydrateRender adopts multi-root SSR fragments as one patchable range', () 
   assert.deepEqual([...root.children].map(element => element.textContent), ['changed', 'moved']);
 });
 
+test('hydrateRender creates component instances on top of SSR roots', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  root.innerHTML = '<button class="server">stale</button>';
+  const button = root.firstElementChild;
+  const hooks = [];
+  const Counter = {
+    props: ['label'],
+    setup(props) {
+      const count = ref(0);
+      onMounted(() => hooks.push('mounted'));
+      return () => h('button', {
+        class: 'client',
+        onClick: () => count.value++
+      }, `${props.label}:${count.value}`);
+    }
+  };
+  const tree = hydrateRender(h(Counter, { label: 'Count' }), root);
+  assert.equal(tree.instance !== undefined, true);
+  assert.equal(root.firstElementChild, button);
+  assert.equal(button.className, 'client');
+  assert.equal(button.textContent, 'Count:0');
+  assert.deepEqual(hooks, ['mounted']);
+  button.dispatchEvent(new Event('click'));
+  await nextTick();
+  assert.equal(root.firstElementChild, button);
+  assert.equal(button.textContent, 'Count:1');
+});
+
 test('VNode children normalize nested arrays as Fragment ranges', () => {
   const document = installDom();
   const root = document.createElement('main');

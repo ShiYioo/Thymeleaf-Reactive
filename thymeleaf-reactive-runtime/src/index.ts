@@ -1947,6 +1947,50 @@ export function patch(oldVNode: VNode | undefined, newVNode: VNode | undefined, 
 
 const renderedTrees = new WeakMap<Node, VNode>();
 
+function hydrateObjectComponent(vnode: VNode, node: Node | null, container: Node): VNode {
+  const definition = vnode.type as ComponentOptions;
+  const inputs = splitComponentProps(definition, vnode.props);
+  const instance = {} as ComponentInstance;
+  instance.vnode = vnode;
+  instance.parent = vnode.owner;
+  instance.props = reactive({ ...inputs.props });
+  instance.attrs = reactive({ ...inputs.attrs });
+  instance.listeners = inputs.listeners;
+  instance.children = vnode.children;
+  instance.provides = Object.create(instance.parent?.provides ?? null);
+  instance.beforeMountHooks = definition.beforeMount ? [definition.beforeMount] : [];
+  instance.mountedHooks = definition.mounted ? [definition.mounted] : [];
+  instance.beforeUpdateHooks = definition.beforeUpdate ? [definition.beforeUpdate] : [];
+  instance.updatedHooks = definition.updated ? [definition.updated] : [];
+  instance.beforeUnmountHooks = definition.beforeUnmount ? [definition.beforeUnmount] : [];
+  instance.unmountedHooks = definition.unmounted ? [definition.unmounted] : [];
+  instance.activatedHooks = definition.activated ? [definition.activated] : [];
+  instance.deactivatedHooks = definition.deactivated ? [definition.deactivated] : [];
+  instance.uid = nextComponentUid++;
+  instance.scope = effectScope();
+  let componentUpdate!: Effect;
+  componentUpdate = instance.scope.run(() => effect(() => {
+    const nextTree = renderObjectComponent(instance);
+    if (!instance.isMounted) {
+      instance.beforeMountHooks!.forEach(hook => hook());
+      instance.tree = hydrateVNode(nextTree, node, container);
+      instance.isMounted = true;
+      instance.mountedHooks!.forEach(hook => hook());
+    } else {
+      instance.beforeUpdateHooks!.forEach(hook => hook());
+      instance.tree = patch(instance.tree, nextTree, container) ?? instance.tree;
+      instance.updatedHooks!.forEach(hook => hook());
+    }
+    vnode.component = instance.tree;
+    vnode.el = instance.tree.el;
+    vnode.anchor = instance.tree.anchor;
+  }, { scheduler: () => queueJob(componentUpdate, instance.uid) }))!;
+  instance.update = componentUpdate;
+  instance.dispose = () => instance.scope?.stop();
+  vnode.instance = instance;
+  return vnode;
+}
+
 function hydrateFragment(vnode: VNode, node: Node | null, container: Node): VNode {
   const start = vnode.el = document.createComment("fragment");
   container.insertBefore(start, node);
@@ -1967,6 +2011,14 @@ function hydrateFragment(vnode: VNode, node: Node | null, container: Node): VNod
 }
 
 function hydrateVNode(vnode: VNode, node: Node | null, container: Node): VNode {
+  if (isObjectComponent(vnode.type)) return hydrateObjectComponent(vnode, node, container);
+  if (typeof vnode.type === "function") {
+    const component = vnode.type(vnode.props, vnode.children);
+    vnode.component = hydrateVNode(component, node, container);
+    vnode.el = vnode.component.el;
+    vnode.anchor = vnode.component.anchor;
+    return vnode;
+  }
   if (vnode.type === Fragment) return hydrateFragment(vnode, node, container);
   if (vnode.type === Text || vnode.type === Comment) {
     if (!node || (vnode.type === Text ? node.nodeType !== Node.TEXT_NODE : node.nodeType !== Node.COMMENT_NODE)) {
