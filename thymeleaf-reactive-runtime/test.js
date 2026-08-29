@@ -284,6 +284,20 @@ test('component HMR patches only mounted named component instances and cleans up
   assert.equal(root.textContent, '');
 });
 
+test('component HMR accepts object component replacements without refreshing the host tree', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Panel = defineComponent('object-hmr-test', { render: () => h('strong', { class: 'before' }, 'Before') });
+  const app = createApp(() => h('section', {}, [h('p', {}, 'Host'), h(Panel)]));
+  app.mount(root);
+  const host = root.querySelector('p');
+  assert.equal(hotUpdate('object-hmr-test', { render: () => h('strong', { class: 'after' }, 'After') }), true);
+  assert.equal(root.querySelector('p'), host);
+  assert.equal(root.querySelector('strong').textContent, 'After');
+  assert.equal(root.querySelector('strong').className, 'after');
+  app.unmount();
+});
+
 test('fragment components patch and hot-update multiple root nodes as one range', () => {
   const document = installDom();
   const root = document.createElement('main');
