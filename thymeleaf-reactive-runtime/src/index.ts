@@ -313,6 +313,21 @@ export function watch<T>(
   };
 }
 
+/** Runs immediately, tracks every reactive value it reads, and cleans up before reruns. */
+export function watchEffect(run: (onCleanup: (cleanup: () => void) => void) => void): () => void {
+  let cleanup: (() => void) | undefined;
+  const runner = effect(() => {
+    cleanup?.();
+    cleanup = undefined;
+    run(next => { cleanup = next; });
+  });
+  return () => {
+    runner.stop?.();
+    cleanup?.();
+    cleanup = undefined;
+  };
+}
+
 /** Creates a lazily evaluated, cached value that invalidates when its dependencies change. */
 export function computed<T>(getter: () => T): ComputedRef<T> {
   let dirty = true;
