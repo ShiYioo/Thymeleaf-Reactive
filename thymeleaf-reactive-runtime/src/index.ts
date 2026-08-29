@@ -3,7 +3,19 @@ import jsep from "jsep";
 type Primitive = string | number | boolean | null | undefined;
 export type Effect = (() => void) & { stop?: () => void };
 type EffectOptions = { lazy?: boolean; scheduler?: () => void };
-export type Component = (props: Record<string, unknown>, children: VNode[]) => VNode;
+export type ComponentRender = (props: Record<string, unknown>, children: VNode[]) => VNode;
+export type ComponentContext = {
+  children: VNode[];
+  emit: (event: string, ...args: unknown[]) => void;
+};
+export type ComponentOptions = {
+  setup?: (props: Record<string, unknown>, context: ComponentContext) => ComponentRender | void;
+  render?: ComponentRender;
+  mounted?: () => void;
+  updated?: () => void;
+  unmounted?: () => void;
+};
+export type Component = ComponentRender | ComponentOptions;
 export type RenderFunction = (state: any) => VNode;
 
 const effectStack: Effect[] = [];
@@ -151,9 +163,19 @@ export const Teleport = Symbol("teleport");
 type ComponentInstance = {
   vnode: VNode;
   tree: VNode;
-  update: () => void;
+  update: Effect;
   dispose: () => void;
+  props?: Record<string, unknown>;
+  children?: VNode[];
+  render?: ComponentRender;
+  parent?: ComponentInstance;
+  provides?: Record<PropertyKey, unknown>;
+  mountedHooks?: (() => void)[];
+  updatedHooks?: (() => void)[];
+  unmountedHooks?: (() => void)[];
+  isMounted?: boolean;
 };
+const componentInstanceStack: ComponentInstance[] = [];
 export type VNode = {
   type: string | typeof Text | typeof Comment | typeof Fragment | typeof Teleport | Component;
   props: Record<string, unknown>;
@@ -164,6 +186,7 @@ export type VNode = {
   key?: string | number;
   component?: VNode;
   instance?: ComponentInstance;
+  owner?: ComponentInstance;
   text?: string;
 };
 
@@ -176,6 +199,91 @@ export function h(type: VNode["type"], props: Record<string, unknown> = {}, chil
     el: null,
     key: props.key as string | number | undefined
   };
+}
+
+function currentComponentInstance(): ComponentInstance | undefined {
+  return componentInstanceStack.at(-1);
+}
+
+function registerLifecycleHook(name: "mountedHooks" | "updatedHooks" | "unmountedHooks", hook: () => void): void {
+  const instance = currentComponentInstance();
+  if (!instance) throw new Error("Lifecycle hooks must be registered during component setup");
+  instance[name]!.push(hook);
+}
+
+export function onMounted(hook: () => void): void {
+  registerLifecycleHook("mountedHooks", hook);
+}
+
+export function onUpdated(hook: () => void): void {
+  registerLifecycleHook("updatedHooks", hook);
+}
+
+export function onUnmounted(hook: () => void): void {
+  registerLifecycleHook("unmountedHooks", hook);
+}
+
+export function provide(key: PropertyKey, value: unknown): void {
+  const instance = currentComponentInstance();
+  if (!instance) throw new Error("provide() must be called during component setup");
+  instance.provides![key] = value;
+}
+
+export function inject<T>(key: PropertyKey, defaultValue?: T | (() => T)): T | undefined {
+  const instance = currentComponentInstance();
+  if (!instance) throw new Error("inject() must be called during component setup");
+  if (key in instance.provides!) return instance.provides![key] as T;
+  return typeof defaultValue === "function" ? (defaultValue as () => T)() : defaultValue;
+}
+
+function isObjectComponent(type: VNode["type"]): type is ComponentOptions {
+  return typeof type === "object" && type !== null;
+}
+
+function emitComponentEvent(props: Record<string, unknown>, event: string, args: unknown[]): void {
+  const listener = props[`on${event.slice(0, 1).toUpperCase()}${event.slice(1)}`];
+  if (typeof listener === "function") listener(...args);
+}
+
+function attachComponentOwner(vnode: VNode, owner: ComponentInstance): void {
+  if (typeof vnode.type === "function" || isObjectComponent(vnode.type)) vnode.owner = owner;
+  vnode.children.forEach(child => attachComponentOwner(child, owner));
+}
+
+function syncComponentProps(target: Record<string, unknown>, next: Record<string, unknown>): boolean {
+  let changed = false;
+  Object.keys(target).forEach(key => {
+    if (!(key in next)) {
+      delete target[key];
+      changed = true;
+    }
+  });
+  Object.entries(next).forEach(([key, value]) => {
+    if (!Object.is(target[key], value)) {
+      target[key] = value;
+      changed = true;
+    }
+  });
+  return changed;
+}
+
+function renderObjectComponent(instance: ComponentInstance): VNode {
+  componentInstanceStack.push(instance);
+  try {
+    if (!instance.render) {
+      const definition = instance.vnode.type as ComponentOptions;
+      instance.render = definition.setup?.(instance.props!, {
+        children: instance.children!,
+        emit: (event, ...args) => emitComponentEvent(instance.props!, event, args)
+      }) ?? definition.render;
+      if (!instance.render) throw new Error("Component requires setup() or render()");
+    }
+    const tree = instance.render(instance.props!, instance.children!);
+    attachComponentOwner(tree, instance);
+    return tree;
+  } finally {
+    componentInstanceStack.pop();
+  }
 }
 
 function interpolateSfcText(value: string, scope: Record<string, unknown>): string {
@@ -221,7 +329,9 @@ function resolveSfcComponent(tagName: string, scope: Record<string, unknown>): C
   const candidate = registryCandidate
     ?? scope[tagName]
     ?? scope[pascal];
-  return typeof candidate === "function" ? candidate as Component : undefined;
+  return typeof candidate === "function" || (typeof candidate === "object" && candidate !== null)
+    ? candidate as Component
+    : undefined;
 }
 
 function renderSfcChildren(nodes: Node[], scope: Record<string, unknown>, slots: VNode[]): VNode[] {
@@ -494,6 +604,37 @@ function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode
     vnode.children.forEach(child => mount(child, target, targetAnchor));
     return vnode;
   }
+  if (isObjectComponent(vnode.type)) {
+    const definition = vnode.type;
+    const instance = {} as ComponentInstance;
+    instance.vnode = vnode;
+    instance.parent = vnode.owner;
+    instance.props = reactive({ ...vnode.props });
+    instance.children = vnode.children;
+    instance.provides = Object.create(instance.parent?.provides ?? null);
+    instance.mountedHooks = definition.mounted ? [definition.mounted] : [];
+    instance.updatedHooks = definition.updated ? [definition.updated] : [];
+    instance.unmountedHooks = definition.unmounted ? [definition.unmounted] : [];
+    instance.isMounted = false;
+    instance.update = effect(() => {
+      const nextTree = renderObjectComponent(instance);
+      if (!instance.isMounted) {
+        mount(nextTree, container, anchor);
+        instance.isMounted = true;
+        instance.mountedHooks!.forEach(hook => hook());
+      } else {
+        instance.tree = patch(instance.tree, nextTree, container) ?? instance.tree;
+        instance.updatedHooks!.forEach(hook => hook());
+      }
+      instance.tree = nextTree;
+      instance.vnode.component = nextTree;
+      instance.vnode.el = nextTree.el;
+      instance.vnode.anchor = nextTree.anchor;
+    });
+    instance.dispose = () => instance.update.stop?.();
+    vnode.instance = instance;
+    return vnode;
+  }
   if (typeof vnode.type === "function") {
     vnode.component = vnode.type(vnode.props, vnode.children);
     mount(vnode.component, container, anchor);
@@ -537,6 +678,13 @@ function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode
 }
 
 function unmount(vnode: VNode, container: Node): void {
+  if (isObjectComponent(vnode.type) && vnode.instance) {
+    const instance = vnode.instance;
+    instance.dispose();
+    unmount(instance.tree, container);
+    instance.unmountedHooks!.forEach(hook => hook());
+    return;
+  }
   if (typeof vnode.type === "function") {
     vnode.instance?.dispose();
     if (vnode.component) unmount(vnode.component, container);
@@ -640,6 +788,19 @@ export function patch(oldVNode: VNode | undefined, newVNode: VNode | undefined, 
     patchChildren(nextTarget, oldVNode.children, newVNode.children, newVNode.anchor ?? null);
     return newVNode;
   }
+  if (isObjectComponent(newVNode.type)) {
+    const instance = oldVNode.instance;
+    if (!instance) return mount(newVNode, container, oldVNode.el);
+    newVNode.instance = instance;
+    instance.vnode = newVNode;
+    instance.children = newVNode.children;
+    const propsChanged = syncComponentProps(instance.props!, newVNode.props);
+    if (!propsChanged) instance.update();
+    newVNode.component = instance.tree;
+    newVNode.el = instance.tree.el;
+    newVNode.anchor = instance.tree.anchor;
+    return newVNode;
+  }
   if (typeof newVNode.type === "function") {
     const instance = oldVNode.instance;
     if (instance) {
@@ -712,16 +873,16 @@ export function createApp(render: (state: any) => VNode, state: object = {}) {
   };
 }
 
-type HotComponent = { render: Component; instances: Set<() => void> };
+type HotComponent = { render: ComponentRender; instances: Set<() => void> };
 const hotComponents = new Map<string, HotComponent>();
 const mountedApps = new Set<Effect>();
 
 /** Registers a named component so a compiler can replace its render function in development. */
-export function defineComponent(name: string, render: Component): Component {
+export function defineComponent(name: string, render: ComponentRender): ComponentRender {
   const existing = hotComponents.get(name);
   if (existing) existing.render = render;
   else hotComponents.set(name, { render, instances: new Set() });
-  const component: Component = (props, children) => {
+  const component: ComponentRender = (props, children) => {
     const entry = hotComponents.get(name);
     return (entry?.render ?? render)(props, children);
   };
@@ -763,7 +924,7 @@ export function adoptComponentRoot(root: Element, component: Component, props: R
 }
 
 /** Replaces one component's render function while preserving its mounted DOM/state. */
-export function hotUpdate(name: string, render: Component): boolean {
+export function hotUpdate(name: string, render: ComponentRender): boolean {
   const entry = hotComponents.get(name);
   if (!entry) return false;
   entry.render = render;

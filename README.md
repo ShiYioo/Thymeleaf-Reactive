@@ -79,6 +79,20 @@ Reactive binding expressions support safe member access plus common arithmetic, 
 
 The browser runtime also exports `computed(() => ...)` for cached derived state when authoring render-function components.
 
+## Component API
+
+Alongside function components, the runtime supports object components with `setup`, `render`, `mounted`, `updated`, and `unmounted`. `setup` receives reactive props plus an `emit` function, and can use `ref`, `provide`, `inject`, `onMounted`, `onUpdated`, and `onUnmounted` to keep local component state and coordinate with ancestor components.
+
+```js
+const Counter = {
+  setup(props, { emit }) {
+    const count = ref(0);
+    provide("theme", "dark");
+    return () => h("button", { onClick: () => emit("save", ++count.value) }, count.value);
+  }
+};
+```
+
 ## Virtual DOM Teleport
 
 The render-function runtime exports `Teleport` for rendering a VNode subtree into a different DOM target while retaining keyed updates and component state. Its `to` property accepts a CSS selector or an `Element`.

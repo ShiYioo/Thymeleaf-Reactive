@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { reactive, ref, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineComponent, Fragment, h, hotUpdate, hydrate, refreshComponentsFromPage, render, Teleport } from './dist/index.js';
+import { reactive, ref, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineComponent, Fragment, h, hotUpdate, hydrate, refreshComponentsFromPage, render, Teleport, inject, onMounted, onUnmounted, onUpdated, provide } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -376,6 +376,57 @@ test('Teleport patches and moves its child range without recreating keyed fields
   state.visible = false;
   assert.equal(secondTarget.childNodes.length, 0);
   app.unmount();
+});
+
+test('object components retain setup state and support lifecycle, emits, and injection', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const hooks = [];
+  const emitted = [];
+  const Child = {
+    setup(props, { emit }) {
+      const prefix = inject('prefix');
+      const clicks = ref(0);
+      onMounted(() => hooks.push('child-mounted'));
+      onUpdated(() => hooks.push('child-updated'));
+      onUnmounted(() => hooks.push('child-unmounted'));
+      return () => h('button', {
+        onClick: () => {
+          clicks.value++;
+          emit('save', clicks.value);
+        }
+      }, `${prefix}:${props.label}:${clicks.value}`);
+    }
+  };
+  const Parent = {
+    setup(props) {
+      provide('prefix', 'injected');
+      onMounted(() => hooks.push('parent-mounted'));
+      onUpdated(() => hooks.push('parent-updated'));
+      onUnmounted(() => hooks.push('parent-unmounted'));
+      return () => h('section', {}, [h(Child, { label: props.label, onSave: value => emitted.push(value) })]);
+    }
+  };
+  const app = createApp(state => h(Parent, { label: state.label }), { label: 'Before' });
+  const state = app.mount(root);
+  const button = root.querySelector('button');
+  assert.equal(button.textContent, 'injected:Before:0');
+  assert.deepEqual(hooks, ['child-mounted', 'parent-mounted']);
+
+  button.dispatchEvent(new Event('click', { bubbles: true }));
+  assert.equal(button.textContent, 'injected:Before:1');
+  assert.deepEqual(emitted, [1]);
+  assert.equal(hooks.includes('child-updated'), true);
+
+  state.label = 'After';
+  assert.equal(root.querySelector('button'), button);
+  assert.equal(button.textContent, 'injected:After:1');
+  assert.equal(hooks.includes('parent-updated'), true);
+
+  app.unmount();
+  assert.equal(root.childNodes.length, 0);
+  assert.equal(hooks.includes('child-unmounted'), true);
+  assert.equal(hooks.includes('parent-unmounted'), true);
 });
 
 test('virtual DOM performs keyed moves and insertions while updating props and listeners', () => {
