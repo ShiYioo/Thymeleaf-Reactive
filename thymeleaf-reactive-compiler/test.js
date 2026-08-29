@@ -73,3 +73,9 @@ test('compiles tr aliases used by the Thymeleaf starter', () => {
     'data-tr-each': 'item of items'
   });
 });
+
+test('compiles reactive html bindings into runtime metadata', () => {
+  const result = compileElementAttributes({ 'tr:html': 'content' });
+  assert.deepEqual(result.bindings, [{ kind: 'html', expression: 'content' }]);
+  assert.deepEqual(result.runtimeAttrs, { 'data-tr-html': 'content' });
+});
