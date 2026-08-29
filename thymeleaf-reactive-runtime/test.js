@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { adoptComponentRoot, reactive, ref, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineAsyncComponent, defineComponent, effectScope, Fragment, h, hotUpdate, hydrate, nextTick, onScopeDispose, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRef, toRefs, unref, watch, watchEffect } from './dist/index.js';
+import { adoptComponentRoot, reactive, ref, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, h, hotUpdate, hydrate, nextTick, onScopeDispose, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRef, toRefs, unref, watch, watchEffect } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -609,6 +609,39 @@ test('Teleport patches and moves its child range without recreating keyed fields
   state.visible = false;
   assert.equal(secondTarget.childNodes.length, 0);
   app.unmount();
+});
+
+test('KeepAlive caches keyed component instances across switches', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const hooks = [];
+  const Counter = {
+    setup(props) {
+      const count = ref(0);
+      onMounted(() => hooks.push(`mounted:${props.name}`));
+      onUnmounted(() => hooks.push(`unmounted:${props.name}`));
+      return () => h('button', { onClick: () => count.value++ }, `${props.name}:${count.value}`);
+    }
+  };
+  const app = createApp(state => h(KeepAlive, {}, [
+    h(Counter, { key: state.name, name: state.name })
+  ]), { name: 'A' });
+  const state = app.mount(root);
+  const firstA = root.querySelector('button');
+  firstA.dispatchEvent(new Event('click'));
+  assert.equal(firstA.textContent, 'A:1');
+  state.name = 'B';
+  const buttonB = root.querySelector('button');
+  assert.equal(buttonB.textContent, 'B:0');
+  state.name = 'A';
+  assert.equal(root.querySelector('button'), firstA);
+  assert.equal(firstA.textContent, 'A:1');
+  assert.deepEqual(hooks, ['mounted:A', 'mounted:B']);
+  state.name = 'B';
+  assert.equal(root.querySelector('button'), buttonB);
+  app.unmount();
+  assert.equal(hooks.includes('unmounted:A'), true);
+  assert.equal(hooks.includes('unmounted:B'), true);
 });
 
 test('object components retain setup state and support lifecycle, emits, and injection', () => {

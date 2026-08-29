@@ -109,6 +109,14 @@ const modal = h(Teleport, { to: "#modal-root" }, [
 
 Changing `to` moves the existing teleported DOM range to the new target instead of recreating it.
 
+## Virtual DOM KeepAlive
+
+The render-function runtime exports `KeepAlive` for caching keyed component instances while switching between views. Cached instances leave the active DOM but keep their local state and effect scope; switching back patches and reuses the cached instance. Unmounting `KeepAlive` disposes every cached component normally.
+
+```js
+h(KeepAlive, {}, [h(Editor, { key: activeView })]);
+```
+
 ## License
 
 Apache-2.0

@@ -407,6 +407,7 @@ export const Text = Symbol("text");
 export const Comment = Symbol("comment");
 export const Fragment = Symbol("fragment");
 export const Teleport = Symbol("teleport");
+export const KeepAlive = Symbol("keep-alive");
 type ComponentInstance = {
   vnode: VNode;
   tree: VNode;
@@ -426,7 +427,7 @@ type ComponentInstance = {
 type HotReloadableRender = ComponentRender & { hmrUpdate?: (next: ComponentOptions) => boolean };
 const componentInstanceStack: ComponentInstance[] = [];
 export type VNode = {
-  type: string | typeof Text | typeof Comment | typeof Fragment | typeof Teleport | Component;
+  type: string | typeof Text | typeof Comment | typeof Fragment | typeof Teleport | typeof KeepAlive | Component;
   props: Record<string, unknown>;
   children: VNode[];
   el: Node | null;
@@ -437,6 +438,8 @@ export type VNode = {
   instance?: ComponentInstance;
   owner?: ComponentInstance;
   slot?: string;
+  cache?: Map<unknown, VNode>;
+  activeKey?: unknown;
   text?: string;
 };
 
@@ -1108,6 +1111,24 @@ function resolveTeleportTarget(to: unknown): Element {
   throw new Error("Teleport requires a valid `to` selector or Element target");
 }
 
+function keepAliveKey(vnode: VNode): unknown {
+  return vnode.key ?? vnode.type;
+}
+
+function detachVNode(vnode: VNode): void {
+  if (vnode.type === Fragment) {
+    let node = vnode.el;
+    while (node) {
+      const next = node === vnode.anchor ? null : node.nextSibling;
+      node.parentNode?.removeChild(node);
+      if (!next) break;
+      node = next;
+    }
+    return;
+  }
+  if (vnode.el?.parentNode) vnode.el.parentNode.removeChild(vnode.el);
+}
+
 function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode {
   if (vnode.type === Text) {
     vnode.el = document.createTextNode(vnode.text ?? "");
@@ -1135,6 +1156,22 @@ function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode
     target.appendChild(targetAnchor);
     vnode.target = target;
     vnode.children.forEach(child => mount(child, target, targetAnchor));
+    return vnode;
+  }
+  if (vnode.type === KeepAlive) {
+    vnode.cache = new Map();
+    const child = vnode.children[0];
+    if (!child) {
+      vnode.el = document.createComment("keep-alive");
+      container.insertBefore(vnode.el, anchor);
+      return vnode;
+    }
+    vnode.cache.set(keepAliveKey(child), child);
+    vnode.activeKey = keepAliveKey(child);
+    mount(child, container, anchor);
+    vnode.component = child;
+    vnode.el = child.el;
+    vnode.anchor = child.anchor;
     return vnode;
   }
   if (isObjectComponent(vnode.type)) {
@@ -1230,6 +1267,19 @@ function unmount(vnode: VNode, container: Node): void {
   if (typeof vnode.type === "function") {
     vnode.instance?.dispose();
     if (vnode.component) unmount(vnode.component, container);
+    return;
+  }
+  if (vnode.type === KeepAlive) {
+    const cache = vnode.cache;
+    if (cache) {
+      const seen = new Set<VNode>();
+      cache.forEach(cached => {
+        if (!seen.has(cached)) {
+          seen.add(cached);
+          unmount(cached, cached.el?.parentNode ?? container);
+        }
+      });
+    } else if (vnode.el?.parentNode === container) container.removeChild(vnode.el);
     return;
   }
   if (vnode.type === Fragment) {
@@ -1328,6 +1378,37 @@ export function patch(oldVNode: VNode | undefined, newVNode: VNode | undefined, 
       if (oldTarget && oldVNode.anchor?.parentNode === oldTarget) oldTarget.removeChild(oldVNode.anchor);
     }
     patchChildren(nextTarget, oldVNode.children, newVNode.children, newVNode.anchor ?? null);
+    return newVNode;
+  }
+  if (newVNode.type === KeepAlive) {
+    const cache = newVNode.cache = oldVNode.cache ?? new Map();
+    const oldChild = oldVNode.component;
+    const nextChild = newVNode.children[0];
+    if (!nextChild) {
+      if (oldChild) detachVNode(oldChild);
+      newVNode.el = oldVNode.el ?? document.createComment("keep-alive");
+      if (!oldVNode.el) container.appendChild(newVNode.el);
+      newVNode.activeKey = undefined;
+      return newVNode;
+    }
+    const nextKey = keepAliveKey(nextChild);
+    const insertionAnchor = oldChild?.anchor?.nextSibling ?? oldChild?.el?.nextSibling ?? null;
+    if (oldChild && oldVNode.activeKey !== nextKey) {
+      cache.set(oldVNode.activeKey, oldChild);
+      detachVNode(oldChild);
+    }
+    const cached = cache.get(nextKey);
+    const active = cached
+      ? patch(cached, nextChild, container) ?? cached
+      : nextChild;
+    if (!cached) {
+      mount(active, container, insertionAnchor);
+      cache.set(nextKey, active);
+    } else moveVNode(active, container, insertionAnchor);
+    newVNode.activeKey = nextKey;
+    newVNode.component = active;
+    newVNode.el = active.el;
+    newVNode.anchor = active.anchor;
     return newVNode;
   }
   if (isObjectComponent(newVNode.type)) {
