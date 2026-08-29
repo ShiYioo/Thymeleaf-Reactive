@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { adoptComponentRoot, reactive, ref, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, nextTick, onActivated, onDeactivated, onScopeDispose, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRef, toRefs, unref, watch, watchEffect } from './dist/index.js';
+import { adoptComponentRoot, reactive, ref, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onScopeDispose, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRef, toRefs, unref, watch, watchEffect } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -655,8 +655,11 @@ test('object components retain setup state and support lifecycle, emits, and inj
     setup(props, { emit }) {
       const prefix = inject('prefix');
       const clicks = ref(0);
+      onBeforeMount(() => hooks.push('child-before-mount'));
       onMounted(() => hooks.push('child-mounted'));
+      onBeforeUpdate(() => hooks.push('child-before-update'));
       onUpdated(() => hooks.push('child-updated'));
+      onBeforeUnmount(() => hooks.push('child-before-unmount'));
       onUnmounted(() => hooks.push('child-unmounted'));
       return () => h('button', {
         onClick: () => {
@@ -679,11 +682,12 @@ test('object components retain setup state and support lifecycle, emits, and inj
   const state = app.mount(root);
   const button = root.querySelector('button');
   assert.equal(button.textContent, 'injected:Before:0');
-  assert.deepEqual(hooks, ['child-mounted', 'parent-mounted']);
+  assert.deepEqual(hooks, ['child-before-mount', 'child-mounted', 'parent-mounted']);
 
   button.dispatchEvent(new Event('click', { bubbles: true }));
   assert.equal(button.textContent, 'injected:Before:1');
   assert.deepEqual(emitted, [1]);
+  assert.equal(hooks.includes('child-before-update'), true);
   assert.equal(hooks.includes('child-updated'), true);
 
   state.label = 'After';
@@ -693,6 +697,7 @@ test('object components retain setup state and support lifecycle, emits, and inj
 
   app.unmount();
   assert.equal(root.childNodes.length, 0);
+  assert.ok(hooks.indexOf('child-before-unmount') < hooks.indexOf('child-unmounted'));
   assert.equal(hooks.includes('child-unmounted'), true);
   assert.equal(hooks.includes('parent-unmounted'), true);
 });

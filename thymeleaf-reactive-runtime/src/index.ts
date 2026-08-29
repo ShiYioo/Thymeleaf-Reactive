@@ -15,8 +15,11 @@ export type ComponentOptions = {
   render?: ComponentRender;
   hmrRender?: (scope: Record<string, unknown>, children: VNode[]) => VNode;
   hmrSignature?: string;
+  beforeMount?: () => void;
   mounted?: () => void;
+  beforeUpdate?: () => void;
   updated?: () => void;
+  beforeUnmount?: () => void;
   unmounted?: () => void;
   activated?: () => void;
   deactivated?: () => void;
@@ -433,8 +436,11 @@ type ComponentInstance = {
   parent?: ComponentInstance;
   provides?: Record<PropertyKey, unknown>;
   mountedHooks?: (() => void)[];
+  beforeMountHooks?: (() => void)[];
   updatedHooks?: (() => void)[];
+  beforeUpdateHooks?: (() => void)[];
   unmountedHooks?: (() => void)[];
+  beforeUnmountHooks?: (() => void)[];
   activatedHooks?: (() => void)[];
   deactivatedHooks?: (() => void)[];
   isMounted?: boolean;
@@ -475,7 +481,7 @@ function currentComponentInstance(): ComponentInstance | undefined {
   return componentInstanceStack.at(-1);
 }
 
-function registerLifecycleHook(name: "mountedHooks" | "updatedHooks" | "unmountedHooks" | "activatedHooks" | "deactivatedHooks", hook: () => void): void {
+function registerLifecycleHook(name: "beforeMountHooks" | "mountedHooks" | "beforeUpdateHooks" | "updatedHooks" | "beforeUnmountHooks" | "unmountedHooks" | "activatedHooks" | "deactivatedHooks", hook: () => void): void {
   const instance = currentComponentInstance();
   if (!instance) throw new Error("Lifecycle hooks must be registered during component setup");
   instance[name]!.push(hook);
@@ -485,12 +491,24 @@ export function onMounted(hook: () => void): void {
   registerLifecycleHook("mountedHooks", hook);
 }
 
+export function onBeforeMount(hook: () => void): void {
+  registerLifecycleHook("beforeMountHooks", hook);
+}
+
 export function onUpdated(hook: () => void): void {
   registerLifecycleHook("updatedHooks", hook);
 }
 
+export function onBeforeUpdate(hook: () => void): void {
+  registerLifecycleHook("beforeUpdateHooks", hook);
+}
+
 export function onUnmounted(hook: () => void): void {
   registerLifecycleHook("unmountedHooks", hook);
+}
+
+export function onBeforeUnmount(hook: () => void): void {
+  registerLifecycleHook("beforeUnmountHooks", hook);
 }
 
 export function onActivated(hook: () => void): void {
@@ -1331,8 +1349,11 @@ function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode
     instance.props = reactive({ ...vnode.props });
     instance.children = vnode.children;
     instance.provides = Object.create(instance.parent?.provides ?? null);
+    instance.beforeMountHooks = definition.beforeMount ? [definition.beforeMount] : [];
     instance.mountedHooks = definition.mounted ? [definition.mounted] : [];
+    instance.beforeUpdateHooks = definition.beforeUpdate ? [definition.beforeUpdate] : [];
     instance.updatedHooks = definition.updated ? [definition.updated] : [];
+    instance.beforeUnmountHooks = definition.beforeUnmount ? [definition.beforeUnmount] : [];
     instance.unmountedHooks = definition.unmounted ? [definition.unmounted] : [];
     instance.activatedHooks = definition.activated ? [definition.activated] : [];
     instance.deactivatedHooks = definition.deactivated ? [definition.deactivated] : [];
@@ -1341,10 +1362,12 @@ function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode
     instance.update = instance.scope.run(() => effect(() => {
       const nextTree = renderObjectComponent(instance);
       if (!instance.isMounted) {
+        instance.beforeMountHooks!.forEach(hook => hook());
         mount(nextTree, container, anchor);
         instance.isMounted = true;
         instance.mountedHooks!.forEach(hook => hook());
       } else {
+        instance.beforeUpdateHooks!.forEach(hook => hook());
         instance.tree = patch(instance.tree, nextTree, container) ?? instance.tree;
         instance.updatedHooks!.forEach(hook => hook());
       }
@@ -1413,6 +1436,7 @@ function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode
 function unmount(vnode: VNode, container: Node): void {
   if (isObjectComponent(vnode.type) && vnode.instance) {
     const instance = vnode.instance;
+    instance.beforeUnmountHooks!.forEach(hook => hook());
     instance.dispose();
     unmount(instance.tree, container);
     instance.unmountedHooks!.forEach(hook => hook());
@@ -1800,8 +1824,11 @@ export function adoptComponentRoot(root: Element, component: Component, props: R
     instance.props = reactive({ ...props });
     instance.children = vnode.children;
     instance.provides = Object.create(null);
+    instance.beforeMountHooks = definition.beforeMount ? [definition.beforeMount] : [];
     instance.mountedHooks = definition.mounted ? [definition.mounted] : [];
+    instance.beforeUpdateHooks = definition.beforeUpdate ? [definition.beforeUpdate] : [];
     instance.updatedHooks = definition.updated ? [definition.updated] : [];
+    instance.beforeUnmountHooks = definition.beforeUnmount ? [definition.beforeUnmount] : [];
     instance.unmountedHooks = definition.unmounted ? [definition.unmounted] : [];
     instance.activatedHooks = definition.activated ? [definition.activated] : [];
     instance.deactivatedHooks = definition.deactivated ? [definition.deactivated] : [];
@@ -1810,11 +1837,15 @@ export function adoptComponentRoot(root: Element, component: Component, props: R
     instance.scope = effectScope();
     instance.update = instance.scope.run(() => effect(() => {
       const nextTree = renderObjectComponent(instance);
+      if (!instance.isMounted) instance.beforeMountHooks!.forEach(hook => hook());
+      else instance.beforeUpdateHooks!.forEach(hook => hook());
       instance.tree = patch(instance.tree, nextTree, container) ?? instance.tree;
       if (!instance.isMounted) {
         instance.isMounted = true;
         instance.mountedHooks!.forEach(hook => hook());
-      } else instance.updatedHooks!.forEach(hook => hook());
+      } else {
+        instance.updatedHooks!.forEach(hook => hook());
+      }
       instance.vnode.component = instance.tree;
       instance.vnode.el = instance.tree.el;
       instance.vnode.anchor = instance.tree.anchor;
