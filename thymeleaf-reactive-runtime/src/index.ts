@@ -1295,16 +1295,21 @@ export function adoptComponentRoot(root: Element, component: Component, props: R
   const container = root.parentNode;
   if (!container) return;
   const tree = vnodeFromDom(root);
-  if (isObjectComponent(component)) {
-    const vnode: VNode = { type: component, props, children: tree.children, el: tree.el, anchor: tree.anchor, component: tree };
+  const name = componentNames.get(component);
+  const entry = name ? hotComponents.get(name) : undefined;
+  const definition = isObjectComponent(component)
+    ? component
+    : entry && isObjectComponent(entry.render) ? entry.render : undefined;
+  if (definition) {
+    const vnode: VNode = { type: definition, props, children: tree.children, el: tree.el, anchor: tree.anchor, component: tree };
     const instance = {} as ComponentInstance;
     instance.vnode = vnode;
     instance.props = reactive({ ...props });
     instance.children = vnode.children;
     instance.provides = Object.create(null);
-    instance.mountedHooks = component.mounted ? [component.mounted] : [];
-    instance.updatedHooks = component.updated ? [component.updated] : [];
-    instance.unmountedHooks = component.unmounted ? [component.unmounted] : [];
+    instance.mountedHooks = definition.mounted ? [definition.mounted] : [];
+    instance.updatedHooks = definition.updated ? [definition.updated] : [];
+    instance.unmountedHooks = definition.unmounted ? [definition.unmounted] : [];
     instance.isMounted = false;
     instance.tree = tree;
     instance.scope = effectScope();
@@ -1319,12 +1324,18 @@ export function adoptComponentRoot(root: Element, component: Component, props: R
       instance.vnode.el = instance.tree.el;
       instance.vnode.anchor = instance.tree.anchor;
     }))!;
-    instance.dispose = () => instance.scope?.stop();
+    const update = () => {
+      if (entry && isObjectComponent(entry.render) && hotUpdateObjectComponent(vnode, entry.render)) return;
+      instance.update();
+    };
+    instance.dispose = () => {
+      instance.scope?.stop();
+      entry?.instances.delete(update);
+    };
     vnode.instance = instance;
+    entry?.instances.add(update);
     return;
   }
-  const name = componentNames.get(component);
-  const entry = name ? hotComponents.get(name) : undefined;
   if (!entry) return;
   const vnode: VNode = { type: component, props, children: tree.children, el: tree.el, anchor: tree.anchor, component: tree };
   const instance = {} as ComponentInstance;

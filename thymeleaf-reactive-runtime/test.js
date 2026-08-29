@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { reactive, ref, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineAsyncComponent, defineComponent, effectScope, Fragment, h, hotUpdate, hydrate, nextTick, onScopeDispose, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRef, toRefs, unref, watch, watchEffect } from './dist/index.js';
+import { adoptComponentRoot, reactive, ref, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineAsyncComponent, defineComponent, effectScope, Fragment, h, hotUpdate, hydrate, nextTick, onScopeDispose, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRef, toRefs, unref, watch, watchEffect } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -326,6 +326,33 @@ test('component HMR preserves script setup local refs while replacing its templa
   assert.equal(root.querySelector('button'), button);
   assert.equal(button.textContent, 'Updated count: 2');
   app.unmount();
+});
+
+test('adopted script setup components preserve local refs across HMR', () => {
+  const document = installDom();
+  document.body.innerHTML = '<section data-tr-component="counter"><button>Server</button></section>';
+  const root = document.querySelector('section');
+  const Counter = defineComponent('adopted-script-setup-hmr-state-test', compileSfcComponent(`
+    <template><button @click="increment">Count: {{ count }}</button></template>
+    <script setup>
+      const count = ref(1);
+      function increment() { count.value++; }
+    </script>
+  `));
+  adoptComponentRoot(root, Counter);
+  const button = document.querySelector('button');
+  button.dispatchEvent(new Event('click', { bubbles: true }));
+  assert.equal(button.textContent, 'Count: 2');
+
+  assert.equal(hotUpdate('adopted-script-setup-hmr-state-test', compileSfcComponent(`
+    <template><button @click="increment">Updated count: {{ count }}</button></template>
+    <script setup>
+      const count = ref(1);
+      function increment() { count.value++; }
+    </script>
+  `)), true);
+  assert.equal(document.querySelector('button'), button);
+  assert.equal(button.textContent, 'Updated count: 2');
 });
 
 test('fragment components patch and hot-update multiple root nodes as one range', () => {
