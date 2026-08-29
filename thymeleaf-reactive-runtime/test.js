@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { adoptComponentRoot, reactive, ref, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, h, hotUpdate, hydrate, nextTick, onActivated, onDeactivated, onScopeDispose, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRef, toRefs, unref, watch, watchEffect } from './dist/index.js';
+import { adoptComponentRoot, reactive, ref, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, nextTick, onActivated, onDeactivated, onScopeDispose, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRef, toRefs, unref, watch, watchEffect } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -1431,5 +1431,29 @@ test('Transition runs enter and leave lifecycle hooks around keyed replacement',
   await new Promise(resolve => setTimeout(resolve, 5));
   assert.equal(root.textContent, 'Second');
   assert.deepEqual(events.slice(-2), ['after-enter', 'after-leave']);
+  app.unmount();
+});
+
+test('TransitionGroup preserves keyed nodes and transitions list additions and removals', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const state = reactive({ items: ['a', 'b'] });
+  const events = [];
+  const app = createApp(() => h(TransitionGroup, {
+    tag: 'ul',
+    name: 'list',
+    onAfterEnter: element => events.push(`enter:${element.textContent}`),
+    onAfterLeave: element => events.push(`leave:${element.textContent}`)
+  }, state.items.map(item => h('li', { key: item }, item))));
+  app.mount(root);
+  const first = root.querySelector('li');
+  state.items = ['b', 'c'];
+  assert.deepEqual([...root.querySelectorAll('li')].map(item => item.textContent), ['b', 'c', 'a']);
+  await new Promise(resolve => setTimeout(resolve, 5));
+  assert.ok(events.includes('enter:c'));
+  assert.ok(events.includes('leave:a'));
+  assert.equal(first.parentNode, null);
+  assert.deepEqual([...root.querySelectorAll('li')].map(item => item.textContent), ['b', 'c']);
+  assert.equal(root.querySelectorAll('li')[0].textContent, 'b');
   app.unmount();
 });

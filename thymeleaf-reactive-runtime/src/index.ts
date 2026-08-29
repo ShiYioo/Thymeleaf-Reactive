@@ -421,6 +421,7 @@ export const Teleport = Symbol("teleport");
 export const KeepAlive = Symbol("keep-alive");
 export const Suspense = Symbol("suspense");
 export const Transition = Symbol("transition");
+export const TransitionGroup = Symbol("transition-group");
 type ComponentInstance = {
   vnode: VNode;
   tree: VNode;
@@ -442,7 +443,7 @@ type ComponentInstance = {
 type HotReloadableRender = ComponentRender & { hmrUpdate?: (next: ComponentOptions) => boolean };
 const componentInstanceStack: ComponentInstance[] = [];
 export type VNode = {
-  type: string | typeof Text | typeof Comment | typeof Fragment | typeof Teleport | typeof KeepAlive | typeof Suspense | typeof Transition | Component;
+  type: string | typeof Text | typeof Comment | typeof Fragment | typeof Teleport | typeof KeepAlive | typeof Suspense | typeof Transition | typeof TransitionGroup | Component;
   props: Record<string, unknown>;
   children: VNode[];
   el: Node | null;
@@ -1146,6 +1147,14 @@ function transitionLeave(vnode: VNode, done: () => void): void {
   }, 0);
 }
 
+function isTransitionProp(key: string): boolean {
+  return key === "tag" || key === "name" || key.startsWith("onBefore") || key.startsWith("onAfter") || key === "onEnter" || key === "onLeave";
+}
+
+function transitionGroupElementProps(props: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(props).filter(([key]) => !isTransitionProp(key)));
+}
+
 const eventListeners = new WeakMap<Element, Map<string, EventListener>>();
 const svgNamespace = "http://www.w3.org/2000/svg";
 const componentNames = new WeakMap<Component, string>();
@@ -1288,6 +1297,15 @@ function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode
     transitionEnter(childWithTransitionProps(child, vnode.props));
     return vnode;
   }
+  if (vnode.type === TransitionGroup) {
+    const group = h(String(vnode.props.tag ?? "div"), transitionGroupElementProps(vnode.props), vnode.children);
+    vnode.component = group;
+    mount(group, container, anchor);
+    vnode.el = group.el;
+    vnode.anchor = group.anchor;
+    vnode.children.forEach(child => transitionEnter(childWithTransitionProps(child, vnode.props)));
+    return vnode;
+  }
   if (vnode.type === KeepAlive) {
     vnode.cache = new Map();
     const child = vnode.children[0];
@@ -1413,6 +1431,24 @@ function unmount(vnode: VNode, container: Node): void {
     if (vnode.component) transitionLeave(childWithTransitionProps(vnode.component, vnode.props), () => unmount(vnode.component!, container));
     return;
   }
+  if (vnode.type === TransitionGroup) {
+    const group = vnode.component;
+    const children = group?.children ?? [];
+    let remaining = children.length;
+    const finish = () => {
+      if (remaining > 0) remaining--;
+      if (!remaining) {
+        children.forEach(child => { if (child.el) unmount(child, group!.el!); });
+        if (group?.el?.parentNode === container) container.removeChild(group.el);
+      }
+    };
+    if (!remaining) {
+      if (group?.el?.parentNode === container) container.removeChild(group.el);
+      return;
+    }
+    children.forEach(child => transitionLeave(childWithTransitionProps(child, vnode.props), finish));
+    return;
+  }
   if (vnode.type === KeepAlive) {
     const cache = vnode.cache;
     if (cache) {
@@ -1450,6 +1486,10 @@ function moveVNode(vnode: VNode, container: Node, anchor: Node | null): void {
     if (vnode.component) moveVNode(vnode.component, container, anchor);
     return;
   }
+  if (vnode.type === TransitionGroup) {
+    if (vnode.component) moveVNode(vnode.component, container, anchor);
+    return;
+  }
   if (vnode.type === Suspense) {
     if (vnode.component) moveVNode(vnode.component, container, anchor);
     return;
@@ -1470,7 +1510,13 @@ function moveVNode(vnode: VNode, container: Node, anchor: Node | null): void {
   }
 }
 
-function patchChildren(container: Node, oldChildren: VNode[], newChildren: VNode[], endAnchor: Node | null = null): void {
+function patchChildren(
+  container: Node,
+  oldChildren: VNode[],
+  newChildren: VNode[],
+  endAnchor: Node | null = null,
+  transitionProps?: Record<string, unknown>
+): void {
   const oldKeyed = new Map<string | number, { child: VNode; index: number }>();
   const duplicateKeys = new Set<string | number>();
   oldChildren.forEach((child, index) => {
@@ -1490,11 +1536,17 @@ function patchChildren(container: Node, oldChildren: VNode[], newChildren: VNode
       if (match.index !== i && next.el) moveVNode(next, container, anchor);
       oldKeyed.delete(identity);
       used.add(match.child);
-    } else mount(next, container, anchor);
+    } else {
+      mount(next, container, anchor);
+      if (transitionProps) transitionEnter(childWithTransitionProps(next, transitionProps));
+    }
     anchor = next.el;
   }
   oldKeyed.forEach(({ child }) => {
-    if (!used.has(child)) unmount(child, container);
+    if (!used.has(child)) {
+      if (transitionProps) transitionLeave(childWithTransitionProps(child, transitionProps), () => unmount(child, container));
+      else unmount(child, container);
+    }
   });
 }
 
@@ -1556,6 +1608,32 @@ export function patch(oldVNode: VNode | undefined, newVNode: VNode | undefined, 
     }
     newVNode.el = newVNode.component.el;
     newVNode.anchor = newVNode.component.anchor;
+    return newVNode;
+  }
+  if (newVNode.type === TransitionGroup) {
+    const oldGroup = oldVNode.component;
+    if (!oldGroup) return mount(newVNode, container, oldVNode.el);
+    const nextGroup = h(String(newVNode.props.tag ?? "div"), transitionGroupElementProps(newVNode.props), newVNode.children);
+    if (oldGroup.type !== nextGroup.type) {
+      mount(nextGroup, container, oldGroup.el);
+      oldGroup.el && unmount(oldGroup, container);
+    } else {
+      nextGroup.el = oldGroup.el;
+      const element = oldGroup.el as Element;
+      Object.keys({ ...oldGroup.props, ...nextGroup.props }).forEach(key => {
+        if (oldGroup.props[key] !== nextGroup.props[key]) setProp(element, key, nextGroup.props[key], oldGroup.props[key]);
+      });
+      patchChildren(element, oldGroup.children, nextGroup.children, null, newVNode.props);
+      const nextKeys = new Set(nextGroup.children);
+      const leavingAnchor = oldGroup.children
+        .find(child => !nextKeys.has(child) && child.el?.parentNode === element)?.el ?? null;
+      if (leavingAnchor) {
+        nextGroup.children.forEach(child => moveVNode(child, element, leavingAnchor));
+      }
+    }
+    newVNode.component = nextGroup;
+    newVNode.el = nextGroup.el;
+    newVNode.anchor = nextGroup.anchor;
     return newVNode;
   }
   if (newVNode.type === KeepAlive) {

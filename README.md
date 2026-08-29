@@ -129,6 +129,14 @@ The runtime exports `Transition` for single-child enter and leave transitions. I
 h(Transition, { name: "fade" }, [h("p", {}, "Content")]);
 ```
 
+For keyed lists, `TransitionGroup` keeps the existing keyed diff while applying the same enter and leave hooks to added and removed children. Its `tag` prop selects the container element.
+
+```js
+h(TransitionGroup, { tag: "ul", name: "list" }, items.map(item =>
+  h("li", { key: item.id }, item.label)
+));
+```
+
 ## Virtual DOM KeepAlive
 
 The render-function runtime exports `KeepAlive` for caching keyed component instances while switching between views. Cached instances leave the active DOM but keep their local state and effect scope; switching back patches and reuses the cached instance. Unmounting `KeepAlive` disposes every cached component normally.
