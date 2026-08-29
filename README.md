@@ -59,7 +59,7 @@ In development mode, a template component can opt into a resource-backed Vue SFC
 </section>
 ```
 
-The SFC template compiler supports HTML, interpolation, `v-if`/`v-else-if`/`v-else`, `v-show`, `v-for` (including `(item, index) in items` and `of` syntax), `v-text`, `v-model`, `:prop`/`v-bind`, `@event`/`v-on` (including `method()` calls), and `<slot>`. The browser registers `components/Counter.vue` against the `counter` root name, so the server's file-based HMR event remains component-scoped even when filenames and rendered component names differ.
+The SFC template compiler supports HTML, interpolation, `v-if`/`v-else-if`/`v-else`, `v-show`, `v-for` (including `(item, index) in items` and `of` syntax), `v-text`, `v-model`, `:prop`/`v-bind`, `@event`/`v-on` (including `method()` calls), and default or named `<slot>` content with fallbacks. Named slot content can use `v-slot:name`, `#name`, or `slot="name"`. The browser registers `components/Counter.vue` against the `counter` root name, so the server's file-based HMR event remains component-scoped even when filenames and rendered component names differ.
 
 Resource SFCs can use a CSP-safe `<script setup>` subset without evaluating arbitrary JavaScript: `ref(initial)`, `reactive(initial)`, `computed(() => expression)`, and zero-argument methods composed of assignments, increments/decrements, and `emit("event", value)`. Refs are automatically unwrapped in templates and `v-model`. Template-only HMR updates preserve existing script-setup local state, including components adopted from the server-rendered first paint. Unsupported statements fail explicitly instead of being evaluated dynamically.
 

@@ -840,6 +840,44 @@ test('SFC resolves registered child components into the VDOM tree', () => {
   assert.equal(child.textContent, 'After');
 });
 
+test('SFC renders named slots, direct slot content, and slot fallbacks', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Card = compileSfcComponent(`
+    <template>
+      <article>
+        <header><slot name="header"><h1>Fallback header</h1></slot></header>
+        <main><slot><p>Fallback body</p></slot></main>
+        <footer><slot name="footer"><small>Fallback footer</small></slot></footer>
+      </article>
+    </template>
+  `);
+  const render = compileSfcComponent(`
+    <template>
+      <Card>
+        <template v-slot:header><h2>{{ title }}</h2></template>
+        <p slot="footer">{{ footer }}</p>
+        <strong>{{ body }}</strong>
+      </Card>
+    </template>
+  `);
+  const state = createApp(render, {
+    title: 'Heading', body: 'Body', footer: 'Footer', components: { Card }
+  }).mount(root);
+  assert.equal(root.querySelector('h2').textContent, 'Heading');
+  assert.equal(root.querySelector('main strong').textContent, 'Body');
+  assert.equal(root.querySelector('footer p').textContent, 'Footer');
+  assert.equal(root.querySelector('small'), null);
+  state.title = 'Updated';
+  assert.equal(root.querySelector('h2').textContent, 'Updated');
+
+  const fallbackRoot = document.createElement('main');
+  createApp(() => h(Card)).mount(fallbackRoot);
+  assert.equal(fallbackRoot.querySelector('h1').textContent, 'Fallback header');
+  assert.equal(fallbackRoot.querySelector('main p').textContent, 'Fallback body');
+  assert.equal(fallbackRoot.querySelector('small').textContent, 'Fallback footer');
+});
+
 test('SFC resolves dynamic native and registered component targets', () => {
   const document = installDom();
   const root = document.createElement('main');

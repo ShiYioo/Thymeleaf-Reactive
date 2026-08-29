@@ -433,6 +433,7 @@ export type VNode = {
   component?: VNode;
   instance?: ComponentInstance;
   owner?: ComponentInstance;
+  slot?: string;
   text?: string;
 };
 
@@ -638,6 +639,36 @@ function renderSfcChildren(nodes: Node[], scope: Record<string, unknown>, slots:
   return output;
 }
 
+function renderSfcSlots(nodes: Node[], scope: Record<string, unknown>, slots: VNode[]): VNode[] {
+  const output: VNode[] = [];
+  nodes.forEach(node => {
+    if (node.nodeType !== Node.ELEMENT_NODE) {
+      const rendered = renderSfcNode(node, scope, slots);
+      if (rendered) output.push(...(Array.isArray(rendered) ? rendered : [rendered]));
+      return;
+    }
+    const element = node as Element;
+    const shorthand = Array.from(element.attributes).find(attribute => attribute.name.startsWith("#"));
+    const explicit = shorthand?.name.slice(1) || element.getAttribute("v-slot") ||
+      Array.from(element.attributes).find(attribute => attribute.name.startsWith("v-slot:"))?.name.slice(7) ||
+      element.getAttribute("slot");
+    if (!explicit) {
+      const rendered = renderSfcNode(node, scope, slots);
+      if (rendered) output.push(...(Array.isArray(rendered) ? rendered : [rendered]));
+      return;
+    }
+    const source = element.tagName.toLowerCase() === "template"
+      ? Array.from((element as HTMLTemplateElement).content.childNodes)
+      : [(() => {
+          const clone = element.cloneNode(true) as Element;
+          clone.removeAttribute("slot");
+          return clone;
+        })()];
+    output.push(...renderSfcChildren(source, scope, slots).map(vnode => ({ ...vnode, slot: explicit })));
+  });
+  return output;
+}
+
 function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[]): VNode | VNode[] | undefined {
   if (node.nodeType === Node.TEXT_NODE) {
     const text = node.textContent ?? "";
@@ -645,7 +676,11 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
   }
   if (node.nodeType !== Node.ELEMENT_NODE) return undefined;
   const element = node as Element;
-  if (element.tagName.toLowerCase() === "slot") return h(Fragment, {}, slots);
+  if (element.tagName.toLowerCase() === "slot") {
+    const name = element.getAttribute("name") ?? "default";
+    const assigned = slots.filter(child => (child.slot ?? "default") === name);
+    return h(Fragment, {}, assigned.length ? assigned : renderSfcChildren(Array.from(element.childNodes), scope, slots));
+  }
   const loop = element.getAttribute("v-for");
   if (loop) {
     const match = loop.match(/^\s*\(?\s*([A-Za-z_$][\w$]*)(?:\s*,\s*([A-Za-z_$][\w$]*))?\s*\)?\s+(?:in|of)\s+(.+)\s*$/);
@@ -728,10 +763,17 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
     else props[name] = value;
   });
   if (show) props.hidden = !Boolean(readPath(scope, show));
+  const type = dynamic
+    ? resolveDynamicComponent(dynamicSource && !element.hasAttribute("is") ? readPath(scope, dynamicSource) : dynamicSource)
+    : resolveSfcComponent(element.tagName, scope) ?? element.tagName.toLowerCase();
+  const resolvedType = typeof type === "string" ? resolveSfcComponent(type, scope) ?? type : type;
+  const component = typeof resolvedType === "function" || isObjectComponent(resolvedType);
   const textExpression = element.getAttribute("v-text");
-  const children = textExpression
-    ? [normalizeVNode(String(readPath(scope, textExpression) ?? ""))]
-    : renderSfcChildren(Array.from(element.childNodes), scope, slots);
+  const children = component
+    ? renderSfcSlots(Array.from(element.childNodes), scope, slots)
+    : textExpression
+      ? [normalizeVNode(String(readPath(scope, textExpression) ?? ""))]
+      : renderSfcChildren(Array.from(element.childNodes), scope, slots);
   if (element.tagName.toLowerCase() === "select" && element.hasAttribute("multiple")) {
     const selected = new Set((Array.isArray(readPath(scope, element.getAttribute("v-model") ?? ""))
       ? readPath(scope, element.getAttribute("v-model") ?? "")
@@ -740,10 +782,7 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
       if (child.type === "option") child.props.selected = selected.has(String(child.props.value ?? ""));
     });
   }
-  const type = dynamic
-    ? resolveDynamicComponent(dynamicSource && !element.hasAttribute("is") ? readPath(scope, dynamicSource) : dynamicSource)
-    : resolveSfcComponent(element.tagName, scope) ?? element.tagName.toLowerCase();
-  return h(typeof type === "string" ? resolveSfcComponent(type, scope) ?? type : type, props, children);
+  return h(resolvedType, props, children);
 }
 
 type SfcSetupBinding = { name: string; kind: "ref" | "reactive" | "computed"; expression: string };
@@ -836,6 +875,21 @@ function runSfcSetupMethod(body: string, scope: Record<string, unknown>, context
   });
 }
 
+function extractSfcBlock(source: string, tagName: string): string | undefined {
+  const pattern = new RegExp(`<\\/?${tagName}(?:\\s[^>]*)?>`, "ig");
+  const opening = pattern.exec(source);
+  if (!opening) return undefined;
+  const contentStart = pattern.lastIndex;
+  let depth = 1;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(source))) {
+    if (match[0].startsWith("</")) depth--;
+    else depth++;
+    if (!depth) return source.slice(contentStart, match.index);
+  }
+  return undefined;
+}
+
 /**
  * Compiles a resource-backed Vue SFC template plus a CSP-safe script-setup subset.
  * Supported setup declarations are ref(), reactive(), computed(() => expression),
@@ -843,10 +897,10 @@ function runSfcSetupMethod(body: string, scope: Record<string, unknown>, context
  */
 export function compileSfcComponent(source: string): Component {
   if (typeof document === "undefined") throw new Error("SFC components require a browser document");
-  const match = source.match(/<template(?:\s[^>]*)?>([\s\S]*?)<\/template>/i);
-  if (!match) throw new Error("Vue component is missing a <template> block");
+  const templateSource = extractSfcBlock(source, "template");
+  if (!templateSource) throw new Error("Vue component is missing a <template> block");
   const template = document.createElement("template");
-  template.innerHTML = match[1];
+  template.innerHTML = templateSource;
   const roots = Array.from(template.content.childNodes);
   const script = source.match(/<script\s+setup(?:\s[^>]*)?>([\s\S]*?)<\/script>/i)?.[1];
   if (!script) return (props, children) => {
