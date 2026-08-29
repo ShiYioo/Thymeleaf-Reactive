@@ -2092,6 +2092,7 @@ type HydrationContext = {
   state: object;
   handlers: Record<string, (...args: any[]) => any>;
   cleanups: Set<() => void>;
+  scope: EffectScope;
 };
 const hydrationContexts = new WeakMap<Element, HydrationContext>();
 
@@ -2099,7 +2100,14 @@ function disposeHydration(root: Element): void {
   const context = hydrationContexts.get(root);
   if (!context) return;
   [...context.cleanups].reverse().forEach(cleanup => cleanup());
+  context.scope.stop();
   hydrationContexts.delete(root);
+}
+
+function hydrationEffect(context: HydrationContext, fn: () => void): Effect {
+  let runner!: Effect;
+  runner = context.scope.run(() => effect(fn as Effect, { scheduler: () => queueJob(runner) }))!;
+  return runner;
 }
 
 function belongsToNestedHydration(element: Element, root: Element): boolean {
@@ -2544,7 +2552,7 @@ function cloneEachTemplate(template: HTMLElement): HTMLElement {
 export function hydrate(root: Element, state: object, handlers: Record<string, (...args: any[]) => any> = {}): object {
   disposeHydration(root);
   const reactiveState = reactive(state);
-  const context: HydrationContext = { state: reactiveState, handlers, cleanups: new Set() };
+  const context: HydrationContext = { state: reactiveState, handlers, cleanups: new Set(), scope: effectScope() };
   hydrationContexts.set(root, context);
   const cleanup = (dispose: () => void): void => { context.cleanups.add(dispose); };
   const componentRoot = root.matches("[data-tr-component]") ? root : undefined;
@@ -2571,7 +2579,7 @@ export function hydrate(root: Element, state: object, handlers: Record<string, (
     const anchor = document.createComment("tr-each");
     parent.insertBefore(anchor, template);
     const records = new Map<string | number, EachRecord>();
-    const runner = effect(() => {
+    const runner = hydrationEffect(context, () => {
       const collection = readPath(reactiveState, parsed.collection);
       const values = Array.isArray(collection) ? collection : collection && typeof collection === "object" ? Object.values(collection) : [];
       const nextKeys = new Set<string | number>();
@@ -2615,22 +2623,22 @@ export function hydrate(root: Element, state: object, handlers: Record<string, (
   });
   bindings<HTMLElement>("[data-tr-text]").forEach(element => {
     const expression = element.dataset.trText!;
-    const runner = effect(() => { element.textContent = String(readPath(reactiveState, expression) ?? ""); });
+    const runner = hydrationEffect(context, () => { element.textContent = String(readPath(reactiveState, expression) ?? ""); });
     cleanup(() => runner.stop?.());
   });
   bindings<HTMLElement>("[data-tr-html]").forEach(element => {
     const expression = element.dataset.trHtml!;
-    const runner = effect(() => { element.innerHTML = String(readPath(reactiveState, expression) ?? ""); });
+    const runner = hydrationEffect(context, () => { element.innerHTML = String(readPath(reactiveState, expression) ?? ""); });
     cleanup(() => runner.stop?.());
   });
   bindings<HTMLElement>("[data-tr-show]").forEach(element => {
     const expression = element.dataset.trShow!;
-    const runner = effect(() => { element.hidden = !Boolean(readPath(reactiveState, expression)); });
+    const runner = hydrationEffect(context, () => { element.hidden = !Boolean(readPath(reactiveState, expression)); });
     cleanup(() => runner.stop?.());
   });
   bindings<HTMLElement>("[data-tr-attr]").forEach(element => {
     const expression = element.dataset.trAttr!;
-    const runner = effect(() => {
+    const runner = hydrationEffect(context, () => {
       const values = readDynamicObject(reactiveState, expression);
       if (!values || typeof values !== "object") return;
       Object.entries(values).forEach(([name, value]) => {
@@ -2642,7 +2650,7 @@ export function hydrate(root: Element, state: object, handlers: Record<string, (
   });
   bindings<HTMLElement>("[data-tr-class]").forEach(element => {
     const expression = element.dataset.trClass!;
-    const runner = effect(() => {
+    const runner = hydrationEffect(context, () => {
       const value = readPath(reactiveState, expression);
       element.className = value && typeof value === "object"
         ? Object.entries(value).filter(([, enabled]) => Boolean(enabled)).map(([name]) => name).join(" ")
@@ -2652,7 +2660,7 @@ export function hydrate(root: Element, state: object, handlers: Record<string, (
   });
   bindings<HTMLElement>("[data-tr-style]").forEach(element => {
     const expression = element.dataset.trStyle!;
-    const runner = effect(() => {
+    const runner = hydrationEffect(context, () => {
       const value = readPath(reactiveState, expression);
       const style = element.style;
       if (!value || typeof value !== "object") { element.removeAttribute("style"); return; }
@@ -2667,7 +2675,7 @@ export function hydrate(root: Element, state: object, handlers: Record<string, (
     if (!parent) return;
     const anchor = document.createComment("tr-if");
     parent.insertBefore(anchor, element);
-    const runner = effect(() => {
+    const runner = hydrationEffect(context, () => {
       if (readPath(reactiveState, expression)) {
         element.hidden = false;
         if (element.parentNode !== parent) parent.insertBefore(element, anchor.nextSibling);
@@ -2685,7 +2693,7 @@ export function hydrate(root: Element, state: object, handlers: Record<string, (
     const isCheckbox = element instanceof HTMLInputElement && element.type === "checkbox";
     const isRadio = element instanceof HTMLInputElement && element.type === "radio";
     const isMultipleSelect = element instanceof HTMLSelectElement && element.multiple;
-    const runner = effect(() => {
+    const runner = hydrationEffect(context, () => {
       const value = readPath(reactiveState, expression);
       if (isCheckbox) {
         element.checked = Array.isArray(value) ? value.map(String).includes(element.value) : Boolean(value);

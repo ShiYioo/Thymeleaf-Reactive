@@ -477,6 +477,7 @@ test('component HMR reconciles keyed component instances across reorders, additi
   assert.equal(rows[1].querySelector('strong').textContent, 'C');
   rows[1].querySelector('input').value = 'C updated';
   rows[1].querySelector('input').dispatchEvent(new Event('input', { bubbles: true }));
+  await nextTick();
   assert.equal(rows[1].querySelector('strong').textContent, 'C updated');
 });
 
@@ -504,6 +505,7 @@ test('component HMR hydrates reactive bindings introduced by a changed template'
   await refreshComponentsFromPage('profile');
   assert.equal(document.querySelector('strong').textContent, 'Ada');
   state.name = 'Grace';
+  await nextTick();
   assert.equal(document.querySelector('strong').textContent, 'Grace');
 });
 
@@ -521,10 +523,11 @@ test('component HMR disposes bindings replaced by a template change', async () =
   state.count = 2;
   assert.equal(document.querySelector('strong').textContent, 'Ada');
   state.message = 'Grace';
+  await nextTick();
   assert.equal(document.querySelector('strong').textContent, 'Grace');
 });
 
-test('component hydration does not bind descendants owned by nested components', () => {
+test('component hydration does not bind descendants owned by nested components', async () => {
   const document = installDom();
   document.body.innerHTML = '<section data-tr-component="outer"><p data-tr-text="label"></p><section data-tr-component="inner"><p data-tr-text="label"></p></section></section>';
   const outerRoot = document.querySelector('[data-tr-component="outer"]');
@@ -534,8 +537,10 @@ test('component hydration does not bind descendants owned by nested components',
   const labels = document.querySelectorAll('p');
   assert.deepEqual([...labels].map(label => label.textContent), ['Outer', 'Inner']);
   outer.label = 'Outer updated';
+  await nextTick();
   assert.deepEqual([...labels].map(label => label.textContent), ['Outer updated', 'Inner']);
   inner.label = 'Inner updated';
+  await nextTick();
   assert.deepEqual([...labels].map(label => label.textContent), ['Outer updated', 'Inner updated']);
 });
 
@@ -1266,7 +1271,7 @@ test('SFC script setup compiles safe reactive declarations and event methods', a
   app.unmount();
 });
 
-test('hydrates Thymeleaf bindings and synchronizes model values', () => {
+test('hydrates Thymeleaf bindings and synchronizes model values', async () => {
   const document = installDom();
   const root = document.createElement('section');
   root.innerHTML = '<span data-tr-text="user.name"></span><input data-tr-model="user.name"><div data-tr-show="visible"></div>';
@@ -1274,6 +1279,7 @@ test('hydrates Thymeleaf bindings and synchronizes model values', () => {
   assert.equal(root.querySelector('span').textContent, 'Ada');
   assert.equal(root.querySelector('div').hidden, true);
   state.user.name = 'Grace';
+  await nextTick();
   assert.equal(root.querySelector('span').textContent, 'Grace');
   const input = root.querySelector('input');
   input.value = 'Lin';
@@ -1281,7 +1287,7 @@ test('hydrates Thymeleaf bindings and synchronizes model values', () => {
   assert.equal(state.user.name, 'Lin');
 });
 
-test('hydrates checkbox radio and multiple-select model bindings', () => {
+test('hydrates checkbox radio and multiple-select model bindings', async () => {
   const document = installDom();
   const root = document.createElement('section');
   root.innerHTML = [
@@ -1319,6 +1325,7 @@ test('hydrates checkbox radio and multiple-select model bindings', () => {
   state.tags = ['b'];
   state.choice = 'b';
   state.selected = ['c'];
+  await nextTick();
   assert.equal(tagA.checked, false);
   assert.equal(tagB.checked, true);
   assert.equal(choiceA.checked, false);
@@ -1326,7 +1333,7 @@ test('hydrates checkbox radio and multiple-select model bindings', () => {
   assert.deepEqual([...select.options].filter(option => option.selected).map(option => option.value), ['c']);
 });
 
-test('hydrates dynamic attributes, classes, and styles reactively', () => {
+test('hydrates dynamic attributes, classes, and styles reactively', async () => {
   const document = installDom();
   const root = document.createElement('section');
   root.innerHTML = '<a data-tr-attr="title:user.name,aria-label:user.name" data-tr-class="classes" data-tr-style="styles">Link</a>';
@@ -1343,13 +1350,14 @@ test('hydrates dynamic attributes, classes, and styles reactively', () => {
   state.user.name = 'Grace';
   state.classes = { active: false, muted: true };
   state.styles = { color: 'blue' };
+  await nextTick();
   assert.equal(link.getAttribute('title'), 'Grace');
   assert.equal(link.className, 'muted');
   assert.equal(link.style.color, 'blue');
   assert.equal(link.style.display, '');
 });
 
-test('evaluates safe arithmetic logical and conditional template expressions', () => {
+test('evaluates safe arithmetic logical and conditional template expressions', async () => {
   const document = installDom();
   const root = document.createElement('section');
   root.innerHTML = [
@@ -1365,25 +1373,28 @@ test('evaluates safe arithmetic logical and conditional template expressions', (
   assert.equal(root.querySelector('div').className, 'active');
   state.count = 2;
   state.visible = false;
+  await nextTick();
   assert.equal(root.querySelector('strong').textContent, '3');
   assert.equal(root.querySelector('p'), null);
   assert.equal(root.querySelector('a').getAttribute('title'), 'many');
   assert.equal(root.querySelector('div').className, 'muted');
 });
 
-test('hydrates conditional blocks by mounting and unmounting their DOM nodes', () => {
+test('hydrates conditional blocks by mounting and unmounting their DOM nodes', async () => {
   const document = installDom();
   const root = document.createElement('section');
   root.innerHTML = '<p data-tr-if="visible">Only when visible</p>';
   const state = hydrate(root, { visible: false });
   assert.equal(root.querySelector('p'), null);
   state.visible = true;
+  await nextTick();
   assert.equal(root.querySelector('p').textContent, 'Only when visible');
   state.visible = false;
+  await nextTick();
   assert.equal(root.querySelector('p'), null);
 });
 
-test('hydrates server-hidden conditional blocks and reveals them reactively', () => {
+test('hydrates server-hidden conditional blocks and reveals them reactively', async () => {
   const document = installDom();
   const root = document.createElement('section');
   root.innerHTML = '<p data-tr-if="visible" hidden>Only when visible</p><div data-tr-show="visible" hidden>Shown when visible</div>';
@@ -1391,12 +1402,13 @@ test('hydrates server-hidden conditional blocks and reveals them reactively', ()
   assert.equal(root.querySelector('p'), null);
   assert.equal(root.querySelector('div').hidden, true);
   state.visible = true;
+  await nextTick();
   assert.equal(root.querySelector('p').hidden, false);
   assert.equal(root.querySelector('p').textContent, 'Only when visible');
   assert.equal(root.querySelector('div').hidden, false);
 });
 
-test('hydrates keyed each bindings with scoped reactive rows', () => {
+test('hydrates keyed each bindings with scoped reactive rows', async () => {
   const document = installDom();
   const root = document.createElement('ul');
   root.innerHTML = '<li data-tr-each="item in items" data-tr-key="item.id" data-tr-text="item.label"></li>';
@@ -1406,15 +1418,17 @@ test('hydrates keyed each bindings with scoped reactive rows', () => {
   const firstB = rows[1];
   assert.deepEqual([...rows].map(row => row.textContent), ['A', 'B']);
   state.items = [{ id: 'b', label: 'B2' }, { id: 'a', label: 'A' }, { id: 'c', label: 'C' }];
+  await nextTick();
   rows = root.querySelectorAll('li');
   assert.deepEqual([...rows].map(row => row.textContent), ['B2', 'A', 'C']);
   assert.equal(rows[0], firstB);
   assert.equal(rows[1], firstA);
   state.items.pop();
+  await nextTick();
   assert.deepEqual([...root.querySelectorAll('li')].map(row => row.textContent), ['B2', 'A']);
 });
 
-test('hydrates server-rendered each rows without duplicating them', () => {
+test('hydrates server-rendered each rows without duplicating them', async () => {
   const document = installDom();
   const root = document.createElement('ul');
   root.innerHTML = [
@@ -1430,21 +1444,24 @@ test('hydrates server-rendered each rows without duplicating them', () => {
   assert.equal(rows[0], firstA);
   assert.equal(rows[1], firstB);
   state.items = [{ id: 'b', label: 'B2' }, { id: 'a', label: 'A' }, { id: 'c', label: 'C' }];
+  await nextTick();
   rows = root.querySelectorAll('li');
   assert.deepEqual([...rows].map(row => row.textContent), ['B2', 'A', 'C']);
   assert.equal(rows[0], firstB);
   assert.equal(rows[1], firstA);
 });
 
-test('each row scopes inherit outer reactive state for expressions', () => {
+test('each row scopes inherit outer reactive state for expressions', async () => {
   const document = installDom();
   const root = document.createElement('ul');
   root.innerHTML = '<li data-tr-each="item in items" data-tr-key="item.id" data-tr-text="item.label + suffix"></li>';
   const state = hydrate(root, { suffix: '!', items: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] });
   assert.deepEqual([...root.querySelectorAll('li')].map(row => row.textContent), ['A!', 'B!']);
   state.suffix = '?';
+  await nextTick();
   assert.deepEqual([...root.querySelectorAll('li')].map(row => row.textContent), ['A?', 'B?']);
   state.items[0].label = 'Alpha';
+  await nextTick();
   assert.deepEqual([...root.querySelectorAll('li')].map(row => row.textContent), ['Alpha?', 'B?']);
 });
 
@@ -1480,7 +1497,7 @@ test('hydrates tr:on handlers with event arguments and modifiers', () => {
   assert.equal(event.defaultPrevented, true);
 });
 
-test('hydrates tr:html content reactively', () => {
+test('hydrates tr:html content reactively', async () => {
   const document = installDom();
   const root = document.createElement('main');
   root.innerHTML = '<section data-tr-html="content">stale</section>';
@@ -1488,6 +1505,7 @@ test('hydrates tr:html content reactively', () => {
   const section = root.querySelector('section');
   assert.equal(section.innerHTML, '<strong>Ready</strong>');
   state.content = '<em>Updated</em>';
+  await nextTick();
   assert.equal(section.innerHTML, '<em>Updated</em>');
 });
 
