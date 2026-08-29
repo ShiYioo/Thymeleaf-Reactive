@@ -667,6 +667,27 @@ test('hydrateRender adopts compatible SSR nodes and recovers structural mismatch
   assert.equal(section.textContent, 'done');
 });
 
+test('hydrateRender adopts multi-root SSR fragments as one patchable range', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  root.innerHTML = '<span>one</span><p>stale</p><i>remove me</i>';
+  const first = root.firstElementChild;
+  const tree = hydrateRender(h(Fragment, {}, [
+    h('span', { key: 'one' }, 'updated'),
+    h('strong', { key: 'two' }, 'two')
+  ]), root);
+  assert.equal(tree.el.nodeType, Node.COMMENT_NODE);
+  assert.equal(tree.anchor.nodeType, Node.COMMENT_NODE);
+  assert.equal(root.firstElementChild, first);
+  assert.deepEqual([...root.children].map(element => element.textContent), ['updated', 'two']);
+  const next = render(h(Fragment, {}, [
+    h('strong', { key: 'two' }, 'changed'),
+    h('span', { key: 'one' }, 'moved')
+  ]), root);
+  assert.equal(next.el, tree.el);
+  assert.deepEqual([...root.children].map(element => element.textContent), ['changed', 'moved']);
+});
+
 test('VNode children normalize nested arrays as Fragment ranges', () => {
   const document = installDom();
   const root = document.createElement('main');

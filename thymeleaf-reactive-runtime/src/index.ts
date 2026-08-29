@@ -1947,7 +1947,27 @@ export function patch(oldVNode: VNode | undefined, newVNode: VNode | undefined, 
 
 const renderedTrees = new WeakMap<Node, VNode>();
 
+function hydrateFragment(vnode: VNode, node: Node | null, container: Node): VNode {
+  const start = vnode.el = document.createComment("fragment");
+  container.insertBefore(start, node);
+  let cursor = node;
+  vnode.children.forEach(child => {
+    const hydrated = hydrateVNode(child, cursor, container);
+    const end = hydrated.anchor ?? hydrated.el;
+    cursor = end?.nextSibling ?? null;
+  });
+  const end = vnode.anchor = document.createComment("/fragment");
+  container.insertBefore(end, cursor);
+  while (cursor && cursor !== end) {
+    const next = cursor.nextSibling;
+    container.removeChild(cursor);
+    cursor = next;
+  }
+  return vnode;
+}
+
 function hydrateVNode(vnode: VNode, node: Node | null, container: Node): VNode {
+  if (vnode.type === Fragment) return hydrateFragment(vnode, node, container);
   if (vnode.type === Text || vnode.type === Comment) {
     if (!node || (vnode.type === Text ? node.nodeType !== Node.TEXT_NODE : node.nodeType !== Node.COMMENT_NODE)) {
       return mount(vnode, container, node);

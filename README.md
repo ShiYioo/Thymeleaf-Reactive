@@ -111,7 +111,7 @@ Changing `to` moves the existing teleported DOM range to the new target instead 
 
 The VDOM creates `<svg>` roots and descendants in the SVG namespace and patches SVG attributes without replacing existing nodes.
 
-For render-function applications, `hydrateRender(vnode, container)` adopts compatible server-rendered native DOM nodes, patches their props and descendants, removes stale server nodes, and locally replaces structural mismatches. The adopted tree remains registered for later `render()` patches.
+For render-function applications, `hydrateRender(vnode, container)` adopts compatible server-rendered native DOM nodes, patches their props and descendants, adopts multi-root `Fragment` ranges, removes stale server nodes, and locally replaces structural mismatches. The adopted tree remains registered for later `render()` patches.
 
 ## Virtual DOM Suspense
 
