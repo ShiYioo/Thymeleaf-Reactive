@@ -24,6 +24,40 @@ const reactiveProxies = new WeakSet<object>();
 const effectDeps = new WeakMap<Effect, Set<Set<Effect>>>();
 const effectSchedulers = new WeakMap<Effect, () => void>();
 const ITERATE_KEY = Symbol("iterate");
+let activeEffectScope: EffectScope | undefined;
+
+export class EffectScope {
+  active = true;
+  readonly effects = new Set<Effect>();
+  readonly cleanups = new Set<() => void>();
+  readonly parent = activeEffectScope;
+
+  run<T>(fn: () => T): T | undefined {
+    if (!this.active) return undefined;
+    const previous = activeEffectScope;
+    activeEffectScope = this;
+    try { return fn(); }
+    finally { activeEffectScope = previous; }
+  }
+
+  stop(): void {
+    if (!this.active) return;
+    this.active = false;
+    this.effects.forEach(run => run.stop?.());
+    this.effects.clear();
+    this.cleanups.forEach(cleanup => cleanup());
+    this.cleanups.clear();
+  }
+}
+
+export function effectScope(): EffectScope {
+  return new EffectScope();
+}
+
+export function onScopeDispose(cleanup: () => void): void {
+  if (!activeEffectScope) throw new Error("onScopeDispose() must be called inside an active effect scope");
+  activeEffectScope.cleanups.add(cleanup);
+}
 
 function isReactiveValue(value: unknown): value is object {
   if (!value || typeof value !== "object") return false;
@@ -117,6 +151,7 @@ export function effect(fn: Effect, options: EffectOptions = {}): Effect {
     effectSchedulers.delete(run);
   };
   if (options.scheduler) effectSchedulers.set(run, options.scheduler);
+  activeEffectScope?.effects.add(run);
   if (!options.lazy) run();
   return run;
 }
@@ -249,6 +284,7 @@ type ComponentInstance = {
   updatedHooks?: (() => void)[];
   unmountedHooks?: (() => void)[];
   isMounted?: boolean;
+  scope?: EffectScope;
 };
 const componentInstanceStack: ComponentInstance[] = [];
 export type VNode = {
@@ -801,7 +837,8 @@ function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode
     instance.updatedHooks = definition.updated ? [definition.updated] : [];
     instance.unmountedHooks = definition.unmounted ? [definition.unmounted] : [];
     instance.isMounted = false;
-    instance.update = effect(() => {
+    instance.scope = effectScope();
+    instance.update = instance.scope.run(() => effect(() => {
       const nextTree = renderObjectComponent(instance);
       if (!instance.isMounted) {
         mount(nextTree, container, anchor);
@@ -815,8 +852,8 @@ function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode
       instance.vnode.component = nextTree;
       instance.vnode.el = nextTree.el;
       instance.vnode.anchor = nextTree.anchor;
-    });
-    instance.dispose = () => instance.update.stop?.();
+    }))!;
+    instance.dispose = () => instance.scope?.stop();
     vnode.instance = instance;
     return vnode;
   }
@@ -1097,7 +1134,8 @@ export function adoptComponentRoot(root: Element, component: Component, props: R
     instance.unmountedHooks = component.unmounted ? [component.unmounted] : [];
     instance.isMounted = false;
     instance.tree = tree;
-    instance.update = effect(() => {
+    instance.scope = effectScope();
+    instance.update = instance.scope.run(() => effect(() => {
       const nextTree = renderObjectComponent(instance);
       instance.tree = patch(instance.tree, nextTree, container) ?? instance.tree;
       if (!instance.isMounted) {
@@ -1107,8 +1145,8 @@ export function adoptComponentRoot(root: Element, component: Component, props: R
       instance.vnode.component = instance.tree;
       instance.vnode.el = instance.tree.el;
       instance.vnode.anchor = instance.tree.anchor;
-    });
-    instance.dispose = () => instance.update.stop?.();
+    }))!;
+    instance.dispose = () => instance.scope?.stop();
     vnode.instance = instance;
     return;
   }

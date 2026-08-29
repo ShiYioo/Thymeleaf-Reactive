@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { reactive, ref, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineComponent, Fragment, h, hotUpdate, hydrate, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, unref, watch } from './dist/index.js';
+import { reactive, ref, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineComponent, effectScope, Fragment, h, hotUpdate, hydrate, onScopeDispose, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, unref, watch } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -89,6 +89,23 @@ test('proxyRefs unwraps values and writes through existing refs', () => {
   state.label = 'After';
   assert.equal(count.value, 2);
   assert.equal(state.label, 'After');
+});
+
+test('effect scopes stop nested effects and run registered cleanup', () => {
+  const state = reactive({ count: 0 });
+  const scope = effectScope();
+  let runs = 0;
+  let disposed = false;
+  scope.run(() => {
+    effect(() => { runs++; state.count; });
+    onScopeDispose(() => { disposed = true; });
+  });
+  state.count++;
+  assert.equal(runs, 2);
+  scope.stop();
+  state.count++;
+  assert.equal(runs, 2);
+  assert.equal(disposed, true);
 });
 
 test('HMR polling replays every missed version in order', async () => {
