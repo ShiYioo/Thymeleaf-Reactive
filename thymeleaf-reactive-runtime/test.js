@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { adoptComponentRoot, reactive, ref, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onScopeDispose, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRef, toRefs, unref, watch, watchEffect } from './dist/index.js';
+import { adoptComponentRoot, reactive, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onScopeDispose, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRef, toRefs, unref, watch, watchEffect } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -60,6 +60,22 @@ test('ref values participate in dependency tracking', () => {
   assert.equal(observed, 0);
   count.value = 2;
   assert.equal(observed, 2);
+});
+
+test('shallowRef tracks replacement and triggerRef tracks manual deep mutation', () => {
+  const state = shallowRef({ count: 0 });
+  let observed = '';
+  let runs = 0;
+  effect(() => { runs++; observed = String(state.value.count); });
+  state.value.count = 1;
+  assert.equal(runs, 1);
+  assert.equal(observed, '0');
+  triggerRef(state);
+  assert.equal(runs, 2);
+  assert.equal(observed, '1');
+  state.value = { count: 2 };
+  assert.equal(runs, 3);
+  assert.equal(observed, '2');
 });
 
 test('reactive Map and Set track keyed and iteration dependencies', () => {

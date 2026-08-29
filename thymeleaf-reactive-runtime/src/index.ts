@@ -49,6 +49,7 @@ const queuedPreJobs = new Set<() => void>();
 const queuedJobs = new Map<() => void, number>();
 const queuedPostJobs = new Set<() => void>();
 const refValues = new WeakSet<object>();
+const refTriggers = new WeakMap<object, () => void>();
 let pendingFlush: Promise<void> | undefined;
 let activeEffectScope: EffectScope | undefined;
 let nextComponentUid = 0;
@@ -275,11 +276,43 @@ export type ComputedRef<T> = { readonly value: T };
 
 export type Ref<T> = { value: T };
 
+function createRef<T>(value: T, shallow: boolean): Ref<T> {
+  if (!shallow) {
+    const result = reactive({ value });
+    refValues.add(result);
+    return result;
+  }
+  const subscribers = new Set<Effect>();
+  let current = value;
+  const result = {
+    get value(): T {
+      trackEffect(subscribers);
+      return current;
+    },
+    set value(next: T) {
+      if (Object.is(current, next)) return;
+      current = next;
+      triggerEffects(subscribers);
+    }
+  };
+  refValues.add(result);
+  refTriggers.set(result, () => triggerEffects(subscribers));
+  return result;
+}
+
 /** Creates a reactive scalar container for component state. */
 export function ref<T>(value: T): Ref<T> {
-  const result = reactive({ value });
-  refValues.add(result);
-  return result;
+  return createRef(value, false);
+}
+
+/** Tracks only replacement of the ref value, leaving nested objects untouched. */
+export function shallowRef<T>(value: T): Ref<T> {
+  return createRef(value, true);
+}
+
+/** Manually notifies effects that depend on a shallow ref after deep mutation. */
+export function triggerRef<T>(value: Ref<T>): void {
+  refTriggers.get(value as object)?.();
 }
 
 export function isRef(value: unknown): value is Ref<unknown> {
