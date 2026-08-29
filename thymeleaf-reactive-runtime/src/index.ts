@@ -61,7 +61,7 @@ export function onScopeDispose(cleanup: () => void): void {
 
 function isReactiveValue(value: unknown): value is object {
   if (!value || typeof value !== "object") return false;
-  if (Array.isArray(value)) return true;
+  if (Array.isArray(value) || value instanceof Map || value instanceof Set) return true;
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
 }
@@ -88,12 +88,48 @@ function triggerEffects(subscribers: Iterable<Effect>): void {
 export function reactive<T extends object>(value: T): T {
   if (reactiveProxies.has(value)) return value;
   if (proxyCache.has(value)) return proxyCache.get(value) as T;
-  const deps = new Map<PropertyKey, Set<Effect>>();
+  const deps = new Map<unknown, Set<Effect>>();
+  const subscribers = (key: unknown): Set<Effect> => {
+    let value = deps.get(key);
+    if (!value) deps.set(key, value = new Set());
+    return value;
+  };
+  const triggerCollection = (key?: unknown): void => {
+    const triggered = new Set<Effect>(key === undefined ? [] : deps.get(key) ?? []);
+    deps.get(ITERATE_KEY)?.forEach(run => triggered.add(run));
+    triggerEffects(triggered);
+  };
   const proxy = new Proxy(value, {
     get(target, key, receiver) {
-      let subscribers = deps.get(key);
-      if (!subscribers) deps.set(key, subscribers = new Set());
-      trackEffect(subscribers);
+      if (target instanceof Map) {
+        if (key === "get") return (entry: unknown) => {
+          trackEffect(subscribers(entry));
+          const result = target.get(entry);
+          return isReactiveValue(result) ? reactive(result) : result;
+        };
+        if (key === "has") return (entry: unknown) => { trackEffect(subscribers(entry)); return target.has(entry); };
+        if (key === "set") return (entry: unknown, next: unknown) => {
+          const existed = target.has(entry); const previous = target.get(entry); target.set(entry, next);
+          if (!existed || !Object.is(previous, next)) triggerCollection(entry);
+          return receiver;
+        };
+        if (key === "delete") return (entry: unknown) => {
+          const existed = target.delete(entry); if (existed) triggerCollection(entry); return existed;
+        };
+        if (key === "clear") return () => { if (target.size) { target.clear(); triggerCollection(); } };
+      }
+      if (target instanceof Set) {
+        if (key === "has") return (entry: unknown) => { trackEffect(subscribers(entry)); return target.has(entry); };
+        if (key === "add") return (entry: unknown) => { const existed = target.has(entry); target.add(entry); if (!existed) triggerCollection(entry); return receiver; };
+        if (key === "delete") return (entry: unknown) => { const existed = target.delete(entry); if (existed) triggerCollection(entry); return existed; };
+        if (key === "clear") return () => { if (target.size) { target.clear(); triggerCollection(); } };
+      }
+      if ((target instanceof Map || target instanceof Set) && (key === "size" || key === Symbol.iterator || key === "entries" || key === "values" || key === "keys" || key === "forEach")) {
+        trackEffect(subscribers(ITERATE_KEY));
+        const member = Reflect.get(target, key, target);
+        return typeof member === "function" ? member.bind(target) : member;
+      }
+      trackEffect(subscribers(key));
       const result = Reflect.get(target, key, receiver);
       return isReactiveValue(result) ? reactive(result) : result;
     },

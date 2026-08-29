@@ -60,6 +60,27 @@ test('ref values participate in dependency tracking', () => {
   assert.equal(observed, 2);
 });
 
+test('reactive Map and Set track keyed and iteration dependencies', () => {
+  const values = reactive(new Map([['a', 1]]));
+  const tags = reactive(new Set(['a']));
+  let mapped = 0;
+  let mapSize = 0;
+  let hasTag = false;
+  let tagSize = 0;
+  effect(() => { mapped = values.get('a'); });
+  effect(() => { mapSize = values.size; });
+  effect(() => { hasTag = tags.has('a'); });
+  effect(() => { tagSize = tags.size; });
+  values.set('a', 2);
+  values.set('b', 3);
+  tags.delete('a');
+  tags.add('b');
+  assert.equal(mapped, 2);
+  assert.equal(mapSize, 2);
+  assert.equal(hasTag, false);
+  assert.equal(tagSize, 1);
+});
+
 test('watch tracks getters and reactive objects while running registered cleanup', () => {
   const state = reactive({ count: 0, nested: { enabled: false } });
   const changes = [];
