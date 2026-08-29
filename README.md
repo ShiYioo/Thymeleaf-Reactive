@@ -111,6 +111,16 @@ Changing `to` moves the existing teleported DOM range to the new target instead 
 
 The VDOM creates `<svg>` roots and descendants in the SVG namespace and patches SVG attributes without replacing existing nodes.
 
+## Virtual DOM Suspense
+
+The render-function runtime exports `Suspense` for async component boundaries. Its `fallback` VNode is rendered while a descendant created by `defineAsyncComponent` is pending; once the loader resolves, the fallback is patched into the resolved content in place.
+
+```js
+h(Suspense, { fallback: h("p", {}, "Loading") }, [
+  h(defineAsyncComponent(() => import("./Panel.js")))
+]);
+```
+
 ## Virtual DOM KeepAlive
 
 The render-function runtime exports `KeepAlive` for caching keyed component instances while switching between views. Cached instances leave the active DOM but keep their local state and effect scope; switching back patches and reuses the cached instance. Unmounting `KeepAlive` disposes every cached component normally.

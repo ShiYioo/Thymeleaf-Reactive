@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { adoptComponentRoot, reactive, ref, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, h, hotUpdate, hydrate, nextTick, onActivated, onDeactivated, onScopeDispose, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRef, toRefs, unref, watch, watchEffect } from './dist/index.js';
+import { adoptComponentRoot, reactive, ref, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, h, hotUpdate, hydrate, nextTick, onActivated, onDeactivated, onScopeDispose, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRef, toRefs, unref, watch, watchEffect } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -1391,4 +1391,19 @@ test('browser bootstrap preserves existing handlers and hydrates encoded server 
   const count = document.querySelector('p');
   assert.equal(count.textContent, '2');
   assert.equal(typeof window.ThymeleafReactive.hydrate, 'function');
+});
+
+test('Suspense renders fallback until an async component resolves', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  let resolve;
+  const Async = defineAsyncComponent(() => new Promise(done => { resolve = done; }));
+  const app = createApp(() => h(Suspense, { fallback: h('p', {}, 'Waiting') }, [h(Async)]));
+  app.mount(root);
+  assert.equal(root.textContent, 'Waiting');
+  resolve(() => h('strong', {}, 'Ready'));
+  await Promise.resolve();
+  assert.equal(root.textContent, 'Ready');
+  assert.equal(root.querySelector('p'), null);
+  app.unmount();
 });

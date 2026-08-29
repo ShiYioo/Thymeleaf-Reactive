@@ -341,11 +341,15 @@ export function watchEffect(run: (onCleanup: (cleanup: () => void) => void) => v
   };
 }
 
+type AsyncComponentState = { component?: Component; error?: unknown; loading: boolean; pending: boolean };
+const asyncComponentStates = new WeakMap<ComponentRender, AsyncComponentState>();
+
 /** Creates a component that resolves its implementation on demand. */
 export function defineAsyncComponent(source: AsyncComponentOptions | (() => Promise<Component>)): ComponentRender {
   const options = typeof source === "function" ? { loader: source } : source;
-  const state = reactive<{ component?: Component; error?: unknown; loading: boolean }>({
-    loading: !options.delay
+  const state = reactive<AsyncComponentState>({
+    loading: !options.delay,
+    pending: true
   });
   let settled = false;
   if (options.delay && options.delay > 0) {
@@ -356,6 +360,7 @@ export function defineAsyncComponent(source: AsyncComponentOptions | (() => Prom
       if (!settled) {
         settled = true;
         state.loading = false;
+        state.pending = false;
         state.error = new Error(`Async component timed out after ${options.timeout}ms`);
       }
     }, options.timeout);
@@ -365,18 +370,22 @@ export function defineAsyncComponent(source: AsyncComponentOptions | (() => Prom
     settled = true;
     state.component = component;
     state.loading = false;
+    state.pending = false;
   }).catch(error => {
     if (settled) return;
     settled = true;
     state.error = error;
     state.loading = false;
+    state.pending = false;
   });
-  return (props, children) => {
+  const component: ComponentRender = (props, children) => {
     if (state.component) return h(state.component, props, children);
     if (state.error && options.errorComponent) return h(options.errorComponent, { ...props, error: state.error }, children);
     if (state.loading && options.loadingComponent) return h(options.loadingComponent, props, children);
     return { type: Comment, props: {}, children: [], el: null, text: "async-component" };
   };
+  asyncComponentStates.set(component, state);
+  return component;
 }
 
 /** Creates a lazily evaluated, cached value that invalidates when its dependencies change. */
@@ -410,6 +419,7 @@ export const Comment = Symbol("comment");
 export const Fragment = Symbol("fragment");
 export const Teleport = Symbol("teleport");
 export const KeepAlive = Symbol("keep-alive");
+export const Suspense = Symbol("suspense");
 type ComponentInstance = {
   vnode: VNode;
   tree: VNode;
@@ -431,7 +441,7 @@ type ComponentInstance = {
 type HotReloadableRender = ComponentRender & { hmrUpdate?: (next: ComponentOptions) => boolean };
 const componentInstanceStack: ComponentInstance[] = [];
 export type VNode = {
-  type: string | typeof Text | typeof Comment | typeof Fragment | typeof Teleport | typeof KeepAlive | Component;
+  type: string | typeof Text | typeof Comment | typeof Fragment | typeof Teleport | typeof KeepAlive | typeof Suspense | Component;
   props: Record<string, unknown>;
   children: VNode[];
   el: Node | null;
@@ -1053,6 +1063,15 @@ function normalizeVNode(value: VNode | Primitive): VNode {
   return { type: Text, props: {}, children: [], el: null, text: String(value ?? "") };
 }
 
+function hasPendingAsync(vnode: VNode): boolean {
+  const state = typeof vnode.type === "function" ? asyncComponentStates.get(vnode.type) : undefined;
+  return Boolean(state?.pending || vnode.children.some(hasPendingAsync));
+}
+
+function suspenseFallback(vnode: VNode): VNode {
+  return normalizeVNode(vnode.props.fallback as VNode | Primitive ?? "");
+}
+
 const eventListeners = new WeakMap<Element, Map<string, EventListener>>();
 const svgNamespace = "http://www.w3.org/2000/svg";
 const componentNames = new WeakMap<Component, string>();
@@ -1177,6 +1196,15 @@ function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode
     vnode.children.forEach(child => mount(child, target, targetAnchor));
     return vnode;
   }
+  if (vnode.type === Suspense) {
+    const content = vnode.children[0];
+    const active = content && !hasPendingAsync(content) ? content : suspenseFallback(vnode);
+    vnode.component = active;
+    mount(active, container, anchor);
+    vnode.el = active.el;
+    vnode.anchor = active.anchor;
+    return vnode;
+  }
   if (vnode.type === KeepAlive) {
     vnode.cache = new Map();
     const child = vnode.children[0];
@@ -1294,6 +1322,10 @@ function unmount(vnode: VNode, container: Node): void {
     if (vnode.component) unmount(vnode.component, container);
     return;
   }
+  if (vnode.type === Suspense) {
+    if (vnode.component) unmount(vnode.component, container);
+    return;
+  }
   if (vnode.type === KeepAlive) {
     const cache = vnode.cache;
     if (cache) {
@@ -1327,6 +1359,10 @@ function unmount(vnode: VNode, container: Node): void {
 }
 
 function moveVNode(vnode: VNode, container: Node, anchor: Node | null): void {
+  if (vnode.type === Suspense) {
+    if (vnode.component) moveVNode(vnode.component, container, anchor);
+    return;
+  }
   if (vnode.type === Teleport) {
     if (vnode.el) container.insertBefore(vnode.el, anchor);
     return;
@@ -1403,6 +1439,15 @@ export function patch(oldVNode: VNode | undefined, newVNode: VNode | undefined, 
       if (oldTarget && oldVNode.anchor?.parentNode === oldTarget) oldTarget.removeChild(oldVNode.anchor);
     }
     patchChildren(nextTarget, oldVNode.children, newVNode.children, newVNode.anchor ?? null);
+    return newVNode;
+  }
+  if (newVNode.type === Suspense) {
+    const content = newVNode.children[0];
+    const nextActive = content && !hasPendingAsync(content) ? content : suspenseFallback(newVNode);
+    const active = patch(oldVNode.component, nextActive, container) ?? nextActive;
+    newVNode.component = active;
+    newVNode.el = active.el;
+    newVNode.anchor = active.anchor;
     return newVNode;
   }
   if (newVNode.type === KeepAlive) {
