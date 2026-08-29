@@ -579,12 +579,36 @@ function sfcEventModifierHandler(handler: (event: Event) => void, modifiers: str
   let called = false;
   return event => {
     if (modifiers.includes("self") && event.target !== event.currentTarget) return;
+    const keyboard = event as KeyboardEvent;
+    const mouse = event as MouseEvent;
+    const keyAliases: Record<string, string[]> = {
+      enter: ["Enter"], esc: ["Escape", "Esc"], tab: ["Tab"], delete: ["Delete", "Backspace"],
+      space: [" ", "Spacebar"], up: ["ArrowUp"], down: ["ArrowDown"], left: ["ArrowLeft"], right: ["ArrowRight"]
+    };
+    const keyModifier = "key" in event ? modifiers.find(modifier => keyAliases[modifier]) : undefined;
+    if (keyModifier && !keyAliases[keyModifier].includes(keyboard.key)) return;
+    const mouseModifier = modifiers.find(modifier => ["left", "middle", "right"].includes(modifier));
+    if (mouseModifier && mouse.button !== ({ left: 0, middle: 1, right: 2 } as Record<string, number>)[mouseModifier]) return;
+    if (modifiers.includes("ctrl") && !keyboard.ctrlKey) return;
+    if (modifiers.includes("shift") && !keyboard.shiftKey) return;
+    if (modifiers.includes("alt") && !keyboard.altKey) return;
+    if (modifiers.includes("meta") && !keyboard.metaKey) return;
+    if (modifiers.includes("exact") && ["ctrl", "shift", "alt", "meta"].some(key => !modifiers.includes(key) && Boolean(keyboard[`${key}Key` as keyof KeyboardEvent]))) return;
     if (modifiers.includes("once") && called) return;
     called = true;
     if (modifiers.includes("prevent")) event.preventDefault();
     if (modifiers.includes("stop")) event.stopPropagation();
     handler(event);
   };
+}
+
+function addSfcEventHandler(props: Record<string, unknown>, eventName: string, handler: ((event: Event) => void) | undefined): void {
+  if (!handler) return;
+  const key = sfcEventPropName(eventName);
+  const previous = props[key];
+  props[key] = typeof previous === "function"
+    ? (event: Event) => { (previous as (event: Event) => void)(event); handler(event); }
+    : handler;
 }
 
 function resolveSfcComponent(tagName: string, scope: Record<string, unknown>): Component | undefined {
@@ -732,11 +756,11 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
     else if (name.startsWith("v-bind:")) props[name.slice(7)] = readPath(scope, value);
      else if (name.startsWith("@")) {
        const [eventName, ...modifiers] = name.slice(1).split(".");
-       props[sfcEventPropName(eventName)] = sfcEventHandler(value, scope, modifiers);
+       addSfcEventHandler(props, eventName, sfcEventHandler(value, scope, modifiers));
      }
      else if (name.startsWith("v-on:")) {
        const [eventName, ...modifiers] = name.slice(5).split(".");
-       props[sfcEventPropName(eventName)] = sfcEventHandler(value, scope, modifiers);
+       addSfcEventHandler(props, eventName, sfcEventHandler(value, scope, modifiers));
      }
     else if (name === "v-model") {
       const inputType = element.tagName.toLowerCase() === "input"

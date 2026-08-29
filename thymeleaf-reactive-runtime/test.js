@@ -12,6 +12,8 @@ function installDom() {
   globalThis.Element = window.Element;
   globalThis.HTMLElement = window.HTMLElement;
   globalThis.CustomEvent = window.CustomEvent;
+  globalThis.KeyboardEvent = window.KeyboardEvent;
+  globalThis.MouseEvent = window.MouseEvent;
   globalThis.DOMParser = window.DOMParser;
   globalThis.HTMLInputElement = window.HTMLInputElement;
   globalThis.HTMLTextAreaElement = window.HTMLTextAreaElement;
@@ -818,6 +820,32 @@ test('SFC event modifiers prevent, stop, filter, and limit handlers', () => {
   once.dispatchEvent(new Event('click', { bubbles: true }));
   once.dispatchEvent(new Event('click', { bubbles: true }));
   assert.equal(state.onceRuns, 1);
+});
+
+test('SFC event modifiers filter keyboard, mouse, and system inputs', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const render = compileSfcComponent(`
+    <template>
+      <div>
+        <input @keyup.enter="enter" @keyup.ctrl.exact="ctrl">
+        <button @click.right="right">Right</button>
+      </div>
+    </template>
+  `);
+  const state = createApp(render, { enterRuns: 0, ctrlRuns: 0, rightRuns: 0,
+    enter() { this.enterRuns++; }, ctrl() { this.ctrlRuns++; }, right() { this.rightRuns++; } }).mount(root);
+  const input = root.querySelector('input');
+  input.dispatchEvent(new KeyboardEvent('keyup', { key: 'a', bubbles: true }));
+  input.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true }));
+  input.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', ctrlKey: true, bubbles: true }));
+  input.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', ctrlKey: true, shiftKey: true, bubbles: true }));
+  assert.equal(state.enterRuns, 3);
+  assert.equal(state.ctrlRuns, 1);
+  const button = root.querySelector('button');
+  button.dispatchEvent(new MouseEvent('click', { button: 0, bubbles: true }));
+  button.dispatchEvent(new MouseEvent('click', { button: 2, bubbles: true }));
+  assert.equal(state.rightRuns, 1);
 });
 
 test('SFC v-model supports checkbox arrays and select values', () => {
