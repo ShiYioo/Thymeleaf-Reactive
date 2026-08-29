@@ -1254,6 +1254,19 @@ function keepAliveKey(vnode: VNode): unknown {
   return vnode.key ?? vnode.type;
 }
 
+function pruneKeepAliveCache(vnode: VNode, cache: Map<unknown, VNode>, activeKey: unknown, container: Node): void {
+  const rawMax = Number(vnode.props.max);
+  if (!Number.isFinite(rawMax)) return;
+  const max = Math.max(1, Math.floor(rawMax));
+  while (cache.size > max) {
+    const candidate = [...cache.entries()].find(([key]) => key !== activeKey);
+    if (!candidate) return;
+    const [key, cached] = candidate;
+    cache.delete(key);
+    unmount(cached, cached.el?.parentNode ?? container);
+  }
+}
+
 function detachVNode(vnode: VNode): void {
   if (vnode.type === Fragment) {
     let node = vnode.el;
@@ -1359,7 +1372,8 @@ function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode
     instance.deactivatedHooks = definition.deactivated ? [definition.deactivated] : [];
     instance.isMounted = false;
     instance.scope = effectScope();
-    instance.update = instance.scope.run(() => effect(() => {
+    let componentUpdate!: Effect;
+    componentUpdate = instance.scope.run(() => effect(() => {
       const nextTree = renderObjectComponent(instance);
       if (!instance.isMounted) {
         instance.beforeMountHooks!.forEach(hook => hook());
@@ -1375,7 +1389,8 @@ function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode
       instance.vnode.component = nextTree;
       instance.vnode.el = nextTree.el;
       instance.vnode.anchor = nextTree.anchor;
-    }))!;
+    }, { scheduler: () => queueJob(componentUpdate) }))!;
+    instance.update = componentUpdate;
     instance.dispose = () => instance.scope?.stop();
     vnode.instance = instance;
     return vnode;
@@ -1690,9 +1705,12 @@ export function patch(oldVNode: VNode | undefined, newVNode: VNode | undefined, 
       cache.set(nextKey, active);
       invokeComponentHook(active, "activatedHooks");
     } else {
+      cache.delete(nextKey);
+      cache.set(nextKey, active);
       moveVNode(active, container, insertionAnchor);
       invokeComponentHook(active, "activatedHooks");
     }
+    pruneKeepAliveCache(newVNode, cache, nextKey, container);
     newVNode.activeKey = nextKey;
     newVNode.component = active;
     newVNode.el = active.el;

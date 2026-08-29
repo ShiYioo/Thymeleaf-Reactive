@@ -300,7 +300,7 @@ test('component HMR accepts object component replacements without refreshing the
   app.unmount();
 });
 
-test('component HMR preserves script setup local refs while replacing its template', () => {
+test('component HMR preserves script setup local refs while replacing its template', async () => {
   const document = installDom();
   const root = document.createElement('main');
   const initial = compileSfcComponent(`
@@ -315,6 +315,7 @@ test('component HMR preserves script setup local refs while replacing its templa
   app.mount(root);
   const button = root.querySelector('button');
   button.dispatchEvent(new Event('click', { bubbles: true }));
+  await nextTick();
   assert.equal(button.textContent, 'Count: 2');
 
   const replacement = compileSfcComponent(`
@@ -330,7 +331,7 @@ test('component HMR preserves script setup local refs while replacing its templa
   app.unmount();
 });
 
-test('component HMR recreates script setup state when its script changes', () => {
+test('component HMR recreates script setup state when its script changes', async () => {
   const document = installDom();
   const root = document.createElement('main');
   const Counter = defineComponent('script-setup-hmr-script-change-test', compileSfcComponent(`
@@ -343,6 +344,7 @@ test('component HMR recreates script setup state when its script changes', () =>
   const app = createApp(() => h(Counter));
   app.mount(root);
   root.querySelector('button').dispatchEvent(new Event('click', { bubbles: true }));
+  await nextTick();
   assert.equal(root.textContent, 'Count: 2');
 
   assert.equal(hotUpdate('script-setup-hmr-script-change-test', compileSfcComponent(`
@@ -611,7 +613,7 @@ test('Teleport patches and moves its child range without recreating keyed fields
   app.unmount();
 });
 
-test('KeepAlive caches keyed component instances across switches', () => {
+test('KeepAlive caches keyed component instances across switches', async () => {
   const document = installDom();
   const root = document.createElement('main');
   const hooks = [];
@@ -631,22 +633,77 @@ test('KeepAlive caches keyed component instances across switches', () => {
   const state = app.mount(root);
   const firstA = root.querySelector('button');
   firstA.dispatchEvent(new Event('click'));
+  await nextTick();
   assert.equal(firstA.textContent, 'A:1');
   state.name = 'B';
+  await nextTick();
   const buttonB = root.querySelector('button');
   assert.equal(buttonB.textContent, 'B:0');
   state.name = 'A';
+  await nextTick();
   assert.equal(root.querySelector('button'), firstA);
   assert.equal(firstA.textContent, 'A:1');
   assert.deepEqual(hooks, ['mounted:A', 'activated:A', 'deactivated:A', 'mounted:B', 'activated:B', 'deactivated:B', 'activated:A']);
   state.name = 'B';
+  await nextTick();
   assert.equal(root.querySelector('button'), buttonB);
   app.unmount();
   assert.equal(hooks.includes('unmounted:A'), true);
   assert.equal(hooks.includes('unmounted:B'), true);
 });
 
-test('object components retain setup state and support lifecycle, emits, and injection', () => {
+test('KeepAlive max evicts the least recently activated instance', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Counter = {
+    setup(props) {
+      const count = ref(0);
+      return () => h('button', { onClick: () => count.value++ }, `${props.name}:${count.value}`);
+    }
+  };
+  const app = createApp(state => h(KeepAlive, { max: 1 }, [
+    h(Counter, { key: state.view, name: state.view })
+  ]), { view: 'A' });
+  const state = app.mount(root);
+  const firstA = root.querySelector('button');
+  firstA.dispatchEvent(new Event('click'));
+  await nextTick();
+  assert.equal(firstA.textContent, 'A:1');
+  state.view = 'B';
+  state.view = 'A';
+  await nextTick();
+  const secondA = root.querySelector('button');
+  assert.notEqual(secondA, firstA);
+  assert.equal(secondA.textContent, 'A:0');
+  app.unmount();
+});
+
+test('component updates are deduplicated and committed on nextTick', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  let renders = 0;
+  const Counter = {
+    setup(props) {
+      return () => {
+        renders++;
+        return h('strong', {}, String(props.count));
+      };
+    }
+  };
+  const app = createApp(state => h(Counter, { count: state.count }), { count: 0 });
+  const state = app.mount(root);
+  assert.equal(root.textContent, '0');
+  assert.equal(renders, 1);
+  state.count = 1;
+  state.count = 2;
+  assert.equal(root.textContent, '0');
+  await nextTick();
+  assert.equal(root.textContent, '2');
+  assert.equal(renders, 2);
+  app.unmount();
+});
+
+test('object components retain setup state and support lifecycle, emits, and injection', async () => {
   const document = installDom();
   const root = document.createElement('main');
   const hooks = [];
@@ -685,12 +742,14 @@ test('object components retain setup state and support lifecycle, emits, and inj
   assert.deepEqual(hooks, ['child-before-mount', 'child-mounted', 'parent-mounted']);
 
   button.dispatchEvent(new Event('click', { bubbles: true }));
+  await nextTick();
   assert.equal(button.textContent, 'injected:Before:1');
   assert.deepEqual(emitted, [1]);
   assert.equal(hooks.includes('child-before-update'), true);
   assert.equal(hooks.includes('child-updated'), true);
 
   state.label = 'After';
+  await nextTick();
   assert.equal(root.querySelector('button'), button);
   assert.equal(button.textContent, 'injected:After:1');
   assert.equal(hooks.includes('parent-updated'), true);
@@ -1170,7 +1229,7 @@ test('SFC supports object spread bindings for native and child component props',
   assert.equal(root.querySelector('strong').textContent, 'Done:false');
 });
 
-test('SFC script setup compiles safe reactive declarations and event methods', () => {
+test('SFC script setup compiles safe reactive declarations and event methods', async () => {
   const document = installDom();
   const root = document.createElement('main');
   const saves = [];
@@ -1196,9 +1255,11 @@ test('SFC script setup compiles safe reactive declarations and event methods', (
   const [increment, save] = root.querySelectorAll('button');
   assert.equal(root.querySelector('strong').textContent, '1 / 2');
   increment.dispatchEvent(new Event('click', { bubbles: true }));
+  await nextTick();
   assert.equal(root.querySelector('strong').textContent, '2 / 4');
   input.value = '3';
   input.dispatchEvent(new Event('input', { bubbles: true }));
+  await nextTick();
   assert.equal(root.querySelector('strong').textContent, '3 / 6');
   save.dispatchEvent(new Event('click', { bubbles: true }));
   assert.deepEqual(saves, ['3']);
