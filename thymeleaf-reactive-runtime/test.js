@@ -684,6 +684,41 @@ test('SFC supports object spread bindings for native and child component props',
   assert.equal(root.querySelector('strong').textContent, 'Done:false');
 });
 
+test('SFC script setup compiles safe reactive declarations and event methods', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const saves = [];
+  const component = compileSfcComponent(`
+    <template>
+      <section>
+        <input v-model="count">
+        <strong>{{ count }} / {{ doubled }}</strong>
+        <button @click="increment">Increment</button>
+        <button @click="save">Save</button>
+      </section>
+    </template>
+    <script setup>
+      const count = ref(1);
+      const doubled = computed(() => count * 2);
+      function increment() { count.value++; }
+      const save = () => emit('save', count.value);
+    </script>
+  `);
+  const app = createApp(() => h(component, { onSave: value => saves.push(value) }));
+  app.mount(root);
+  const input = root.querySelector('input');
+  const [increment, save] = root.querySelectorAll('button');
+  assert.equal(root.querySelector('strong').textContent, '1 / 2');
+  increment.dispatchEvent(new Event('click', { bubbles: true }));
+  assert.equal(root.querySelector('strong').textContent, '2 / 4');
+  input.value = '3';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  assert.equal(root.querySelector('strong').textContent, '3 / 6');
+  save.dispatchEvent(new Event('click', { bubbles: true }));
+  assert.deepEqual(saves, ['3']);
+  app.unmount();
+});
+
 test('hydrates Thymeleaf bindings and synchronizes model values', () => {
   const document = installDom();
   const root = document.createElement('section');

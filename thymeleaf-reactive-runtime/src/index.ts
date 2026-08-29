@@ -555,10 +555,100 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
   return h(resolveSfcComponent(element.tagName, scope) ?? element.tagName.toLowerCase(), props, children);
 }
 
+type SfcSetupBinding = { name: string; kind: "ref" | "reactive" | "computed"; expression: string };
+type SfcSetupMethod = { name: string; body: string };
+
+function splitSfcStatements(source: string): string[] {
+  const statements: string[] = [];
+  let start = 0;
+  let depth = 0;
+  let quote = "";
+  for (let index = 0; index < source.length; index++) {
+    const character = source[index];
+    if (quote) {
+      if (character === "\\") index++;
+      else if (character === quote) quote = "";
+      continue;
+    }
+    if (character === "\"" || character === "'" || character === "`") quote = character;
+    else if (character === "(" || character === "[" || character === "{") depth++;
+    else if (character === ")" || character === "]" || character === "}") depth--;
+    else if (character === ";" && depth === 0) {
+      const statement = source.slice(start, index).trim();
+      if (statement) statements.push(statement);
+      start = index + 1;
+    }
+  }
+  const statement = source.slice(start).trim();
+  if (statement) statements.push(statement);
+  return statements;
+}
+
+function parseSfcSetup(source: string): { bindings: SfcSetupBinding[]; methods: SfcSetupMethod[] } {
+  const bindings: SfcSetupBinding[] = [];
+  const methods: SfcSetupMethod[] = [];
+  const body = source
+    .replace(/\/\/.*$/gm, "")
+    .replace(/}\s*(?=(?:const|let|function)\b)/g, "};\n")
+    .trim();
+  if (!body) return { bindings, methods };
+  splitSfcStatements(body).forEach(statement => {
+    const binding = statement.match(/^(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*(ref|reactive|computed)\(([\s\S]*)\)$/);
+    if (binding) {
+      const expression = binding[3].trim();
+      const computedMatch = expression.match(/^\(\s*\)\s*=>\s*([\s\S]+)$/);
+      if (binding[2] === "computed" && !computedMatch) {
+        throw new Error(`Unsupported script setup computed declaration: ${statement}`);
+      }
+      bindings.push({ name: binding[1], kind: binding[2] as SfcSetupBinding["kind"], expression: computedMatch?.[1].trim() ?? expression });
+      return;
+    }
+    const arrow = statement.match(/^(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*\(\s*\)\s*=>\s*(?:\{([\s\S]*)\}|([\s\S]+))$/);
+    if (arrow) {
+      methods.push({ name: arrow[1], body: (arrow[2] ?? arrow[3]).trim() });
+      return;
+    }
+    const method = statement.match(/^function\s+([A-Za-z_$][\w$]*)\s*\(\s*\)\s*\{([\s\S]*)\}$/);
+    if (method) {
+      methods.push({ name: method[1], body: method[2].trim() });
+      return;
+    }
+    throw new Error(`Unsupported script setup statement: ${statement}`);
+  });
+  return { bindings, methods };
+}
+
+function splitSfcArguments(source: string): string[] {
+  const statements = splitSfcStatements(source.replace(/,/g, ";"));
+  return statements.length ? statements : source.trim() ? [source.trim()] : [];
+}
+
+function runSfcSetupMethod(body: string, scope: Record<string, unknown>, context: ComponentContext): void {
+  splitSfcStatements(body).forEach(statement => {
+    const increment = statement.match(/^(.+?)(\+\+|--)$/);
+    if (increment) {
+      const current = readPath(scope, increment[1]);
+      writePath(scope, increment[1], Number(current ?? 0) + (increment[2] === "++" ? 1 : -1));
+      return;
+    }
+    const assignment = statement.match(/^([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*=\s*([\s\S]+)$/);
+    if (assignment) {
+      writePath(scope, assignment[1], readPath(scope, assignment[2]));
+      return;
+    }
+    const emit = statement.match(/^emit\(\s*(['"])([^'"]+)\1(?:\s*,\s*([\s\S]+))?\s*\)$/);
+    if (emit) {
+      context.emit(emit[2], ...splitSfcArguments(emit[3] ?? "").map(argument => readPath(scope, argument)));
+      return;
+    }
+    throw new Error(`Unsupported script setup method statement: ${statement}`);
+  });
+}
+
 /**
- * Compiles the template block of a resource-backed Vue single-file component.
- * Script blocks are deliberately not evaluated: component behavior is supplied
- * through reactive props and event-handler props, keeping HMR modules CSP-safe.
+ * Compiles a resource-backed Vue SFC template plus a CSP-safe script-setup subset.
+ * Supported setup declarations are ref(), reactive(), computed(() => expression),
+ * and zero-argument methods containing assignments, increments, decrements, or emit().
  */
 export function compileSfcComponent(source: string): Component {
   if (typeof document === "undefined") throw new Error("SFC components require a browser document");
@@ -567,10 +657,30 @@ export function compileSfcComponent(source: string): Component {
   const template = document.createElement("template");
   template.innerHTML = match[1];
   const roots = Array.from(template.content.childNodes);
-  return (props, children) => {
+  const script = source.match(/<script\s+setup(?:\s[^>]*)?>([\s\S]*?)<\/script>/i)?.[1];
+  if (!script) return (props, children) => {
     const scope = props as Record<string, unknown>;
     const nodes = renderSfcChildren(roots, scope, children);
     return nodes.length === 1 ? nodes[0] : h(Fragment, {}, nodes);
+  };
+  const setup = parseSfcSetup(script);
+  return {
+    setup(props, context) {
+      const local = Object.create(props) as Record<string, unknown>;
+      setup.bindings.forEach(binding => {
+        if (binding.kind === "ref") local[binding.name] = ref(readPath(local, binding.expression));
+        else if (binding.kind === "reactive") local[binding.name] = reactive(readPath(local, binding.expression) ?? {});
+        else local[binding.name] = computed(() => readPath(proxyRefs(local), binding.expression));
+      });
+      setup.methods.forEach(method => {
+        local[method.name] = () => runSfcSetupMethod(method.body, local, context);
+      });
+      const scope = proxyRefs(local);
+      return (_props, children) => {
+        const nodes = renderSfcChildren(roots, scope, children);
+        return nodes.length === 1 ? nodes[0] : h(Fragment, {}, nodes);
+      };
+    }
   };
 }
 
@@ -972,11 +1082,39 @@ export function registerComponentSource(source: string, name: string): void {
 
 /** Adopts a server-rendered component root so future SFC HMR updates patch it in place. */
 export function adoptComponentRoot(root: Element, component: Component, props: Record<string, unknown> = {}): void {
+  const container = root.parentNode;
+  if (!container) return;
+  const tree = vnodeFromDom(root);
+  if (isObjectComponent(component)) {
+    const vnode: VNode = { type: component, props, children: tree.children, el: tree.el, anchor: tree.anchor, component: tree };
+    const instance = {} as ComponentInstance;
+    instance.vnode = vnode;
+    instance.props = reactive({ ...props });
+    instance.children = vnode.children;
+    instance.provides = Object.create(null);
+    instance.mountedHooks = component.mounted ? [component.mounted] : [];
+    instance.updatedHooks = component.updated ? [component.updated] : [];
+    instance.unmountedHooks = component.unmounted ? [component.unmounted] : [];
+    instance.isMounted = false;
+    instance.tree = tree;
+    instance.update = effect(() => {
+      const nextTree = renderObjectComponent(instance);
+      instance.tree = patch(instance.tree, nextTree, container) ?? instance.tree;
+      if (!instance.isMounted) {
+        instance.isMounted = true;
+        instance.mountedHooks!.forEach(hook => hook());
+      } else instance.updatedHooks!.forEach(hook => hook());
+      instance.vnode.component = instance.tree;
+      instance.vnode.el = instance.tree.el;
+      instance.vnode.anchor = instance.tree.anchor;
+    });
+    instance.dispose = () => instance.update.stop?.();
+    vnode.instance = instance;
+    return;
+  }
   const name = componentNames.get(component);
   const entry = name ? hotComponents.get(name) : undefined;
-  const container = root.parentNode;
-  if (!entry || !container) return;
-  const tree = vnodeFromDom(root);
+  if (!entry) return;
   const vnode: VNode = { type: component, props, children: tree.children, el: tree.el, anchor: tree.anchor, component: tree };
   const instance = {} as ComponentInstance;
   instance.vnode = vnode;
@@ -1056,7 +1194,14 @@ export function connectComponentHmr(
       moduleUrl.searchParams.set("t", String(Date.now()));
       const module = await import(moduleUrl.href);
       const render = module.default ?? module.render;
-      if (typeof render !== "function") throw new Error("HMR module has no render export");
+      if (typeof render !== "function") {
+        if (render && typeof render === "object") {
+          console.warn("[thymeleaf-reactive] script-setup SFC update requires a page reload");
+          window.location.reload();
+          return;
+        }
+        throw new Error("HMR module has no component export");
+      }
       const source = moduleUrl.searchParams.get("path");
       const target = source ? componentSources.get(normalizeComponentSource(source)) : undefined;
       if (!hotUpdate(target ?? update.component, render)) {

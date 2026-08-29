@@ -1,4 +1,4 @@
-import { adoptComponentRoot, connectComponentHmr, defineComponent, hydrate, registerComponentSource } from "./index.js";
+import { adoptComponentRoot, connectComponentHmr, defineComponent, hydrate, registerComponentSource, type Component } from "./index.js";
 
 declare global {
   interface Window {
@@ -29,11 +29,17 @@ async function adoptSfcComponent(
   const moduleUrl = new URL("/__thymeleaf_reactive__/component", window.location.origin);
   moduleUrl.searchParams.set("path", source);
   const module = await import(moduleUrl.href);
-  const render = module.default ?? module.render;
-  if (typeof render !== "function") throw new Error(`SFC ${source} has no component render export`);
+  const component = module.default ?? module.render;
+  if ((typeof component !== "function") && (typeof component !== "object" || component === null)) {
+    throw new Error(`SFC ${source} has no component export`);
+  }
   registerComponentSource(source, name);
   Object.assign(state, handlers);
-  adoptComponentRoot(root, defineComponent(name, render), state as Record<string, unknown>);
+  adoptComponentRoot(
+    root,
+    typeof component === "function" ? defineComponent(name, component) : component as Component,
+    state as Record<string, unknown>
+  );
 }
 
 async function boot(): Promise<void> {
