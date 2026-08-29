@@ -235,6 +235,28 @@ test('HMR polling replays every missed version in order', async () => {
   assert.deepEqual(versions, [2, 3]);
 });
 
+test('closing HMR ignores an in-flight polling response', async () => {
+  installDom();
+  globalThis.EventSource = undefined;
+  let resolveResponse;
+  globalThis.fetch = () => new Promise(resolve => { resolveResponse = resolve; });
+  const versions = [];
+  window.addEventListener('thymeleaf-reactive:template-change', event => versions.push(event.detail.version));
+  const close = connectComponentHmr('/events', '/status', 1000);
+  close();
+  resolveResponse({
+    ok: true,
+    json: async () => ({
+      version: 2,
+      historyComplete: true,
+      changes: [{ path: 'profile.html', kind: 'MODIFY', version: 2 }]
+    })
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(versions, []);
+});
+
 test('reactive effects clean stale branches and track array length changes', () => {
   const state = reactive({ enabled: true, first: 'A', second: 'B', items: ['x'] });
   let value = '';

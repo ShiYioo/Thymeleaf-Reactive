@@ -2027,17 +2027,21 @@ export function connectComponentHmr(
   let pollingInitialized = false;
   let polling = false;
   let hasEnqueuedChanges = false;
+  let stopped = false;
   const applyChange = async (message: HmrMessage) => {
+    if (stopped) return;
     const update = message as ComponentHmrMessage;
     if (typeof update.version === "number" && update.version <= seenVersion) return;
     if (!update.component) {
       window.dispatchEvent(new CustomEvent("thymeleaf-reactive:template-change", { detail: update }));
     } else if (!update.moduleUrl) {
       await refreshComponentsFromPage(update.component);
+      if (stopped) return;
     } else {
       const moduleUrl = new URL(update.moduleUrl, window.location.origin);
       moduleUrl.searchParams.set("t", String(Date.now()));
       const module = await import(moduleUrl.href);
+      if (stopped) return;
       const render = module.default ?? module.render;
       if (typeof render !== "function" && (!render || typeof render !== "object")) {
         throw new Error("HMR module has no component export");
@@ -2059,11 +2063,12 @@ export function connectComponentHmr(
   };
   const closeEvents = connectHmr(enqueueChange, endpoint);
   const poll = async () => {
-    if (polling) return;
+    if (stopped || polling) return;
     polling = true;
     try {
       const separator = statusEndpoint.includes("?") ? "&" : "?";
       const response = await fetch(`${statusEndpoint}${separator}since=${encodeURIComponent(seenVersion)}`, { cache: "no-store" });
+      if (stopped) return;
       if (!response.ok) return;
       const status = await response.json() as {
         version?: number;
@@ -2079,6 +2084,7 @@ export function connectComponentHmr(
       }
       if (version <= seenVersion) return;
       if (status.historyComplete === false) {
+        if (stopped) return;
         console.warn("[thymeleaf-reactive] HMR history is incomplete; reloading the page");
         window.location.reload();
         return;
@@ -2086,6 +2092,7 @@ export function connectComponentHmr(
       const changes = (status.changes?.length ? status.changes : status.lastChange ? [status.lastChange] : [])
         .sort((left, right) => (left.version ?? 0) - (right.version ?? 0));
       if (!changes.length) {
+        if (stopped) return;
         console.warn("[thymeleaf-reactive] missing HMR changes; reloading the page");
         window.location.reload();
         return;
@@ -2100,7 +2107,7 @@ export function connectComponentHmr(
   void poll();
   const timer = setInterval(() => { void poll(); }, pollInterval);
   if (typeof timer === "object" && "unref" in timer) (timer as { unref(): void }).unref();
-  return () => { closeEvents(); clearInterval(timer); };
+  return () => { stopped = true; closeEvents(); clearInterval(timer); };
 }
 
 function vnodeFromDom(node: Node): VNode {
