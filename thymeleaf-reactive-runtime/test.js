@@ -150,6 +150,7 @@ test('async components render loading, resolved, and error states', async () => 
   assert.equal(root.textContent, 'Loading');
   resolve(() => h('strong', {}, 'Ready'));
   await Promise.resolve();
+  await nextTick();
   assert.equal(root.textContent, 'Ready');
   app.unmount();
 
@@ -160,6 +161,7 @@ test('async components render loading, resolved, and error states', async () => 
   createApp(() => h(Failed)).mount(root);
   await Promise.resolve();
   await Promise.resolve();
+  await nextTick();
   assert.equal(root.textContent, 'Error:offline');
 });
 
@@ -419,7 +421,7 @@ test('fragment components patch and hot-update multiple root nodes as one range'
   assert.equal(root.textContent, '');
 });
 
-test('keyed fragment children move their full DOM ranges together', () => {
+test('keyed fragment children move their full DOM ranges together', async () => {
   const document = installDom();
   const root = document.createElement('main');
   const app = createApp(state => h('ul', {}, state.items.map(item => h(Fragment, { key: item.id }, [
@@ -431,6 +433,7 @@ test('keyed fragment children move their full DOM ranges together', () => {
   const firstB = initial[2];
   const secondB = initial[3];
   state.items = [{ id: 'b', label: 'B2', meta: 'B2*' }, { id: 'a', label: 'A', meta: 'A*' }];
+  await nextTick();
   const rows = root.querySelectorAll('li');
   assert.equal(rows[0], firstB);
   assert.equal(rows[1], secondB);
@@ -568,7 +571,7 @@ test('component HMR patches server conditional comment anchors', async () => {
   assert.equal(document.querySelector('section').firstChild.nodeType, Node.COMMENT_NODE);
 });
 
-test('virtual DOM patches changed content without replacing keyed input nodes', () => {
+test('virtual DOM patches changed content without replacing keyed input nodes', async () => {
   const document = installDom();
   const root = document.createElement('main');
   const app = createApp(state => h('section', {}, [
@@ -578,6 +581,7 @@ test('virtual DOM patches changed content without replacing keyed input nodes', 
   const state = app.mount(root);
   const input = root.querySelector('input');
   state.count = 1;
+  await nextTick();
   assert.equal(root.querySelector('strong').textContent, '1');
   assert.equal(root.querySelector('input'), input);
   assert.equal(root.querySelector('input').value, 'kept');
@@ -595,7 +599,7 @@ test('render retains the previous tree and supports explicit unmounting', () => 
   assert.equal(root.childNodes.length, 0);
 });
 
-test('Teleport patches and moves its child range without recreating keyed fields', () => {
+test('Teleport patches and moves its child range without recreating keyed fields', async () => {
   const document = installDom();
   const root = document.createElement('main');
   const firstTarget = document.createElement('aside');
@@ -616,15 +620,18 @@ test('Teleport patches and moves its child range without recreating keyed fields
   assert.equal(firstTarget.querySelector('strong').textContent, 'Before');
 
   state.label = 'After';
+  await nextTick();
   assert.equal(firstTarget.querySelector('input'), input);
   assert.equal(firstTarget.querySelector('strong').textContent, 'After');
 
   state.target = '#second-target';
+  await nextTick();
   assert.equal(firstTarget.querySelector('input'), null);
   assert.equal(secondTarget.querySelector('input'), input);
   assert.equal(secondTarget.querySelector('strong').textContent, 'After');
 
   state.visible = false;
+  await nextTick();
   assert.equal(secondTarget.childNodes.length, 0);
   app.unmount();
 });
@@ -686,6 +693,7 @@ test('KeepAlive max evicts the least recently activated instance', async () => {
   await nextTick();
   assert.equal(firstA.textContent, 'A:1');
   state.view = 'B';
+  await nextTick();
   state.view = 'A';
   await nextTick();
   const secondA = root.querySelector('button');
@@ -836,7 +844,7 @@ test('object components retain setup state and support lifecycle, emits, and inj
   assert.equal(hooks.includes('parent-unmounted'), true);
 });
 
-test('object component setup exposes reactive default and named slots', () => {
+test('object component setup exposes reactive default and named slots', async () => {
   const document = installDom();
   const root = document.createElement('main');
   const Panel = {
@@ -858,13 +866,14 @@ test('object component setup exposes reactive default and named slots', () => {
   assert.equal(paragraph.textContent, 'Body');
   state.title = 'Updated title';
   state.body = 'Updated body';
+  await nextTick();
   assert.equal(root.querySelector('h1'), heading);
   assert.equal(root.querySelector('p'), paragraph);
   assert.equal(heading.textContent, 'Updated title');
   assert.equal(paragraph.textContent, 'Updated body');
 });
 
-test('object component slots expose names added after setup', () => {
+test('object component slots expose names added after setup', async () => {
   const document = installDom();
   const root = document.createElement('main');
   const Panel = {
@@ -881,12 +890,14 @@ test('object component slots expose names added after setup', () => {
   const state = createApp(render, { extra: '' }).mount(root);
   assert.equal(root.querySelector('em').textContent, 'No extra');
   state.extra = 'Added';
+  await nextTick();
   assert.equal(root.querySelector('strong').textContent, 'Added');
   state.extra = '';
+  await nextTick();
   assert.equal(root.querySelector('em').textContent, 'No extra');
 });
 
-test('virtual DOM performs keyed moves and insertions while updating props and listeners', () => {
+test('virtual DOM performs keyed moves and insertions while updating props and listeners', async () => {
   const document = installDom();
   const root = document.createElement('main');
   let clicks = 0;
@@ -900,6 +911,7 @@ test('virtual DOM performs keyed moves and insertions while updating props and l
   state.items = [{ id: 'b', label: 'B2' }, { id: 'a', label: 'A' }, { id: 'c', label: 'C' }];
   state.active = true;
   state.color = 'blue';
+  await nextTick();
 
   const items = root.querySelectorAll('li');
   assert.equal(items.length, 3);
@@ -912,7 +924,7 @@ test('virtual DOM performs keyed moves and insertions while updating props and l
   assert.equal(clicks, 1);
 });
 
-test('virtual DOM creates SVG trees in the SVG namespace', () => {
+test('virtual DOM creates SVG trees in the SVG namespace', async () => {
   const document = installDom();
   const root = document.createElement('main');
   const state = createApp(state => h('svg', { viewBox: state.viewBox }, [
@@ -925,12 +937,13 @@ test('virtual DOM creates SVG trees in the SVG namespace', () => {
   assert.equal(circle.getAttribute('r'), '2');
   state.radius = 3;
   state.viewBox = '0 0 20 20';
+  await nextTick();
   assert.equal(root.querySelector('circle'), circle);
   assert.equal(circle.getAttribute('r'), '3');
   assert.equal(svg.getAttribute('viewBox'), '0 0 20 20');
 });
 
-test('virtual DOM removes stale event listeners and style properties', () => {
+test('virtual DOM removes stale event listeners and style properties', async () => {
   const document = installDom();
   const root = document.createElement('main');
   let oldClicks = 0;
@@ -942,6 +955,7 @@ test('virtual DOM removes stale event listeners and style properties', () => {
   const state = app.mount(root);
   const button = root.querySelector('button');
   state.version = 1;
+  await nextTick();
   button.dispatchEvent(new Event('click'));
   assert.equal(oldClicks, 0);
   assert.equal(newClicks, 1);
@@ -949,7 +963,7 @@ test('virtual DOM removes stale event listeners and style properties', () => {
   assert.equal(button.style.background, '');
 });
 
-test('SFC render tracks state, loops keyed children, and writes v-model values back', () => {
+test('SFC render tracks state, loops keyed children, and writes v-model values back', async () => {
   const document = installDom();
   const root = document.createElement('main');
   const render = compileSfcComponent(`
@@ -972,10 +986,13 @@ test('SFC render tracks state, loops keyed children, and writes v-model values b
   }).mount(root);
   assert.equal(root.querySelector('strong').textContent, '0');
   root.querySelector('button').dispatchEvent(new Event('click', { bubbles: true }));
+  await nextTick();
   assert.equal(root.querySelector('strong').textContent, '1');
   state.visible = false;
+  await nextTick();
   assert.equal(root.querySelector('em').textContent, 'hidden');
   state.items = [{ id: 'b', label: 'B2' }, { id: 'a', label: 'A' }];
+  await nextTick();
   assert.deepEqual([...root.querySelectorAll('li')].map(item => item.textContent), ['B2', 'A']);
   const input = root.querySelector('input');
   input.value = 'Grace';
@@ -1118,7 +1135,7 @@ test('SFC event modifiers filter keyboard, mouse, and system inputs', () => {
   assert.equal(state.rightRuns, 1);
 });
 
-test('SFC resolves dynamic attribute and event arguments', () => {
+test('SFC resolves dynamic attribute and event arguments', async () => {
   const document = installDom();
   const root = document.createElement('main');
   const render = compileSfcComponent('<template><button :[attribute]="value" v-on:[eventName]="handle">Dynamic</button></template>');
@@ -1133,13 +1150,14 @@ test('SFC resolves dynamic attribute and event arguments', () => {
   state.attribute = 'aria-label';
   state.value = 'Second';
   state.eventName = 'dblclick';
+  await nextTick();
   assert.equal(button.getAttribute('aria-label'), 'Second');
   button.dispatchEvent(new Event('click'));
   button.dispatchEvent(new Event('dblclick'));
   assert.equal(state.runs, 2);
 });
 
-test('SFC v-model supports checkbox arrays and select values', () => {
+test('SFC v-model supports checkbox arrays and select values', async () => {
   const document = installDom();
   const root = document.createElement('main');
   const render = compileSfcComponent(`
@@ -1171,9 +1189,10 @@ test('SFC v-model supports checkbox arrays and select values', () => {
   assert.equal(state.choice, 'a');
   assert.deepEqual(state.selected, ['b']);
   delete selected.selectedOptions;
+  await nextTick();
 });
 
-test('SFC v-for accepts tuple syntax and preserves keyed form nodes', () => {
+test('SFC v-for accepts tuple syntax and preserves keyed form nodes', async () => {
   const document = installDom();
   const root = document.createElement('main');
   const render = compileSfcComponent('<template><ul><li v-for="(item, index) of items" :key="item.id"><input :value="item.label"><span>{{index}}:{{item.label}}</span></li></ul></template>');
@@ -1183,6 +1202,7 @@ test('SFC v-for accepts tuple syntax and preserves keyed form nodes', () => {
   const [inputA, inputB] = root.querySelectorAll('input');
   inputB.value = 'Typing';
   state.items = [{ id: 'b', label: 'B2' }, { id: 'a', label: 'A' }];
+  await nextTick();
   const [first, second] = root.querySelectorAll('input');
   assert.equal(first, inputB);
   assert.equal(second, inputA);
@@ -1190,19 +1210,21 @@ test('SFC v-for accepts tuple syntax and preserves keyed form nodes', () => {
   assert.deepEqual([...root.querySelectorAll('span')].map(node => node.textContent), ['0:B2', '1:A']);
 });
 
-test('SFC evaluates v-else-if chains in sibling order', () => {
+test('SFC evaluates v-else-if chains in sibling order', async () => {
   const document = installDom();
   const root = document.createElement('main');
   const render = compileSfcComponent('<template><div><p v-if="mode === 1">one</p><p v-else-if="mode === 2">two</p><p v-else>other</p></div></template>');
   const state = createApp(render, { mode: 1 }).mount(root);
   assert.equal(root.querySelector('p').textContent, 'one');
   state.mode = 2;
+  await nextTick();
   assert.equal(root.querySelector('p').textContent, 'two');
   state.mode = 3;
+  await nextTick();
   assert.equal(root.querySelector('p').textContent, 'other');
 });
 
-test('SFC v-html replaces child VNodes and virtual DOM restores them cleanly', () => {
+test('SFC v-html replaces child VNodes and virtual DOM restores them cleanly', async () => {
   const document = installDom();
   const root = document.createElement('main');
   const render = compileSfcComponent('<template><section><div v-html="markup"><span>Ignored</span></div></section></template>');
@@ -1211,6 +1233,7 @@ test('SFC v-html replaces child VNodes and virtual DOM restores them cleanly', (
   assert.equal(target.innerHTML, '<strong>One</strong>');
   assert.equal(target.querySelector('span'), null);
   state.markup = '<em>Two</em>';
+  await nextTick();
   assert.equal(target.innerHTML, '<em>Two</em>');
 
   const treeState = reactive({ raw: true, markup: '<b>Raw</b>' });
@@ -1218,13 +1241,15 @@ test('SFC v-html replaces child VNodes and virtual DOM restores them cleanly', (
   const app = createApp(state => h('div', state.raw ? { innerHTML: state.markup } : {}, state.raw ? [] : [h('span', {}, 'VNode')]), treeState);
   app.mount(treeRoot);
   treeState.raw = false;
+  await nextTick();
   assert.equal(treeRoot.querySelector('div').innerHTML, '<span>VNode</span>');
   treeState.raw = true;
   treeState.markup = '<i>Again</i>';
+  await nextTick();
   assert.equal(treeRoot.querySelector('div').innerHTML, '<i>Again</i>');
 });
 
-test('SFC resolves registered child components into the VDOM tree', () => {
+test('SFC resolves registered child components into the VDOM tree', async () => {
   const document = installDom();
   const root = document.createElement('main');
   const Child = defineComponent('sfc-child-test', props => h('strong', { class: 'child' }, String(props.label)));
@@ -1233,11 +1258,12 @@ test('SFC resolves registered child components into the VDOM tree', () => {
   const child = root.querySelector('strong');
   assert.equal(child.textContent, 'Before');
   state.message = 'After';
+  await nextTick();
   assert.equal(root.querySelector('strong'), child);
   assert.equal(child.textContent, 'After');
 });
 
-test('SFC renders named slots, direct slot content, and slot fallbacks', () => {
+test('SFC renders named slots, direct slot content, and slot fallbacks', async () => {
   const document = installDom();
   const root = document.createElement('main');
   const Card = compileSfcComponent(`
@@ -1266,6 +1292,7 @@ test('SFC renders named slots, direct slot content, and slot fallbacks', () => {
   assert.equal(root.querySelector('footer p').textContent, 'Footer');
   assert.equal(root.querySelector('small'), null);
   state.title = 'Updated';
+  await nextTick();
   assert.equal(root.querySelector('h2').textContent, 'Updated');
 
   const fallbackRoot = document.createElement('main');
@@ -1275,7 +1302,7 @@ test('SFC renders named slots, direct slot content, and slot fallbacks', () => {
   assert.equal(fallbackRoot.querySelector('small').textContent, 'Fallback footer');
 });
 
-test('SFC resolves dynamic native and registered component targets', () => {
+test('SFC resolves dynamic native and registered component targets', async () => {
   const document = installDom();
   const root = document.createElement('main');
   const Child = defineComponent('dynamic-child-test', () => h('strong', {}, 'Child'));
@@ -1283,10 +1310,11 @@ test('SFC resolves dynamic native and registered component targets', () => {
   const state = createApp(render, { current: 'em', components: { Child } }).mount(root);
   assert.equal(root.querySelector('em').textContent, 'Dynamic');
   state.current = Child;
+  await nextTick();
   assert.equal(root.querySelector('strong').textContent, 'Child');
 });
 
-test('SFC supports object spread bindings for native and child component props', () => {
+test('SFC supports object spread bindings for native and child component props', async () => {
   const document = installDom();
   const root = document.createElement('main');
   const Child = defineComponent('sfc-bind-test', props => h('strong', {}, `${props.label}:${props.active}`));
@@ -1301,6 +1329,7 @@ test('SFC supports object spread bindings for native and child component props',
   assert.equal(input.value, 'draft');
   assert.equal(root.querySelector('strong').textContent, 'Ready:true');
   state.childProps = { label: 'Done', active: false };
+  await nextTick();
   assert.equal(root.querySelector('strong').textContent, 'Done:false');
 });
 
@@ -1589,6 +1618,7 @@ test('Suspense renders fallback until an async component resolves', async () => 
   assert.equal(root.textContent, 'Waiting');
   resolve(() => h('strong', {}, 'Ready'));
   await Promise.resolve();
+  await nextTick();
   assert.equal(root.textContent, 'Ready');
   assert.equal(root.querySelector('p'), null);
   app.unmount();
@@ -1612,6 +1642,7 @@ test('Transition runs enter and leave lifecycle hooks around keyed replacement',
   await new Promise(resolve => setTimeout(resolve, 5));
   assert.deepEqual(events, ['before-enter', 'after-enter']);
   state.showFirst = false;
+  await nextTick();
   assert.equal(root.textContent, 'SecondFirst');
   assert.deepEqual(events.slice(-1), ['before-leave']);
   await new Promise(resolve => setTimeout(resolve, 5));
@@ -1634,6 +1665,7 @@ test('TransitionGroup preserves keyed nodes and transitions list additions and r
   app.mount(root);
   const first = root.querySelector('li');
   state.items = ['b', 'c'];
+  await nextTick();
   assert.deepEqual([...root.querySelectorAll('li')].map(item => item.textContent), ['b', 'c', 'a']);
   await new Promise(resolve => setTimeout(resolve, 5));
   assert.ok(events.includes('enter:c'));

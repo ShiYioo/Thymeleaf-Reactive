@@ -881,8 +881,9 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
           : Boolean(current);
         props.onChange = (event: Event) => {
           const checked = (event.target as HTMLInputElement).checked;
-          if (Array.isArray(current) && option != null) {
-            const values = current.map(String);
+          const currentValue = readPath(scope, modelPath);
+          if (Array.isArray(currentValue) && option != null) {
+            const values = currentValue.map(String);
              writeModel(checked
                ? values.includes(option) ? values : [...values, option]
                : values.filter(item => item !== option));
@@ -1843,7 +1844,12 @@ export function createApp(render: (state: any) => VNode, state: object = {}) {
     mount(root: Element): object {
       if (rerender) this.unmount();
       mountedRoot = root;
-      rerender = effect(() => { tree = patch(tree, currentRender(reactiveState), root) ?? undefined; });
+      const uid = nextComponentUid++;
+      let rootUpdate!: Effect;
+      rootUpdate = effect(() => { tree = patch(tree, currentRender(reactiveState), root) ?? undefined; }, {
+        scheduler: () => queueJob(rootUpdate, uid)
+      });
+      rerender = rootUpdate;
       mountedApps.add(rerender);
       return reactiveState;
     },
