@@ -769,6 +769,17 @@ test('SFC resolves registered child components into the VDOM tree', () => {
   assert.equal(child.textContent, 'After');
 });
 
+test('SFC resolves dynamic native and registered component targets', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Child = defineComponent('dynamic-child-test', () => h('strong', {}, 'Child'));
+  const render = compileSfcComponent('<template><component :is="current">Dynamic</component></template>');
+  const state = createApp(render, { current: 'em', components: { Child } }).mount(root);
+  assert.equal(root.querySelector('em').textContent, 'Dynamic');
+  state.current = Child;
+  assert.equal(root.querySelector('strong').textContent, 'Child');
+});
+
 test('SFC supports object spread bindings for native and child component props', () => {
   const document = installDom();
   const root = document.createElement('main');

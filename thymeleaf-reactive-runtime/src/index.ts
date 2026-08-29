@@ -578,6 +578,13 @@ function resolveSfcComponent(tagName: string, scope: Record<string, unknown>): C
     : undefined;
 }
 
+export function resolveDynamicComponent(value: unknown): string | Component | typeof Comment {
+  if (typeof value === "string" || typeof value === "function" || (typeof value === "object" && value !== null)) {
+    return value as string | Component;
+  }
+  return Comment;
+}
+
 function renderSfcChildren(nodes: Node[], scope: Record<string, unknown>, slots: VNode[]): VNode[] {
   const output: VNode[] = [];
   let previousIf = false;
@@ -650,11 +657,13 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
   if (condition && !readPath(scope, condition)) return { type: Comment, props: {}, children: [], el: null, text: "v-if" };
   if (element.hasAttribute("v-else") || element.hasAttribute("v-else-if")) return undefined;
   const show = element.getAttribute("v-show");
+  const dynamic = element.tagName.toLowerCase() === "component";
+  const dynamicSource = element.getAttribute(":is") ?? element.getAttribute("v-bind:is") ?? element.getAttribute("is");
 
   const props: Record<string, unknown> = {};
   Array.from(element.attributes).forEach(attribute => {
     const { name, value } = attribute;
-    if (name === "v-if" || name === "v-else" || name === "v-else-if" || name === "v-show" || name === "v-text") return;
+    if (name === "v-if" || name === "v-else" || name === "v-else-if" || name === "v-show" || name === "v-text" || (dynamic && (name === "is" || name === ":is" || name === "v-bind:is"))) return;
     if (name === "v-bind") {
       const bound = readPath(scope, value);
       if (bound && typeof bound === "object") Object.assign(props, bound);
@@ -721,7 +730,10 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
       if (child.type === "option") child.props.selected = selected.has(String(child.props.value ?? ""));
     });
   }
-  return h(resolveSfcComponent(element.tagName, scope) ?? element.tagName.toLowerCase(), props, children);
+  const type = dynamic
+    ? resolveDynamicComponent(dynamicSource && !element.hasAttribute("is") ? readPath(scope, dynamicSource) : dynamicSource)
+    : resolveSfcComponent(element.tagName, scope) ?? element.tagName.toLowerCase();
+  return h(typeof type === "string" ? resolveSfcComponent(type, scope) ?? type : type, props, children);
 }
 
 type SfcSetupBinding = { name: string; kind: "ref" | "reactive" | "computed"; expression: string };
