@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { adoptComponentRoot, reactive, ref, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, h, hotUpdate, hydrate, nextTick, onScopeDispose, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRef, toRefs, unref, watch, watchEffect } from './dist/index.js';
+import { adoptComponentRoot, reactive, ref, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, h, hotUpdate, hydrate, nextTick, onActivated, onDeactivated, onScopeDispose, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRef, toRefs, unref, watch, watchEffect } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -619,6 +619,8 @@ test('KeepAlive caches keyed component instances across switches', () => {
     setup(props) {
       const count = ref(0);
       onMounted(() => hooks.push(`mounted:${props.name}`));
+      onActivated(() => hooks.push(`activated:${props.name}`));
+      onDeactivated(() => hooks.push(`deactivated:${props.name}`));
       onUnmounted(() => hooks.push(`unmounted:${props.name}`));
       return () => h('button', { onClick: () => count.value++ }, `${props.name}:${count.value}`);
     }
@@ -636,7 +638,7 @@ test('KeepAlive caches keyed component instances across switches', () => {
   state.name = 'A';
   assert.equal(root.querySelector('button'), firstA);
   assert.equal(firstA.textContent, 'A:1');
-  assert.deepEqual(hooks, ['mounted:A', 'mounted:B']);
+  assert.deepEqual(hooks, ['mounted:A', 'activated:A', 'deactivated:A', 'mounted:B', 'activated:B', 'deactivated:B', 'activated:A']);
   state.name = 'B';
   assert.equal(root.querySelector('button'), buttonB);
   app.unmount();

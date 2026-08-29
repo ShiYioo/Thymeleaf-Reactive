@@ -18,6 +18,8 @@ export type ComponentOptions = {
   mounted?: () => void;
   updated?: () => void;
   unmounted?: () => void;
+  activated?: () => void;
+  deactivated?: () => void;
 };
 export type Component = ComponentRender | ComponentOptions;
 export type RenderFunction = (state: any) => VNode;
@@ -421,6 +423,8 @@ type ComponentInstance = {
   mountedHooks?: (() => void)[];
   updatedHooks?: (() => void)[];
   unmountedHooks?: (() => void)[];
+  activatedHooks?: (() => void)[];
+  deactivatedHooks?: (() => void)[];
   isMounted?: boolean;
   scope?: EffectScope;
 };
@@ -459,7 +463,7 @@ function currentComponentInstance(): ComponentInstance | undefined {
   return componentInstanceStack.at(-1);
 }
 
-function registerLifecycleHook(name: "mountedHooks" | "updatedHooks" | "unmountedHooks", hook: () => void): void {
+function registerLifecycleHook(name: "mountedHooks" | "updatedHooks" | "unmountedHooks" | "activatedHooks" | "deactivatedHooks", hook: () => void): void {
   const instance = currentComponentInstance();
   if (!instance) throw new Error("Lifecycle hooks must be registered during component setup");
   instance[name]!.push(hook);
@@ -475,6 +479,14 @@ export function onUpdated(hook: () => void): void {
 
 export function onUnmounted(hook: () => void): void {
   registerLifecycleHook("unmountedHooks", hook);
+}
+
+export function onActivated(hook: () => void): void {
+  registerLifecycleHook("activatedHooks", hook);
+}
+
+export function onDeactivated(hook: () => void): void {
+  registerLifecycleHook("deactivatedHooks", hook);
 }
 
 export function provide(key: PropertyKey, value: unknown): void {
@@ -527,6 +539,11 @@ function componentSlots(instance: ComponentInstance): ComponentSlots {
       ? () => (instance.children ?? []).filter(child => (child.slot ?? "default") === name)
       : undefined
   }) as ComponentSlots;
+}
+
+function invokeComponentHook(vnode: VNode, name: "activatedHooks" | "deactivatedHooks"): void {
+  if (isObjectComponent(vnode.type) && vnode.instance) vnode.instance[name]?.forEach(hook => hook());
+  else if (vnode.component) invokeComponentHook(vnode.component, name);
 }
 
 function renderObjectComponent(instance: ComponentInstance): VNode {
@@ -1169,6 +1186,7 @@ function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode
     vnode.cache.set(keepAliveKey(child), child);
     vnode.activeKey = keepAliveKey(child);
     mount(child, container, anchor);
+    invokeComponentHook(child, "activatedHooks");
     vnode.component = child;
     vnode.el = child.el;
     vnode.anchor = child.anchor;
@@ -1185,6 +1203,8 @@ function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode
     instance.mountedHooks = definition.mounted ? [definition.mounted] : [];
     instance.updatedHooks = definition.updated ? [definition.updated] : [];
     instance.unmountedHooks = definition.unmounted ? [definition.unmounted] : [];
+    instance.activatedHooks = definition.activated ? [definition.activated] : [];
+    instance.deactivatedHooks = definition.deactivated ? [definition.deactivated] : [];
     instance.isMounted = false;
     instance.scope = effectScope();
     instance.update = instance.scope.run(() => effect(() => {
@@ -1385,7 +1405,10 @@ export function patch(oldVNode: VNode | undefined, newVNode: VNode | undefined, 
     const oldChild = oldVNode.component;
     const nextChild = newVNode.children[0];
     if (!nextChild) {
-      if (oldChild) detachVNode(oldChild);
+      if (oldChild) {
+        invokeComponentHook(oldChild, "deactivatedHooks");
+        detachVNode(oldChild);
+      }
       newVNode.el = oldVNode.el ?? document.createComment("keep-alive");
       if (!oldVNode.el) container.appendChild(newVNode.el);
       newVNode.activeKey = undefined;
@@ -1395,6 +1418,7 @@ export function patch(oldVNode: VNode | undefined, newVNode: VNode | undefined, 
     const insertionAnchor = oldChild?.anchor?.nextSibling ?? oldChild?.el?.nextSibling ?? null;
     if (oldChild && oldVNode.activeKey !== nextKey) {
       cache.set(oldVNode.activeKey, oldChild);
+      invokeComponentHook(oldChild, "deactivatedHooks");
       detachVNode(oldChild);
     }
     const cached = cache.get(nextKey);
@@ -1404,7 +1428,11 @@ export function patch(oldVNode: VNode | undefined, newVNode: VNode | undefined, 
     if (!cached) {
       mount(active, container, insertionAnchor);
       cache.set(nextKey, active);
-    } else moveVNode(active, container, insertionAnchor);
+      invokeComponentHook(active, "activatedHooks");
+    } else {
+      moveVNode(active, container, insertionAnchor);
+      invokeComponentHook(active, "activatedHooks");
+    }
     newVNode.activeKey = nextKey;
     newVNode.component = active;
     newVNode.el = active.el;
@@ -1539,6 +1567,8 @@ export function adoptComponentRoot(root: Element, component: Component, props: R
     instance.mountedHooks = definition.mounted ? [definition.mounted] : [];
     instance.updatedHooks = definition.updated ? [definition.updated] : [];
     instance.unmountedHooks = definition.unmounted ? [definition.unmounted] : [];
+    instance.activatedHooks = definition.activated ? [definition.activated] : [];
+    instance.deactivatedHooks = definition.deactivated ? [definition.deactivated] : [];
     instance.isMounted = false;
     instance.tree = tree;
     instance.scope = effectScope();
