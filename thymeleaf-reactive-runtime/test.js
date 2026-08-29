@@ -298,6 +298,36 @@ test('component HMR accepts object component replacements without refreshing the
   app.unmount();
 });
 
+test('component HMR preserves script setup local refs while replacing its template', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const initial = compileSfcComponent(`
+    <template><button @click="increment">Count: {{ count }}</button></template>
+    <script setup>
+      const count = ref(1);
+      function increment() { count.value++; }
+    </script>
+  `);
+  const Counter = defineComponent('script-setup-hmr-state-test', initial);
+  const app = createApp(() => h('section', {}, [h(Counter)]));
+  app.mount(root);
+  const button = root.querySelector('button');
+  button.dispatchEvent(new Event('click', { bubbles: true }));
+  assert.equal(button.textContent, 'Count: 2');
+
+  const replacement = compileSfcComponent(`
+    <template><button @click="increment">Updated count: {{ count }}</button></template>
+    <script setup>
+      const count = ref(1);
+      function increment() { count.value++; }
+    </script>
+  `);
+  assert.equal(hotUpdate('script-setup-hmr-state-test', replacement), true);
+  assert.equal(root.querySelector('button'), button);
+  assert.equal(button.textContent, 'Updated count: 2');
+  app.unmount();
+});
+
 test('fragment components patch and hot-update multiple root nodes as one range', () => {
   const document = installDom();
   const root = document.createElement('main');

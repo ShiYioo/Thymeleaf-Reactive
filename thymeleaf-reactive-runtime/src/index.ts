@@ -11,6 +11,7 @@ export type ComponentContext = {
 export type ComponentOptions = {
   setup?: (props: Record<string, unknown>, context: ComponentContext) => ComponentRender | void;
   render?: ComponentRender;
+  hmrRender?: (scope: Record<string, unknown>, children: VNode[]) => VNode;
   mounted?: () => void;
   updated?: () => void;
   unmounted?: () => void;
@@ -410,7 +411,7 @@ type ComponentInstance = {
   dispose: () => void;
   props?: Record<string, unknown>;
   children?: VNode[];
-  render?: ComponentRender;
+  render?: HotReloadableRender;
   parent?: ComponentInstance;
   provides?: Record<PropertyKey, unknown>;
   mountedHooks?: (() => void)[];
@@ -419,6 +420,7 @@ type ComponentInstance = {
   isMounted?: boolean;
   scope?: EffectScope;
 };
+type HotReloadableRender = ComponentRender & { hmrUpdate?: (next: ComponentOptions) => boolean };
 const componentInstanceStack: ComponentInstance[] = [];
 export type VNode = {
   type: string | typeof Text | typeof Comment | typeof Fragment | typeof Teleport | Component;
@@ -528,6 +530,14 @@ function renderObjectComponent(instance: ComponentInstance): VNode {
   } finally {
     componentInstanceStack.pop();
   }
+}
+
+function hotUpdateObjectComponent(vnode: VNode, definition: ComponentOptions): boolean {
+  if (!isObjectComponent(vnode.type) || !vnode.instance?.render?.hmrUpdate?.(definition)) return false;
+  vnode.type = definition;
+  vnode.instance.vnode.type = definition;
+  vnode.instance.update();
+  return true;
 }
 
 function interpolateSfcText(value: string, scope: Record<string, unknown>): string {
@@ -845,7 +855,12 @@ export function compileSfcComponent(source: string): Component {
     return nodes.length === 1 ? nodes[0] : h(Fragment, {}, nodes);
   };
   const setup = parseSfcSetup(script);
+  const hmrRender = (scope: Record<string, unknown>, children: VNode[]) => {
+    const nodes = renderSfcChildren(roots, scope, children);
+    return nodes.length === 1 ? nodes[0] : h(Fragment, {}, nodes);
+  };
   return {
+    hmrRender,
     setup(props, context) {
       const local = Object.create(props) as Record<string, unknown>;
       setup.bindings.forEach(binding => {
@@ -857,10 +872,14 @@ export function compileSfcComponent(source: string): Component {
         local[method.name] = () => runSfcSetupMethod(method.body, local, context);
       });
       const scope = proxyRefs(local);
-      return (_props, children) => {
-        const nodes = renderSfcChildren(roots, scope, children);
-        return nodes.length === 1 ? nodes[0] : h(Fragment, {}, nodes);
+      let activeRender = hmrRender;
+      const render: HotReloadableRender = (_props, children) => activeRender(scope, children);
+      render.hmrUpdate = next => {
+        if (!next.hmrRender) return false;
+        activeRender = next.hmrRender;
+        return true;
       };
+      return render;
     }
   };
 }
@@ -1015,6 +1034,12 @@ function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode
       instance.tree = vnode.component;
       instance.update = () => {
         const current = instance.vnode;
+        if (isObjectComponent(entry.render) && hotUpdateObjectComponent(instance.tree, entry.render)) {
+          current.component = instance.tree;
+          current.el = instance.tree.el;
+          current.anchor = instance.tree.anchor;
+          return;
+        }
         const nextTree = typeof entry.render === "function"
           ? entry.render(current.props, current.children)
           : h(entry.render, current.props, current.children);
@@ -1307,6 +1332,12 @@ export function adoptComponentRoot(root: Element, component: Component, props: R
   instance.tree = tree;
   instance.update = () => {
     const current = instance.vnode;
+    if (isObjectComponent(entry.render) && hotUpdateObjectComponent(instance.tree, entry.render)) {
+      current.component = instance.tree;
+      current.el = instance.tree.el;
+      current.anchor = instance.tree.anchor;
+      return;
+    }
     const nextTree = typeof entry.render === "function"
       ? entry.render(current.props, current.children)
       : h(entry.render, current.props, current.children);
