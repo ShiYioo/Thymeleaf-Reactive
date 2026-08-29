@@ -91,7 +91,10 @@ function flushJobs(): void {
         .sort((left, right) => left[1] - right[1])
         .map(([job]) => job);
       queuedJobs.clear();
-      jobs.forEach(job => job());
+      jobs.forEach(job => {
+        try { job(); }
+        catch (error) { console.error("[thymeleaf-reactive] scheduler job failed", error); }
+      });
     }
   } finally {
     pendingFlush = undefined;

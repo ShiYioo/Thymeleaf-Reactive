@@ -735,6 +735,39 @@ test('component scheduler updates parents before children', async () => {
   app.unmount();
 });
 
+test('scheduler isolates a failed component job and continues flushing', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  let childUpdates = 0;
+  const Child = {
+    setup(props) {
+      onUpdated(() => childUpdates++);
+      return () => h('span', {}, String(props.value));
+    }
+  };
+  const Parent = {
+    setup(props) {
+      onUpdated(() => { throw new Error('parent update failed'); });
+      return () => h('div', {}, [h(Child, { value: props.value })]);
+    }
+  };
+  const app = createApp(state => h(Parent, { value: state.value }), { value: 0 });
+  const state = app.mount(root);
+  const errors = [];
+  const originalError = console.error;
+  console.error = (...args) => errors.push(args);
+  try {
+    state.value = 1;
+    await nextTick();
+  } finally {
+    console.error = originalError;
+  }
+  assert.equal(root.textContent, '1');
+  assert.equal(childUpdates, 1);
+  assert.equal(errors.length, 1);
+  app.unmount();
+});
+
 test('object components retain setup state and support lifecycle, emits, and injection', async () => {
   const document = installDom();
   const root = document.createElement('main');
