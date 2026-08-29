@@ -1,6 +1,7 @@
 import jsep from "jsep";
 
 type Primitive = string | number | boolean | null | undefined;
+type VNodeChild = VNode | Primitive | VNodeChild[];
 export type Effect = (() => void) & { stop?: () => void };
 type EffectOptions = { lazy?: boolean; scheduler?: () => void };
 export type ComponentRender = (props: Record<string, unknown>, children: VNode[]) => VNode;
@@ -484,7 +485,7 @@ export type VNode = {
   text?: string;
 };
 
-export function h(type: VNode["type"], props: Record<string, unknown> = {}, children: VNode["children"] | Primitive = []): VNode {
+export function h(type: VNode["type"], props: Record<string, unknown> = {}, children: VNodeChild = []): VNode {
   const values = Array.isArray(children) ? children : [children];
   return {
     type,
@@ -1098,8 +1099,9 @@ export function compileSfcComponent(source: string): Component {
   };
 }
 
-function normalizeVNode(value: VNode | Primitive): VNode {
+function normalizeVNode(value: VNodeChild): VNode {
   if (typeof value === "object" && value !== null && "type" in value) return value as VNode;
+  if (Array.isArray(value)) return h(Fragment, {}, value);
   return { type: Text, props: {}, children: [], el: null, text: String(value ?? "") };
 }
 

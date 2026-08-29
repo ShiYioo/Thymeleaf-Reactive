@@ -621,6 +621,19 @@ test('render retains the previous tree and supports explicit unmounting', () => 
   assert.equal(root.childNodes.length, 0);
 });
 
+test('VNode children normalize nested arrays as Fragment ranges', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  render(h('div', {}, [
+    h('span', {}, 'one'),
+    [h('strong', {}, 'two'), h('em', {}, 'three')]
+  ]), root);
+  assert.equal(root.textContent, 'onetwothree');
+  assert.equal(root.querySelectorAll('div > span').length, 1);
+  assert.equal(root.querySelectorAll('div > strong').length, 1);
+  assert.equal(root.querySelectorAll('div > em').length, 1);
+});
+
 test('Teleport patches and moves its child range without recreating keyed fields', async () => {
   const document = installDom();
   const root = document.createElement('main');
