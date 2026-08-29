@@ -708,7 +708,7 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
   const props: Record<string, unknown> = {};
   Array.from(element.attributes).forEach(attribute => {
     const { name, value } = attribute;
-    if (name === "v-if" || name === "v-else" || name === "v-else-if" || name === "v-show" || name === "v-text" || (dynamic && (name === "is" || name === ":is" || name === "v-bind:is"))) return;
+    if (name === "v-if" || name === "v-else" || name === "v-else-if" || name === "v-show" || name === "v-text" || name === "v-html" || (dynamic && (name === "is" || name === ":is" || name === "v-bind:is"))) return;
     if (name === "v-bind") {
       const bound = readPath(scope, value);
       if (bound && typeof bound === "object") Object.assign(props, bound);
@@ -769,9 +769,13 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
   const resolvedType = typeof type === "string" ? resolveSfcComponent(type, scope) ?? type : type;
   const component = typeof resolvedType === "function" || isObjectComponent(resolvedType);
   const textExpression = element.getAttribute("v-text");
+  const htmlExpression = element.getAttribute("v-html");
+  if (htmlExpression) props.innerHTML = readPath(scope, htmlExpression) ?? "";
   const children = component
     ? renderSfcSlots(Array.from(element.childNodes), scope, slots)
-    : textExpression
+    : htmlExpression
+      ? []
+      : textExpression
       ? [normalizeVNode(String(readPath(scope, textExpression) ?? ""))]
       : renderSfcChildren(Array.from(element.childNodes), scope, slots);
   if (element.tagName.toLowerCase() === "select" && element.hasAttribute("multiple")) {
@@ -959,6 +963,10 @@ function normalizeComponentSource(source: string): string {
 
 function setProp(el: Element, key: string, value: unknown, previous?: unknown): void {
   if (key === "key") return;
+  if (key === "innerHTML") {
+    (el as HTMLElement).innerHTML = value == null ? "" : String(value);
+    return;
+  }
   if (key.startsWith("on")) {
     const event = key.slice(2).toLowerCase();
     const listeners = eventListeners.get(el) ?? new Map<string, EventListener>();

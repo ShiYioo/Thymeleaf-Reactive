@@ -827,6 +827,28 @@ test('SFC evaluates v-else-if chains in sibling order', () => {
   assert.equal(root.querySelector('p').textContent, 'other');
 });
 
+test('SFC v-html replaces child VNodes and virtual DOM restores them cleanly', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const render = compileSfcComponent('<template><section><div v-html="markup"><span>Ignored</span></div></section></template>');
+  const state = createApp(render, { markup: '<strong>One</strong>' }).mount(root);
+  const target = root.querySelector('div');
+  assert.equal(target.innerHTML, '<strong>One</strong>');
+  assert.equal(target.querySelector('span'), null);
+  state.markup = '<em>Two</em>';
+  assert.equal(target.innerHTML, '<em>Two</em>');
+
+  const treeState = reactive({ raw: true, markup: '<b>Raw</b>' });
+  const treeRoot = document.createElement('main');
+  const app = createApp(state => h('div', state.raw ? { innerHTML: state.markup } : {}, state.raw ? [] : [h('span', {}, 'VNode')]), treeState);
+  app.mount(treeRoot);
+  treeState.raw = false;
+  assert.equal(treeRoot.querySelector('div').innerHTML, '<span>VNode</span>');
+  treeState.raw = true;
+  treeState.markup = '<i>Again</i>';
+  assert.equal(treeRoot.querySelector('div').innerHTML, '<i>Again</i>');
+});
+
 test('SFC resolves registered child components into the VDOM tree', () => {
   const document = installDom();
   const root = document.createElement('main');
