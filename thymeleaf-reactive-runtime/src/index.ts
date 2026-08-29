@@ -17,6 +17,13 @@ export type ComponentOptions = {
 };
 export type Component = ComponentRender | ComponentOptions;
 export type RenderFunction = (state: any) => VNode;
+export type AsyncComponentOptions = {
+  loader: () => Promise<Component>;
+  loadingComponent?: Component;
+  errorComponent?: Component;
+  delay?: number;
+  timeout?: number;
+};
 
 const effectStack: Effect[] = [];
 const proxyCache = new WeakMap<object, object>();
@@ -325,6 +332,44 @@ export function watchEffect(run: (onCleanup: (cleanup: () => void) => void) => v
     runner.stop?.();
     cleanup?.();
     cleanup = undefined;
+  };
+}
+
+/** Creates a component that resolves its implementation on demand. */
+export function defineAsyncComponent(source: AsyncComponentOptions | (() => Promise<Component>)): ComponentRender {
+  const options = typeof source === "function" ? { loader: source } : source;
+  const state = reactive<{ component?: Component; error?: unknown; loading: boolean }>({
+    loading: !options.delay
+  });
+  let settled = false;
+  if (options.delay && options.delay > 0) {
+    setTimeout(() => { if (!settled) state.loading = true; }, options.delay);
+  }
+  if (options.timeout && options.timeout > 0) {
+    setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        state.loading = false;
+        state.error = new Error(`Async component timed out after ${options.timeout}ms`);
+      }
+    }, options.timeout);
+  }
+  void options.loader().then(component => {
+    if (settled) return;
+    settled = true;
+    state.component = component;
+    state.loading = false;
+  }).catch(error => {
+    if (settled) return;
+    settled = true;
+    state.error = error;
+    state.loading = false;
+  });
+  return (props, children) => {
+    if (state.component) return h(state.component, props, children);
+    if (state.error && options.errorComponent) return h(options.errorComponent, { ...props, error: state.error }, children);
+    if (state.loading && options.loadingComponent) return h(options.loadingComponent, props, children);
+    return { type: Comment, props: {}, children: [], el: null, text: "async-component" };
   };
 }
 

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { reactive, ref, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineComponent, effectScope, Fragment, h, hotUpdate, hydrate, nextTick, onScopeDispose, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRef, toRefs, unref, watch, watchEffect } from './dist/index.js';
+import { reactive, ref, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineAsyncComponent, defineComponent, effectScope, Fragment, h, hotUpdate, hydrate, nextTick, onScopeDispose, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRef, toRefs, unref, watch, watchEffect } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -122,6 +122,33 @@ test('watchEffect cleans up stale work and can be stopped', () => {
   stop();
   state.count = 2;
   assert.deepEqual(events, ['run:0', 'cleanup:1', 'run:1', 'cleanup:1']);
+});
+
+test('async components render loading, resolved, and error states', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  let resolve;
+  const Async = defineAsyncComponent({
+    loader: () => new Promise(done => { resolve = done; }),
+    loadingComponent: () => h('p', {}, 'Loading'),
+    errorComponent: props => h('p', {}, `Error:${props.error.message}`)
+  });
+  const app = createApp(() => h('section', {}, [h(Async)]));
+  app.mount(root);
+  assert.equal(root.textContent, 'Loading');
+  resolve(() => h('strong', {}, 'Ready'));
+  await Promise.resolve();
+  assert.equal(root.textContent, 'Ready');
+  app.unmount();
+
+  const Failed = defineAsyncComponent({
+    loader: () => Promise.reject(new Error('offline')),
+    errorComponent: props => h('p', {}, `Error:${props.error.message}`)
+  });
+  createApp(() => h(Failed)).mount(root);
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(root.textContent, 'Error:offline');
 });
 
 test('proxyRefs unwraps values and writes through existing refs', () => {
