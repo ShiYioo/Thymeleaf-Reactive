@@ -447,7 +447,8 @@ export function h(type: VNode["type"], props: Record<string, unknown> = {}, chil
     props,
     children: values.filter(value => value !== null && value !== undefined && value !== false).map(normalizeVNode),
     el: null,
-    key: props.key as string | number | undefined
+    key: props.key as string | number | undefined,
+    slot: props.slot as string | undefined
   };
 }
 
@@ -518,8 +519,11 @@ function syncComponentProps(target: Record<string, unknown>, next: Record<string
 }
 
 function componentSlots(instance: ComponentInstance): ComponentSlots {
-  const names = new Set((instance.children ?? []).map(child => child.slot ?? "default"));
-  return Object.fromEntries([...names].map(name => [name, () => (instance.children ?? []).filter(child => (child.slot ?? "default") === name)]));
+  return new Proxy({}, {
+    get: (_target, name: string | symbol) => typeof name === "string"
+      ? () => (instance.children ?? []).filter(child => (child.slot ?? "default") === name)
+      : undefined
+  }) as ComponentSlots;
 }
 
 function renderObjectComponent(instance: ComponentInstance): VNode {

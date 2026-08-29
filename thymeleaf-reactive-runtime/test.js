@@ -690,6 +690,28 @@ test('object component setup exposes reactive default and named slots', () => {
   assert.equal(paragraph.textContent, 'Updated body');
 });
 
+test('object component slots expose names added after setup', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Panel = {
+    setup(_props, { slots }) {
+      return () => {
+        const extra = slots.extra?.() ?? [];
+        return h('article', {}, extra.length ? extra : [h('em', {}, 'No extra')]);
+      };
+    }
+  };
+  const render = state => h(Panel, {}, state.extra
+    ? [h('strong', { slot: 'extra' }, state.extra)]
+    : []);
+  const state = createApp(render, { extra: '' }).mount(root);
+  assert.equal(root.querySelector('em').textContent, 'No extra');
+  state.extra = 'Added';
+  assert.equal(root.querySelector('strong').textContent, 'Added');
+  state.extra = '';
+  assert.equal(root.querySelector('em').textContent, 'No extra');
+});
+
 test('virtual DOM performs keyed moves and insertions while updating props and listeners', () => {
   const document = installDom();
   const root = document.createElement('main');
