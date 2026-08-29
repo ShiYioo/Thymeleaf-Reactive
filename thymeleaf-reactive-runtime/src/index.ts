@@ -838,7 +838,9 @@ export function resolveDynamicComponent(value: unknown): string | Component | ty
   return Comment;
 }
 
-function renderSfcChildren(nodes: Node[], scope: Record<string, unknown>, slots: VNode[]): VNode[] {
+type SfcOnceCache = Map<Node, VNode | VNode[]>;
+
+function renderSfcChildren(nodes: Node[], scope: Record<string, unknown>, slots: VNode[], onceCache?: SfcOnceCache): VNode[] {
   const output: VNode[] = [];
   let previousIf = false;
   nodes.forEach(node => {
@@ -855,7 +857,7 @@ function renderSfcChildren(nodes: Node[], scope: Record<string, unknown>, slots:
         }
         const clone = element.cloneNode(true) as Element;
         clone.removeAttribute("v-else");
-        const rendered = renderSfcNode(clone, scope, slots);
+        const rendered = renderSfcNode(clone, scope, slots, onceCache);
         if (rendered) output.push(...(Array.isArray(rendered) ? rendered : [rendered]));
         previousIf = true;
         return;
@@ -866,7 +868,7 @@ function renderSfcChildren(nodes: Node[], scope: Record<string, unknown>, slots:
         if (!previousIf) return;
         const clone = element.cloneNode(true) as Element;
         clone.removeAttribute("v-else-if");
-        const rendered = renderSfcNode(clone, scope, slots);
+        const rendered = renderSfcNode(clone, scope, slots, onceCache);
         if (rendered) output.push(...(Array.isArray(rendered) ? rendered : [rendered]));
         return;
       }
@@ -875,17 +877,17 @@ function renderSfcChildren(nodes: Node[], scope: Record<string, unknown>, slots:
         if (!previousIf) return;
       } else previousIf = false;
     }
-    const rendered = renderSfcNode(node, scope, slots);
+    const rendered = renderSfcNode(node, scope, slots, onceCache);
     if (rendered) output.push(...(Array.isArray(rendered) ? rendered : [rendered]));
   });
   return output;
 }
 
-function renderSfcSlots(nodes: Node[], scope: Record<string, unknown>, slots: VNode[]): VNode[] {
+function renderSfcSlots(nodes: Node[], scope: Record<string, unknown>, slots: VNode[], onceCache?: SfcOnceCache): VNode[] {
   const output: VNode[] = [];
   nodes.forEach(node => {
     if (node.nodeType !== Node.ELEMENT_NODE) {
-      const rendered = renderSfcNode(node, scope, slots);
+      const rendered = renderSfcNode(node, scope, slots, onceCache);
       if (rendered) output.push(...(Array.isArray(rendered) ? rendered : [rendered]));
       return;
     }
@@ -895,7 +897,7 @@ function renderSfcSlots(nodes: Node[], scope: Record<string, unknown>, slots: VN
       Array.from(element.attributes).find(attribute => attribute.name.startsWith("v-slot:"))?.name.slice(7) ||
       element.getAttribute("slot");
     if (!explicit) {
-      const rendered = renderSfcNode(node, scope, slots);
+      const rendered = renderSfcNode(node, scope, slots, onceCache);
       if (rendered) output.push(...(Array.isArray(rendered) ? rendered : [rendered]));
       return;
     }
@@ -906,7 +908,7 @@ function renderSfcSlots(nodes: Node[], scope: Record<string, unknown>, slots: VN
           clone.removeAttribute("slot");
           return clone;
         })()];
-    output.push(...renderSfcChildren(source, scope, slots).map(vnode => ({ ...vnode, slot: explicit })));
+    output.push(...renderSfcChildren(source, scope, slots, onceCache).map(vnode => ({ ...vnode, slot: explicit })));
   });
   return output;
 }
@@ -922,17 +924,18 @@ function normalizeSfcModelValue(value: unknown, modifiers: string[]): unknown {
   return normalized;
 }
 
-function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[]): VNode | VNode[] | undefined {
+function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[], onceCache?: SfcOnceCache): VNode | VNode[] | undefined {
   if (node.nodeType === Node.TEXT_NODE) {
     const text = node.textContent ?? "";
     return text.trim() ? normalizeVNode(interpolateSfcText(text, scope)) : undefined;
   }
   if (node.nodeType !== Node.ELEMENT_NODE) return undefined;
   const element = node as Element;
+  if (element.hasAttribute("v-once") && onceCache?.has(node)) return onceCache.get(node);
   if (element.tagName.toLowerCase() === "slot") {
     const name = element.getAttribute("name") ?? "default";
     const assigned = slots.filter(child => (child.slot ?? "default") === name);
-    return h(Fragment, {}, assigned.length ? assigned : renderSfcChildren(Array.from(element.childNodes), scope, slots));
+    return h(Fragment, {}, assigned.length ? assigned : renderSfcChildren(Array.from(element.childNodes), scope, slots, onceCache));
   }
   const loop = element.getAttribute("v-for");
   if (loop) {
@@ -947,7 +950,7 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
       }) as Record<string, unknown>;
       const clone = element.cloneNode(true) as Element;
       clone.removeAttribute("v-for");
-      const rendered = renderSfcNode(clone, childScope, slots);
+      const rendered = renderSfcNode(clone, childScope, slots, onceCache);
       return rendered === undefined ? [] : Array.isArray(rendered) ? rendered : [rendered];
     });
   }
@@ -1036,12 +1039,12 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
   const htmlExpression = element.getAttribute("v-html");
   if (htmlExpression) props.innerHTML = readPath(scope, htmlExpression) ?? "";
   const children = component
-    ? renderSfcSlots(Array.from(element.childNodes), scope, slots)
+    ? renderSfcSlots(Array.from(element.childNodes), scope, slots, onceCache)
     : htmlExpression
       ? []
       : textExpression
       ? [normalizeVNode(String(readPath(scope, textExpression) ?? ""))]
-      : renderSfcChildren(Array.from(element.childNodes), scope, slots);
+      : renderSfcChildren(Array.from(element.childNodes), scope, slots, onceCache);
   if (element.tagName.toLowerCase() === "select" && element.hasAttribute("multiple")) {
     const selected = new Set((Array.isArray(readPath(scope, element.getAttribute("v-model") ?? ""))
       ? readPath(scope, element.getAttribute("v-model") ?? "")
@@ -1050,7 +1053,9 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
       if (child.type === "option") child.props.selected = selected.has(String(child.props.value ?? ""));
     });
   }
-  return h(resolvedType, props, children);
+  const vnode = h(resolvedType, props, children);
+  if (element.hasAttribute("v-once") && onceCache) onceCache.set(node, vnode);
+  return vnode;
 }
 
 type SfcSetupBinding = { name: string; kind: "ref" | "reactive" | "computed"; expression: string };
@@ -1177,8 +1182,8 @@ export function compileSfcComponent(source: string): Component {
     return nodes.length === 1 ? nodes[0] : h(Fragment, {}, nodes);
   };
   const setup = parseSfcSetup(script);
-  const hmrRender = (scope: Record<string, unknown>, children: VNode[]) => {
-    const nodes = renderSfcChildren(roots, scope, children);
+  const hmrRender = (scope: Record<string, unknown>, children: VNode[], onceCache?: SfcOnceCache) => {
+    const nodes = renderSfcChildren(roots, scope, children, onceCache);
     return nodes.length === 1 ? nodes[0] : h(Fragment, {}, nodes);
   };
   return {
@@ -1195,11 +1200,13 @@ export function compileSfcComponent(source: string): Component {
         local[method.name] = () => runSfcSetupMethod(method.body, local, context);
       });
       const scope = proxyRefs(local);
+      const onceCache: SfcOnceCache = new Map();
       let activeRender = hmrRender;
-      const render: HotReloadableRender = (_props, children) => activeRender(scope, children);
+      const render: HotReloadableRender = (_props, children) => activeRender(scope, children, onceCache);
       render.hmrUpdate = next => {
         if (!next.hmrRender || next.hmrSignature !== script.trim()) return false;
         activeRender = next.hmrRender;
+        onceCache.clear();
         return true;
       };
       return render;
@@ -1806,6 +1813,7 @@ export function patch(oldVNode: VNode | undefined, newVNode: VNode | undefined, 
   if (!oldVNode && newVNode) return mount(newVNode, container);
   if (oldVNode && !newVNode) { unmount(oldVNode, container); return null; }
   if (!oldVNode || !newVNode) return null;
+  if (oldVNode === newVNode) return newVNode;
   if (oldVNode.type !== newVNode.type || oldVNode.key !== newVNode.key) {
     const next = mount(newVNode, container, oldVNode.el);
     unmount(oldVNode, container);

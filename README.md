@@ -63,6 +63,8 @@ The SFC template compiler supports HTML, interpolation, `v-if`/`v-else-if`/`v-el
 
 Resource SFCs can use a CSP-safe `<script setup>` subset without evaluating arbitrary JavaScript: `ref(initial)`, `reactive(initial)`, `computed(() => expression)`, and zero-argument methods composed of assignments, increments/decrements, and `emit("event", value)`. Refs are automatically unwrapped in templates and `v-model`. Template-only HMR updates preserve existing script-setup local state, including components adopted from the server-rendered first paint; a changed script setup rebuilds the component so its new setup logic takes effect. Unsupported statements fail explicitly instead of being evaluated dynamically.
 
+SFC templates support `v-once` for instance-local static subtrees. The subtree is created once and reused across reactive updates, while a template-only HMR replacement clears the cache so the new template is rendered immediately.
+
 Reactive lists can be rendered on the server with `tr:each`; repeated rows should use `tr:key` so HMR can preserve and move the corresponding DOM nodes:
 
 ```html

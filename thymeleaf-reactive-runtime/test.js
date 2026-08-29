@@ -1237,6 +1237,38 @@ test('SFC render tracks state, loops keyed children, and writes v-model values b
   assert.equal(state.name, 'Grace');
 });
 
+test('SFC v-once caches static subtrees while dynamic siblings continue updating', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Counter = defineComponent('sfc-v-once-test', compileSfcComponent(`
+    <template><section><strong v-once>{{ label }}</strong><span>{{ count }}</span><button @click="increment">go</button></section></template>
+    <script setup>
+      const label = ref('Initial');
+      const count = ref(0);
+      function increment() { count.value++; }
+    </script>
+  `));
+  const app = createApp(() => h(Counter));
+  app.mount(root);
+  const strong = root.querySelector('strong');
+  const span = root.querySelector('span');
+  root.querySelector('button').dispatchEvent(new Event('click'));
+  await nextTick();
+  assert.equal(root.querySelector('strong'), strong);
+  assert.equal(strong.textContent, 'Initial');
+  assert.equal(root.querySelector('span'), span);
+  assert.equal(span.textContent, '1');
+  app.unmount();
+
+  const hmrRoot = document.createElement('main');
+  const Hmr = defineComponent('sfc-v-once-hmr-test', compileSfcComponent('<template><strong v-once>Before</strong></template>'));
+  const hmrApp = createApp(() => h(Hmr));
+  hmrApp.mount(hmrRoot);
+  assert.equal(hotUpdate('sfc-v-once-hmr-test', compileSfcComponent('<template><strong v-once>After</strong></template>')), true);
+  assert.equal(hmrRoot.textContent, 'After');
+  hmrApp.unmount();
+});
+
 test('SFC v-model handles checkbox and radio values and event arguments', () => {
   const document = installDom();
   const root = document.createElement('main');
