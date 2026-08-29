@@ -19,3 +19,6 @@ Use the reactive dialect in a Thymeleaf page:
 
 `tr:state` accepts JSON directly or a simple server model reference such as
 `${counter}`. The latter is serialized with the application `ObjectMapper`.
+`tr:on="click:handler"` invokes `handler(state, event)` and accepts Vue-style
+event modifiers such as `.prevent`, `.stop`, `.self`, `.once`, keyboard, mouse,
+and system modifiers.

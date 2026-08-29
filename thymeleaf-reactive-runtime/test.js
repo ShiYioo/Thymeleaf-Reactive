@@ -1393,6 +1393,27 @@ test('browser bootstrap preserves existing handlers and hydrates encoded server 
   assert.equal(typeof window.ThymeleafReactive.hydrate, 'function');
 });
 
+test('hydrates tr:on handlers with event arguments and modifiers', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  root.innerHTML = '<button data-tr-on="click.prevent.stop.once:save">Save</button>';
+  let calls = 0;
+  let received;
+  const state = hydrate(root, {}, {
+    save(current, event) {
+      calls++;
+      received = [current, event.type];
+    }
+  });
+  const button = root.querySelector('button');
+  const event = new window.MouseEvent('click', { bubbles: true, cancelable: true });
+  button.dispatchEvent(event);
+  button.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true }));
+  assert.deepEqual(received, [state, 'click']);
+  assert.equal(calls, 1);
+  assert.equal(event.defaultPrevented, true);
+});
+
 test('Suspense renders fallback until an async component resolves', async () => {
   const document = installDom();
   const root = document.createElement('main');

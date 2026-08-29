@@ -2542,10 +2542,14 @@ export function hydrate(root: Element, state: object, handlers: Record<string, (
     });
   });
   bindings<HTMLElement>("[data-tr-on]").forEach(element => {
-    const [event, name] = (element.dataset.trOn ?? "").split(":", 2);
+    const [eventSpec, name] = (element.dataset.trOn ?? "").split(":", 2);
+    const [event, ...modifiers] = eventSpec.split(".");
     const handler = handlers[name];
     if (event && handler) {
-      const listener = handler.bind(null, reactiveState);
+      const listener = sfcEventModifierHandler(
+        eventObject => handler(reactiveState, eventObject),
+        modifiers
+      );
       element.addEventListener(event, listener);
       cleanup(() => element.removeEventListener(event, listener));
     }
