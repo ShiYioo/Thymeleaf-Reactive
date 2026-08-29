@@ -1054,6 +1054,7 @@ function normalizeVNode(value: VNode | Primitive): VNode {
 }
 
 const eventListeners = new WeakMap<Element, Map<string, EventListener>>();
+const svgNamespace = "http://www.w3.org/2000/svg";
 const componentNames = new WeakMap<Component, string>();
 const componentSources = new Map<string, string>();
 const booleanAttributes = new Set(["allowfullscreen", "async", "autofocus", "autoplay", "checked", "controls", "defer", "disabled", "formnovalidate", "hidden", "inert", "ismap", "itemscope", "loop", "multiple", "muted", "nomodule", "novalidate", "open", "playsinline", "readonly", "required", "reversed", "selected"]);
@@ -1107,7 +1108,8 @@ function setProp(el: Element, key: string, value: unknown, previous?: unknown): 
   } else if (value === "" && booleanAttributes.has(key.toLowerCase())) {
     el.setAttribute(key, "");
     if (key in el && !key.includes("-")) (el as unknown as Record<string, unknown>)[key] = true;
-  } else if (key in el && !key.includes("-")) (el as unknown as Record<string, unknown>)[key] = value;
+  } else if (el.namespaceURI === svgNamespace) el.setAttribute(key, String(value));
+  else if (key in el && !key.includes("-")) (el as unknown as Record<string, unknown>)[key] = value;
   else el.setAttribute(key, String(value));
 }
 
@@ -1263,7 +1265,10 @@ function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode
     }
     return vnode;
   }
-  const el = vnode.el = document.createElement(vnode.type);
+  const isSvg = vnode.type === "svg" || (container as Element).namespaceURI === svgNamespace;
+  const el = vnode.el = isSvg
+    ? document.createElementNS(svgNamespace, vnode.type)
+    : document.createElement(vnode.type);
   const deferredValue = vnode.type === "select" && !vnode.props.multiple ? vnode.props.value : undefined;
   Object.entries(vnode.props).forEach(([key, value]) => {
     if (vnode.type === "select" && key === "value") return;

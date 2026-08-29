@@ -773,6 +773,24 @@ test('virtual DOM performs keyed moves and insertions while updating props and l
   assert.equal(clicks, 1);
 });
 
+test('virtual DOM creates SVG trees in the SVG namespace', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const state = createApp(state => h('svg', { viewBox: state.viewBox }, [
+    h('g', {}, [h('circle', { cx: 4, cy: 5, r: state.radius })])
+  ]), { viewBox: '0 0 10 10', radius: 2 }).mount(root);
+  const svg = root.querySelector('svg');
+  const circle = root.querySelector('circle');
+  assert.equal(svg.namespaceURI, 'http://www.w3.org/2000/svg');
+  assert.equal(circle.namespaceURI, 'http://www.w3.org/2000/svg');
+  assert.equal(circle.getAttribute('r'), '2');
+  state.radius = 3;
+  state.viewBox = '0 0 20 20';
+  assert.equal(root.querySelector('circle'), circle);
+  assert.equal(circle.getAttribute('r'), '3');
+  assert.equal(svg.getAttribute('viewBox'), '0 0 20 20');
+});
+
 test('virtual DOM removes stale event listeners and style properties', () => {
   const document = installDom();
   const root = document.createElement('main');

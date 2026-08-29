@@ -109,6 +109,8 @@ const modal = h(Teleport, { to: "#modal-root" }, [
 
 Changing `to` moves the existing teleported DOM range to the new target instead of recreating it.
 
+The VDOM creates `<svg>` roots and descendants in the SVG namespace and patches SVG attributes without replacing existing nodes.
+
 ## Virtual DOM KeepAlive
 
 The render-function runtime exports `KeepAlive` for caching keyed component instances while switching between views. Cached instances leave the active DOM but keep their local state and effect scope; switching back patches and reuses the cached instance. Unmounting `KeepAlive` disposes every cached component normally.
