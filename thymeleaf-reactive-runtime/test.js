@@ -165,16 +165,29 @@ test('async components render loading, resolved, and error states', async () => 
   assert.equal(root.textContent, 'Error:offline');
 });
 
-test('proxyRefs unwraps values and writes through existing refs', () => {
+test('proxyRefs unwraps genuine refs without confusing ordinary value properties', () => {
   const count = ref(1);
-  const state = proxyRefs({ count, label: 'Before' });
+  const payload = { value: 'preserve me' };
+  const state = proxyRefs({ count, label: 'Before', payload });
   assert.equal(isRef(count), true);
+  assert.equal(isRef(payload), false);
   assert.equal(unref(count), 1);
   assert.equal(state.count, 1);
+  assert.equal(state.payload, payload);
   state.count = 2;
   state.label = 'After';
   assert.equal(count.value, 2);
   assert.equal(state.label, 'After');
+});
+
+test('computed values participate in the ref contract', () => {
+  const count = ref(2);
+  const doubled = computed(() => count.value * 2);
+  assert.equal(isRef(doubled), true);
+  assert.equal(unref(doubled), 4);
+  assert.equal(proxyRefs({ doubled }).doubled, 4);
+  count.value = 3;
+  assert.equal(doubled.value, 6);
 });
 
 test('toRef and toRefs retain reactive property links', () => {

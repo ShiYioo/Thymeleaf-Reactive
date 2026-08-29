@@ -42,6 +42,7 @@ const effectDeps = new WeakMap<Effect, Set<Set<Effect>>>();
 const effectSchedulers = new WeakMap<Effect, () => void>();
 const ITERATE_KEY = Symbol("iterate");
 const queuedJobs = new Map<() => void, number>();
+const refValues = new WeakSet<object>();
 let pendingFlush: Promise<void> | undefined;
 let activeEffectScope: EffectScope | undefined;
 let nextComponentUid = 0;
@@ -248,11 +249,13 @@ export type Ref<T> = { value: T };
 
 /** Creates a reactive scalar container for component state. */
 export function ref<T>(value: T): Ref<T> {
-  return reactive({ value });
+  const result = reactive({ value });
+  refValues.add(result);
+  return result;
 }
 
 export function isRef(value: unknown): value is Ref<unknown> {
-  return Boolean(value && typeof value === "object" && "value" in value);
+  return Boolean(value && typeof value === "object" && refValues.has(value));
 }
 
 export function unref<T>(value: T | Ref<T>): T {
@@ -261,7 +264,7 @@ export function unref<T>(value: T | Ref<T>): T {
 
 /** Creates a ref that remains linked to one property of a reactive object. */
 export function toRef<T extends object, Key extends keyof T>(source: T, key: Key, defaultValue?: T[Key]): Ref<T[Key]> {
-  return {
+  const result = {
     get value(): T[Key] {
       const value = source[key];
       return value === undefined ? defaultValue as T[Key] : value;
@@ -270,6 +273,8 @@ export function toRef<T extends object, Key extends keyof T>(source: T, key: Key
       source[key] = value;
     }
   };
+  refValues.add(result);
+  return result;
 }
 
 /** Converts every enumerable property of a reactive object into a linked ref. */
@@ -424,7 +429,7 @@ export function computed<T>(getter: () => T): ComputedRef<T> {
       }
     }
   });
-  return {
+  const result = {
     get value(): T {
       trackEffect(subscribers);
       if (dirty) {
@@ -434,6 +439,8 @@ export function computed<T>(getter: () => T): ComputedRef<T> {
       return cached!;
     }
   };
+  refValues.add(result);
+  return result;
 }
 
 export const Text = Symbol("text");
