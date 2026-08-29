@@ -708,6 +708,32 @@ test('component updates are deduplicated and committed on nextTick', async () =>
   app.unmount();
 });
 
+test('component scheduler updates parents before children', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const updates = [];
+  const Child = {
+    setup(props) {
+      onBeforeUpdate(() => updates.push('child'));
+      return () => h('span', {}, String(props.value));
+    }
+  };
+  const Parent = {
+    setup(props) {
+      onBeforeUpdate(() => updates.push('parent'));
+      return () => h('div', {}, [h(Child, { value: props.child })]);
+    }
+  };
+  const app = createApp(state => h(Parent, { parent: state.parent, child: state.child }), { parent: 0, child: 0 });
+  const state = app.mount(root);
+  state.parent = 1;
+  state.child = 1;
+  await nextTick();
+  assert.deepEqual(updates, ['parent', 'child']);
+  assert.equal(root.textContent, '1');
+  app.unmount();
+});
+
 test('object components retain setup state and support lifecycle, emits, and injection', async () => {
   const document = installDom();
   const root = document.createElement('main');

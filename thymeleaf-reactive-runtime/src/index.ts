@@ -40,9 +40,10 @@ const reactiveProxies = new WeakSet<object>();
 const effectDeps = new WeakMap<Effect, Set<Set<Effect>>>();
 const effectSchedulers = new WeakMap<Effect, () => void>();
 const ITERATE_KEY = Symbol("iterate");
-const queuedJobs = new Set<() => void>();
+const queuedJobs = new Map<() => void, number>();
 let pendingFlush: Promise<void> | undefined;
 let activeEffectScope: EffectScope | undefined;
+let nextComponentUid = 0;
 
 export class EffectScope {
   active = true;
@@ -77,13 +78,24 @@ export function onScopeDispose(cleanup: () => void): void {
   activeEffectScope.cleanups.add(cleanup);
 }
 
-function queueJob(job: () => void): void {
-  queuedJobs.add(job);
+function queueJob(job: () => void, order = Number.POSITIVE_INFINITY): void {
+  if (!queuedJobs.has(job) || order < queuedJobs.get(job)!) queuedJobs.set(job, order);
   if (pendingFlush) return;
-  pendingFlush = Promise.resolve().then(() => {
-    try { queuedJobs.forEach(run => run()); }
-    finally { queuedJobs.clear(); pendingFlush = undefined; }
-  });
+  pendingFlush = Promise.resolve().then(flushJobs);
+}
+
+function flushJobs(): void {
+  try {
+    while (queuedJobs.size) {
+      const jobs = [...queuedJobs.entries()]
+        .sort((left, right) => left[1] - right[1])
+        .map(([job]) => job);
+      queuedJobs.clear();
+      jobs.forEach(job => job());
+    }
+  } finally {
+    pendingFlush = undefined;
+  }
 }
 
 export function nextTick(): Promise<void> {
@@ -444,6 +456,7 @@ type ComponentInstance = {
   activatedHooks?: (() => void)[];
   deactivatedHooks?: (() => void)[];
   isMounted?: boolean;
+  uid?: number;
   scope?: EffectScope;
 };
 type HotReloadableRender = ComponentRender & { hmrUpdate?: (next: ComponentOptions) => boolean };
@@ -1408,6 +1421,7 @@ function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode
     instance.activatedHooks = definition.activated ? [definition.activated] : [];
     instance.deactivatedHooks = definition.deactivated ? [definition.deactivated] : [];
     instance.isMounted = false;
+    instance.uid = nextComponentUid++;
     instance.scope = effectScope();
     let componentUpdate!: Effect;
     componentUpdate = instance.scope.run(() => effect(() => {
@@ -1426,7 +1440,7 @@ function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode
       instance.vnode.component = nextTree;
       instance.vnode.el = nextTree.el;
       instance.vnode.anchor = nextTree.anchor;
-    }, { scheduler: () => queueJob(componentUpdate) }))!;
+    }, { scheduler: () => queueJob(componentUpdate, instance.uid) }))!;
     instance.update = componentUpdate;
     instance.dispose = () => instance.scope?.stop();
     vnode.instance = instance;
@@ -2093,6 +2107,7 @@ type HydrationContext = {
   handlers: Record<string, (...args: any[]) => any>;
   cleanups: Set<() => void>;
   scope: EffectScope;
+  uid: number;
 };
 const hydrationContexts = new WeakMap<Element, HydrationContext>();
 
@@ -2106,7 +2121,7 @@ function disposeHydration(root: Element): void {
 
 function hydrationEffect(context: HydrationContext, fn: () => void): Effect {
   let runner!: Effect;
-  runner = context.scope.run(() => effect(fn as Effect, { scheduler: () => queueJob(runner) }))!;
+  runner = context.scope.run(() => effect(fn as Effect, { scheduler: () => queueJob(runner, context.uid) }))!;
   return runner;
 }
 
@@ -2552,7 +2567,7 @@ function cloneEachTemplate(template: HTMLElement): HTMLElement {
 export function hydrate(root: Element, state: object, handlers: Record<string, (...args: any[]) => any> = {}): object {
   disposeHydration(root);
   const reactiveState = reactive(state);
-  const context: HydrationContext = { state: reactiveState, handlers, cleanups: new Set(), scope: effectScope() };
+  const context: HydrationContext = { state: reactiveState, handlers, cleanups: new Set(), scope: effectScope(), uid: nextComponentUid++ };
   hydrationContexts.set(root, context);
   const cleanup = (dispose: () => void): void => { context.cleanups.add(dispose); };
   const componentRoot = root.matches("[data-tr-component]") ? root : undefined;
