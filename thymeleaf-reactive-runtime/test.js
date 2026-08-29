@@ -662,6 +662,34 @@ test('object components retain setup state and support lifecycle, emits, and inj
   assert.equal(hooks.includes('parent-unmounted'), true);
 });
 
+test('object component setup exposes reactive default and named slots', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Panel = {
+    setup(_props, { slots }) {
+      return () => h('article', {}, [
+        h('header', {}, slots.header?.() ?? []),
+        h('main', {}, slots.default?.() ?? [])
+      ]);
+    }
+  };
+  const render = state => h(Panel, {}, [
+    h('h1', { slot: 'header' }, state.title),
+    h('p', {}, state.body)
+  ]);
+  const state = createApp(render, { title: 'Title', body: 'Body' }).mount(root);
+  const heading = root.querySelector('h1');
+  const paragraph = root.querySelector('p');
+  assert.equal(heading.textContent, 'Title');
+  assert.equal(paragraph.textContent, 'Body');
+  state.title = 'Updated title';
+  state.body = 'Updated body';
+  assert.equal(root.querySelector('h1'), heading);
+  assert.equal(root.querySelector('p'), paragraph);
+  assert.equal(heading.textContent, 'Updated title');
+  assert.equal(paragraph.textContent, 'Updated body');
+});
+
 test('virtual DOM performs keyed moves and insertions while updating props and listeners', () => {
   const document = installDom();
   const root = document.createElement('main');

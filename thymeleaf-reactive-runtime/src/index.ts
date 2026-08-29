@@ -4,8 +4,10 @@ type Primitive = string | number | boolean | null | undefined;
 export type Effect = (() => void) & { stop?: () => void };
 type EffectOptions = { lazy?: boolean; scheduler?: () => void };
 export type ComponentRender = (props: Record<string, unknown>, children: VNode[]) => VNode;
+export type ComponentSlots = Record<string, () => VNode[]>;
 export type ComponentContext = {
   children: VNode[];
+  slots: ComponentSlots;
   emit: (event: string, ...args: unknown[]) => void;
 };
 export type ComponentOptions = {
@@ -515,6 +517,11 @@ function syncComponentProps(target: Record<string, unknown>, next: Record<string
   return changed;
 }
 
+function componentSlots(instance: ComponentInstance): ComponentSlots {
+  const names = new Set((instance.children ?? []).map(child => child.slot ?? "default"));
+  return Object.fromEntries([...names].map(name => [name, () => (instance.children ?? []).filter(child => (child.slot ?? "default") === name)]));
+}
+
 function renderObjectComponent(instance: ComponentInstance): VNode {
   componentInstanceStack.push(instance);
   try {
@@ -522,6 +529,7 @@ function renderObjectComponent(instance: ComponentInstance): VNode {
       const definition = instance.vnode.type as ComponentOptions;
       instance.render = definition.setup?.(instance.props!, {
         children: instance.children!,
+        slots: componentSlots(instance),
         emit: (event, ...args) => emitComponentEvent(instance.props!, event, args)
       }) ?? definition.render;
       if (!instance.render) throw new Error("Component requires setup() or render()");
