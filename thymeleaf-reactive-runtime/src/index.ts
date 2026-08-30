@@ -1362,14 +1362,21 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
   }
   const loop = element.getAttribute("v-for");
   if (loop) {
-    const match = loop.match(/^\s*\(?\s*([A-Za-z_$][\w$]*)(?:\s*,\s*([A-Za-z_$][\w$]*))?\s*\)?\s+(?:in|of)\s+(.+)\s*$/);
+    const match = loop.match(/^\s*\(?\s*([A-Za-z_$][\w$]*)(?:\s*,\s*([A-Za-z_$][\w$]*))?(?:\s*,\s*([A-Za-z_$][\w$]*))?\s*\)?\s+(?:in|of)\s+(.+)\s*$/);
     if (!match) return undefined;
-    const values = readPath(scope, match[3]);
-    const collection = Array.isArray(values) ? values : values && typeof values === "object" ? Object.values(values) : [];
-    return collection.flatMap((value, index) => {
+    const values = readPath(scope, match[4]);
+    const collection = Array.isArray(values)
+      ? values.map((value, index) => ({ value, key: index, index }))
+      : typeof values === "number" && Number.isFinite(values) && values > 0
+        ? Array.from({ length: Math.floor(values) }, (_value, index) => ({ value: index + 1, key: index, index }))
+        : values && typeof values === "object"
+          ? Object.entries(values).map(([key, value], index) => ({ value, key, index }))
+          : [];
+    return collection.flatMap(({ value, key, index }) => {
       const childScope = Object.assign(Object.create(scope), {
         [match[1]]: value,
-        ...(match[2] ? { [match[2]]: index } : {})
+        ...(match[2] ? { [match[2]]: Array.isArray(values) ? index : key } : {}),
+        ...(match[3] ? { [match[3]]: index } : {})
       }) as Record<string, unknown>;
       const parentRefContext = sfcRefContexts.get(scope);
       sfcRefContexts.set(childScope, {

@@ -1964,6 +1964,27 @@ test('SFC template blocks render v-for and conditional fragments without DOM wra
   app.unmount();
 });
 
+test('SFC v-for supports numeric ranges and object value-key-index aliases', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Component = compileSfcComponent(`
+    <template>
+      <section>
+        <ol><li v-for="n in 3">{{ n }}</li></ol>
+        <dl><template v-for="(value, key, index) in records"><dt>{{ key }}={{ value }}:{{ index }}</dt></template></dl>
+      </section>
+    </template>
+    <script setup></script>
+  `);
+  const app = createApp(state => h(Component, { records: state.records }), {
+    records: { first: 'A', second: 'B' }
+  });
+  app.mount(root);
+  assert.deepEqual([...root.querySelectorAll('ol li')].map(node => node.textContent), ['1', '2', '3']);
+  assert.deepEqual([...root.querySelectorAll('dt')].map(node => node.textContent), ['first=A:0', 'second=B:1']);
+  app.unmount();
+});
+
 test('SFC v-once caches static subtrees while dynamic siblings continue updating', async () => {
   const document = installDom();
   const root = document.createElement('main');
