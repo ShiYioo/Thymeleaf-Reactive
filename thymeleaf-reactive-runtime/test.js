@@ -1269,6 +1269,33 @@ test('SFC v-once caches static subtrees while dynamic siblings continue updating
   hmrApp.unmount();
 });
 
+test('SFC v-memo skips a subtree until its dependency array changes', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Counter = defineComponent('sfc-v-memo-test', compileSfcComponent(`
+    <template><section><strong v-memo="[version]">{{ count }}</strong><button @click="increment">go</button><button @click="refresh">refresh</button></section></template>
+    <script setup>
+      const count = ref(0);
+      const version = ref(0);
+      function increment() { count.value++; }
+      function refresh() { version.value++; }
+    </script>
+  `));
+  const app = createApp(() => h(Counter));
+  app.mount(root);
+  const strong = root.querySelector('strong');
+  const [increment, refresh] = root.querySelectorAll('button');
+  increment.dispatchEvent(new Event('click', { bubbles: true }));
+  await nextTick();
+  assert.equal(root.querySelector('strong'), strong);
+  assert.equal(strong.textContent, '0');
+  refresh.dispatchEvent(new Event('click', { bubbles: true }));
+  await nextTick();
+  assert.equal(root.querySelector('strong'), strong);
+  assert.equal(strong.textContent, '1');
+  app.unmount();
+});
+
 test('SFC v-model handles checkbox and radio values and event arguments', () => {
   const document = installDom();
   const root = document.createElement('main');
