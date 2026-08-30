@@ -2402,6 +2402,25 @@ test('hydrates server-rendered each rows without duplicating them', async () => 
   assert.equal(rows[1], firstA);
 });
 
+test('hydrates tr:each of syntax and preserves keyed rows on updates', async () => {
+  const document = installDom();
+  const root = document.createElement('ul');
+  root.innerHTML = [
+    '<li data-tr-each="item of items" data-tr-key="a" data-tr-key-expression="item.id" data-tr-text="item.label">A</li>',
+    '<li data-tr-each="item of items" data-tr-key="b" data-tr-key-expression="item.id" data-tr-text="item.label">B</li>'
+  ].join('');
+  const initialRows = root.querySelectorAll('li');
+  const firstA = initialRows[0];
+  const firstB = initialRows[1];
+  const state = hydrate(root, { items: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] });
+  state.items = [{ id: 'b', label: 'Beta' }, { id: 'a', label: 'Alpha' }];
+  await nextTick();
+  const rows = root.querySelectorAll('li');
+  assert.deepEqual([...rows].map(row => row.textContent), ['Beta', 'Alpha']);
+  assert.equal(rows[0], firstB);
+  assert.equal(rows[1], firstA);
+});
+
 test('each row scopes inherit outer reactive state for expressions', async () => {
   const document = installDom();
   const root = document.createElement('ul');

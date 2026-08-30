@@ -3262,7 +3262,7 @@ function readDynamicObject(source: any, expression: string): any {
 type EachRecord = { element: HTMLElement; scope: any; key: string | number };
 
 function parseEach(expression: string): { item: string; index?: string; collection: string } | null {
-  const match = expression.trim().match(/^([A-Za-z_$][\w$]*)(?:\s*,\s*([A-Za-z_$][\w$]*))?\s+in\s+(.+)$/);
+  const match = expression.trim().match(/^([A-Za-z_$][\w$]*)(?:\s*,\s*([A-Za-z_$][\w$]*))?\s+(?:in|of)\s+(.+)$/);
   return match ? { item: match[1], index: match[2], collection: match[3] } : null;
 }
 
