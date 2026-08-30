@@ -99,6 +99,25 @@ test('reactive Map and Set track keyed and iteration dependencies', () => {
   assert.equal(tagSize, 1);
 });
 
+test('reactive collection iterators proxy nested values and forEach collections', () => {
+  const map = reactive(new Map([['item', { label: 'A' }]]));
+  const set = reactive(new Set([{ label: 'B' }]));
+  let mapLabel = '';
+  let setLabel = '';
+  let iteratedMap;
+  effect(() => { mapLabel = [...map.values()][0].label; });
+  effect(() => { setLabel = [...set][0].label; });
+  effect(() => { map.forEach((_value, _key, collection) => { iteratedMap = collection; }); });
+  const mapValue = map.get('item');
+  const setValue = [...set][0];
+  mapValue.label = 'A2';
+  setValue.label = 'B2';
+  assert.equal(mapLabel, 'A2');
+  assert.equal(setLabel, 'B2');
+  assert.equal(iteratedMap, map);
+  assert.deepEqual([...set.entries()][0], [setValue, setValue]);
+});
+
 test('watch tracks getters and reactive objects while running registered cleanup', () => {
   const state = reactive({ count: 0, nested: { enabled: false } });
   const changes = [];

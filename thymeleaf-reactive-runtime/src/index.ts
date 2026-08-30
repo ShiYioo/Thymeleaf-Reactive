@@ -215,8 +215,27 @@ export function reactive<T extends object>(value: T): T {
       }
       if ((target instanceof Map || target instanceof Set) && (key === "size" || key === Symbol.iterator || key === "entries" || key === "values" || key === "keys" || key === "forEach")) {
         trackEffect(subscribers(ITERATE_KEY));
-        const member = Reflect.get(target, key, target);
-        return typeof member === "function" ? member.bind(target) : member;
+        if (key === "size") return target.size;
+        if (key === "forEach") return (callback: (value: unknown, key: unknown, collection: object) => void, thisArg?: unknown) => {
+          target.forEach((value: unknown, entry: unknown) => callback.call(thisArg, isReactiveValue(value) ? reactive(value) : value, entry, receiver));
+        };
+        if (key === "keys") return function* () {
+          for (const entry of (target as Map<unknown, unknown>).keys()) yield entry;
+        };
+        return function* () {
+          if (target instanceof Map) {
+            for (const [entry, value] of target.entries()) {
+              yield key === "entries" || key === Symbol.iterator
+                ? [entry, isReactiveValue(value) ? reactive(value) : value]
+                : isReactiveValue(value) ? reactive(value) : value;
+            }
+          } else {
+            for (const value of target.values()) {
+              const resolved = isReactiveValue(value) ? reactive(value) : value;
+              yield key === "entries" ? [resolved, resolved] : resolved;
+            }
+          }
+        };
       }
       trackEffect(subscribers(key));
       const result = Reflect.get(target, key, receiver);
