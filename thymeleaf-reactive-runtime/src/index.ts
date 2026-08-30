@@ -841,6 +841,19 @@ export function resolveDynamicComponent(value: unknown): string | Component | ty
 type SfcOnceCache = Map<Node, VNode | VNode[]>;
 type SfcMemoCache = Map<Node, { dependencies: unknown[]; vnode: VNode | VNode[] }>;
 
+function isSfcStaticNode(node: Node, scope: Record<string, unknown>): boolean {
+  if (node.nodeType === Node.TEXT_NODE) {
+    const text = node.textContent ?? "";
+    return Boolean(text.trim()) && !/{{[\s\S]*}}/.test(text);
+  }
+  if (node.nodeType !== Node.ELEMENT_NODE) return false;
+  const element = node as Element;
+  const tagName = element.tagName.toLowerCase();
+  if (tagName === "template" || tagName === "slot" || tagName === "component" || resolveSfcComponent(element.tagName, scope)) return false;
+  if (Array.from(element.attributes).some(attribute => attribute.name.startsWith("v-") || attribute.name.startsWith(":") || attribute.name.startsWith("@") || attribute.name.startsWith("#") || attribute.name === "slot")) return false;
+  return Array.from(element.childNodes).every(child => isSfcStaticNode(child, scope));
+}
+
 function renderSfcChildren(nodes: Node[], scope: Record<string, unknown>, slots: VNode[], onceCache?: SfcOnceCache, memoCache?: SfcMemoCache): VNode[] {
   const output: VNode[] = [];
   let previousIf = false;
@@ -932,7 +945,7 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
   }
   if (node.nodeType !== Node.ELEMENT_NODE) return undefined;
   const element = node as Element;
-  if (element.hasAttribute("v-once") && onceCache?.has(node)) return onceCache.get(node);
+  if (onceCache?.has(node)) return onceCache.get(node);
   const memoExpression = element.getAttribute("v-memo");
   const memoDependencies = memoExpression ? readPath(scope, memoExpression) : undefined;
   const normalizedMemoDependencies = Array.isArray(memoDependencies) ? memoDependencies : [memoDependencies];
@@ -1064,7 +1077,7 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
     });
   }
   const vnode = h(resolvedType, props, children);
-  if (element.hasAttribute("v-once") && onceCache) onceCache.set(node, vnode);
+  if (onceCache && (element.hasAttribute("v-once") || isSfcStaticNode(node, scope))) onceCache.set(node, vnode);
   if (memoExpression && memoCache) memoCache.set(node, { dependencies: normalizedMemoDependencies, vnode });
   return vnode;
 }

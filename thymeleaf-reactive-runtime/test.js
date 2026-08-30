@@ -1296,6 +1296,26 @@ test('SFC v-memo skips a subtree until its dependency array changes', async () =
   app.unmount();
 });
 
+test('SFC hoists static subtrees and invalidates them during template HMR', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const script = `
+      const count = ref(0);
+      function increment() { count.value++; }
+    `;
+  const Counter = defineComponent('sfc-static-hoist-test', compileSfcComponent(`<template><section><strong>Before</strong><span>{{ count }}</span><button @click="increment">go</button></section></template><script setup>${script}</script>`));
+  const app = createApp(() => h(Counter));
+  app.mount(root);
+  const strong = root.querySelector('strong');
+  root.querySelector('button').dispatchEvent(new Event('click', { bubbles: true }));
+  await nextTick();
+  assert.equal(root.querySelector('strong'), strong);
+  assert.equal(root.querySelector('span').textContent, '1');
+  assert.equal(hotUpdate('sfc-static-hoist-test', compileSfcComponent(`<template><section><strong>After</strong><span>{{ count }}</span><button @click="increment">go</button></section></template><script setup>${script}</script>`)), true);
+  assert.equal(root.querySelector('strong').textContent, 'After');
+  app.unmount();
+});
+
 test('SFC v-model handles checkbox and radio values and event arguments', () => {
   const document = installDom();
   const root = document.createElement('main');
