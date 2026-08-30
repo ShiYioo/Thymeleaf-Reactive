@@ -1865,6 +1865,36 @@ test('SFC render tracks state, loops keyed children, and writes v-model values b
   assert.equal(state.name, 'Grace');
 });
 
+test('SFC string refs bind setup refs without leaking DOM attributes', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Component = compileSfcComponent(`
+    <template>
+      <section>
+        <input ref="input">
+        <strong>{{ input ? 'bound' : 'empty' }}</strong>
+        <small>{{ tick }}</small>
+        <button @click="touch">touch</button>
+      </section>
+    </template>
+    <script setup>
+      const input = ref(null);
+      const tick = ref(0);
+      function touch() { tick.value++; }
+    </script>
+  `);
+  const app = createApp(() => h(Component));
+  app.mount(root);
+  const input = root.querySelector('input');
+  assert.equal(input.hasAttribute('ref'), false);
+  await nextTick();
+  assert.equal(root.querySelector('strong').textContent, 'empty');
+  root.querySelector('button').dispatchEvent(new Event('click'));
+  await nextTick();
+  assert.equal(root.querySelector('strong').textContent, 'bound');
+  app.unmount();
+});
+
 test('SFC v-once caches static subtrees while dynamic siblings continue updating', async () => {
   const document = installDom();
   const root = document.createElement('main');

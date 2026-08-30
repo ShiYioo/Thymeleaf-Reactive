@@ -1428,6 +1428,12 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
         props[eventProp] = (event: Event) => writeModel((event.target as HTMLInputElement).value);
       }
     }
+    else if (name === "ref") {
+      const refName = value;
+      props.ref = (value: unknown) => {
+        if (refName in scope) scope[refName] = value;
+      };
+    }
     else props[name] = value;
   });
   if (show) props.hidden = !Boolean(readPath(scope, show));
