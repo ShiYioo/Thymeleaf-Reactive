@@ -880,17 +880,19 @@ function invokeComponentHook(vnode: VNode, name: "activatedHooks" | "deactivated
 function renderObjectComponent(instance: ComponentInstance): VNode {
   componentInstanceStack.push(instance);
   try {
+    const publicProps = readonly(instance.props!);
+    const publicAttrs = readonly(instance.attrs!);
     if (!instance.render) {
       const definition = instance.vnode.type as ComponentOptions;
-      instance.render = definition.setup?.(instance.props!, {
+      instance.render = definition.setup?.(publicProps, {
         children: instance.children!,
         slots: componentSlots(instance),
-        attrs: instance.attrs!,
+        attrs: publicAttrs,
         emit: (event, ...args) => emitComponentEvent(instance.listeners!, event, args)
       }) ?? definition.render;
       if (!instance.render) throw new Error("Component requires setup() or render()");
     }
-    const rendered = instance.render(instance.props!, instance.children!);
+    const rendered = instance.render(publicProps, instance.children!);
     const definition = instance.vnode.type as ComponentOptions;
     const tree = definition.inheritAttrs === false ? rendered : mergeFallthroughProps(rendered, instance.attrs!);
     attachComponentOwner(tree, instance);
@@ -1393,7 +1395,12 @@ export function compileSfcComponent(source: string): Component {
     hmrRender,
     hmrSignature: script.trim(),
     setup(props, context) {
-      const local = Object.create(props) as Record<string, unknown>;
+      const local = new Proxy(Object.create(null) as Record<string, unknown>, {
+        get(target, key, receiver) {
+          return key in target ? Reflect.get(target, key, receiver) : props[key as string];
+        },
+        has(target, key) { return key in target || key in props; }
+      });
       setup.bindings.forEach(binding => {
         if (binding.kind === "ref") local[binding.name] = ref(readPath(local, binding.expression));
         else if (binding.kind === "reactive") local[binding.name] = reactive(readPath(local, binding.expression) ?? {});

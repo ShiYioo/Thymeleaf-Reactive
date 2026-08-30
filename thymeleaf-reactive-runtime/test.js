@@ -1190,6 +1190,29 @@ test('object components update when an unused prop changes', async () => {
   app.unmount();
 });
 
+test('object component props and attrs are readonly but remain reactive', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Child = {
+    props: ['label'],
+    setup(props, { attrs }) {
+      props.label = 'blocked';
+      attrs.title = 'blocked';
+      return () => h('span', { title: String(attrs.title) }, String(props.label));
+    }
+  };
+  const app = createApp(state => h(Child, { label: state.label, title: state.title }), { label: 'A', title: 'one' });
+  const state = app.mount(root);
+  state.label = 'B';
+  state.title = 'two';
+  await nextTick();
+  const child = root.querySelector('span');
+  assert.equal(child.textContent, 'B');
+  assert.equal(child.title, 'two');
+  child.textContent = 'mutated-dom';
+  app.unmount();
+});
+
 test('object components separate declared props, attrs, and emits', async () => {
   const document = installDom();
   const root = document.createElement('main');
