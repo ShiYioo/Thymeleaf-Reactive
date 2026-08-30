@@ -1078,6 +1078,26 @@ test('object components retain setup state and support lifecycle, emits, and inj
   assert.equal(hooks.includes('parent-unmounted'), true);
 });
 
+test('object components update when an unused prop changes', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  let updates = 0;
+  const Child = {
+    props: ['signal'],
+    setup(_props) {
+      onUpdated(() => { updates++; });
+      return () => h('span', {}, 'stable');
+    }
+  };
+  const app = createApp(state => h('section', {}, [h(Child, { signal: state.signal })]), { signal: 0 });
+  const state = app.mount(root);
+  state.signal = 1;
+  await nextTick();
+  assert.equal(root.textContent, 'stable');
+  assert.equal(updates, 1);
+  app.unmount();
+});
+
 test('object components separate declared props, attrs, and emits', async () => {
   const document = installDom();
   const root = document.createElement('main');

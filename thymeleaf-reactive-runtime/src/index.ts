@@ -2040,7 +2040,8 @@ export function patch(oldVNode: VNode | undefined, newVNode: VNode | undefined, 
     const propsChanged = syncComponentProps(instance.props!, inputs.props);
     const attrsChanged = syncComponentProps(instance.attrs!, inputs.attrs);
     instance.listeners = inputs.listeners;
-    if (!propsChanged && !attrsChanged) instance.update();
+    if (propsChanged || attrsChanged) queueJob(instance.update, instance.uid);
+    else instance.update();
     newVNode.component = instance.tree;
     newVNode.el = instance.tree.el;
     newVNode.anchor = instance.tree.anchor;
