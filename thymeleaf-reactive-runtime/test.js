@@ -1931,6 +1931,39 @@ test('SFC refs inside v-for collect keyed nodes in DOM order', async () => {
   app.unmount();
 });
 
+test('SFC template blocks render v-for and conditional fragments without DOM wrappers', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Component = compileSfcComponent(`
+    <template>
+      <section>
+        <template v-if="visible"><strong>shown</strong><em>now</em></template>
+        <template v-else><strong>hidden</strong></template>
+        <ul><template v-for="item in items"><li :key="item.id">{{ item.label }}</li></template></ul>
+        <button @click="toggle">toggle</button>
+      </section>
+    </template>
+    <script setup>
+      const visible = ref(true);
+      function toggle() { visible.value = !visible.value; }
+    </script>
+  `);
+  const app = createApp(state => h(Component, { items: state.items }), {
+    items: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }]
+  });
+  const state = app.mount(root);
+  assert.equal(root.querySelector('section').children[0].tagName, 'STRONG');
+  assert.deepEqual([...root.querySelectorAll('li')].map(row => row.textContent), ['A', 'B']);
+  root.querySelector('button').dispatchEvent(new Event('click'));
+  await nextTick();
+  assert.equal(root.querySelector('strong').textContent, 'hidden');
+  assert.equal(root.querySelector('em'), null);
+  state.items = [{ id: 'b', label: 'B2' }, { id: 'c', label: 'C' }];
+  await nextTick();
+  assert.deepEqual([...root.querySelectorAll('li')].map(row => row.textContent), ['B2', 'C']);
+  app.unmount();
+});
+
 test('SFC v-once caches static subtrees while dynamic siblings continue updating', async () => {
   const document = installDom();
   const root = document.createElement('main');

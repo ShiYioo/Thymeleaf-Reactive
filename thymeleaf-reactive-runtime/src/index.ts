@@ -1342,6 +1342,9 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
   }
   if (node.nodeType !== Node.ELEMENT_NODE) return undefined;
   const element = node as Element;
+  const childNodes = element.tagName.toLowerCase() === "template"
+    ? Array.from((element as HTMLTemplateElement).content.childNodes)
+    : Array.from(element.childNodes);
   if (onceCache?.has(node)) return onceCache.get(node);
   const memoExpression = element.getAttribute("v-memo");
   const memoDependencies = memoExpression ? readPath(scope, memoExpression) : undefined;
@@ -1376,13 +1379,18 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
       });
       const clone = element.cloneNode(true) as Element;
       clone.removeAttribute("v-for");
-      const rendered = renderSfcNode(clone, childScope, slots, onceCache, memoCache);
+      const rendered = element.tagName.toLowerCase() === "template"
+        ? renderSfcChildren(Array.from((clone as HTMLTemplateElement).content.childNodes), childScope, slots, onceCache, memoCache)
+        : renderSfcNode(clone, childScope, slots, onceCache, memoCache);
       return rendered === undefined ? [] : Array.isArray(rendered) ? rendered : [rendered];
     });
   }
   const condition = element.getAttribute("v-if");
   if (condition && !readPath(scope, condition)) return { type: Comment, props: {}, children: [], el: null, text: "v-if" };
   if (element.hasAttribute("v-else") || element.hasAttribute("v-else-if")) return undefined;
+  if (element.tagName.toLowerCase() === "template") {
+    return renderSfcChildren(childNodes, scope, slots, onceCache, memoCache);
+  }
   const show = element.getAttribute("v-show");
   const dynamic = element.tagName.toLowerCase() === "component";
   const dynamicSource = element.getAttribute(":is") ?? element.getAttribute("v-bind:is") ?? element.getAttribute("is");
