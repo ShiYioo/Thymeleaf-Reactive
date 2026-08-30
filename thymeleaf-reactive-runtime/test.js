@@ -376,6 +376,25 @@ test('onWatcherCleanup preserves outer scope and runs every registered cleanup',
   scope.stop();
 });
 
+test('effectScope.stop runs watcher cleanup and stops watcher effects', () => {
+  const state = ref(0);
+  const events = [];
+  const scope = effectScope();
+  scope.run(() => {
+    watch(state, value => {
+      events.push(`watch:${value}`);
+      onWatcherCleanup(() => events.push(`watch-cleanup:${value}`));
+    }, { immediate: true });
+    watchEffect(() => {
+      events.push(`effect:${state.value}`);
+      onWatcherCleanup(() => events.push(`effect-cleanup:${state.value}`));
+    });
+  });
+  scope.stop();
+  state.value = 1;
+  assert.deepEqual(events, ['watch:0', 'effect:0', 'watch-cleanup:0', 'effect-cleanup:0']);
+});
+
 test('async components render loading, resolved, and error states', async () => {
   const document = installDom();
   const root = document.createElement('main');

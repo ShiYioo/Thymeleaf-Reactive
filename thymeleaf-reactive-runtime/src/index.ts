@@ -586,6 +586,7 @@ export function watch<T>(
   let previous: T | unknown[] | undefined;
   let cleanup: (() => void)[] = [];
   let stopped = false;
+  const ownerScope = activeEffectScope;
   const runGetter = effect(() => {
     value = getter();
     if (options.deep || forceTrigger) traverse(value);
@@ -618,18 +619,22 @@ export function watch<T>(
     runGetter();
     previous = value;
   }
-  return () => {
+  const stop = (): void => {
     if (stopped) return;
     stopped = true;
     cleanup.forEach(run => run());
     cleanup = [];
     runGetter.stop?.();
+    ownerScope?.cleanups.delete(stop);
   };
+  ownerScope?.cleanups.add(stop);
+  return stop;
 }
 
 /** Runs immediately, tracks every reactive value it reads, and cleans up before reruns. */
 export function watchEffect(run: (onCleanup: (cleanup: () => void) => void) => void): () => void {
   let cleanup: (() => void)[] = [];
+  const ownerScope = activeEffectScope;
   const runner = effect(() => {
     cleanup.forEach(current => current());
     cleanup = [];
@@ -639,11 +644,14 @@ export function watchEffect(run: (onCleanup: (cleanup: () => void) => void) => v
     try { run(registerCleanup); }
     finally { activeWatcherCleanup = previousWatcherCleanup; }
   });
-  return () => {
+  const stop = (): void => {
     runner.stop?.();
     cleanup.forEach(current => current());
     cleanup = [];
+    ownerScope?.cleanups.delete(stop);
   };
+  ownerScope?.cleanups.add(stop);
+  return stop;
 }
 
 type AsyncComponentState = { component?: Component; error?: unknown; loading: boolean; pending: boolean };
