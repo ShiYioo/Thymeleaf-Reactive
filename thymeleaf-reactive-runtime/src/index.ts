@@ -2755,6 +2755,32 @@ function hydrateVNodeImpl(vnode: VNode, node: Node | null, container: Node): VNo
     return vnode;
   }
   if (vnode.type === Fragment) return hydrateFragment(vnode, node, container);
+  if (vnode.type === Teleport) {
+    const placeholder = node?.nodeType === Node.COMMENT_NODE && node.textContent === "teleport"
+      ? node
+      : document.createComment("teleport");
+    if (placeholder !== node) container.insertBefore(placeholder, node);
+    vnode.el = placeholder;
+    const target = resolveTeleportTarget(vnode.props.to);
+    vnode.target = target;
+    const targetAnchor = Array.from(target.childNodes).find(child =>
+      child.nodeType === Node.COMMENT_NODE && child.textContent === "/teleport"
+    ) ?? document.createComment("/teleport");
+    if (!targetAnchor.parentNode) target.appendChild(targetAnchor);
+    vnode.anchor = targetAnchor;
+    let cursor = target.firstChild;
+    vnode.children.forEach(child => {
+      const hydrated = hydrateVNode(child, cursor === targetAnchor ? null : cursor, target);
+      const end = hydrated.anchor ?? hydrated.el;
+      cursor = end?.nextSibling ?? targetAnchor;
+    });
+    while (cursor && cursor !== targetAnchor) {
+      const next = cursor.nextSibling;
+      target.removeChild(cursor);
+      cursor = next;
+    }
+    return vnode;
+  }
   if (vnode.type === Text || vnode.type === Comment) {
     if (!node || (vnode.type === Text ? node.nodeType !== Node.TEXT_NODE : node.nodeType !== Node.COMMENT_NODE)) {
       return mount(vnode, container, node);

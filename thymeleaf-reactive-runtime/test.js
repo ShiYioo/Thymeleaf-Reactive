@@ -1174,6 +1174,38 @@ test('Teleport patches and moves its child range without recreating keyed fields
   app.unmount();
 });
 
+test('hydrateRender adopts Teleport placeholders and target content', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const target = document.createElement('aside');
+  target.id = 'hydrate-target';
+  root.innerHTML = '<!--teleport-->';
+  target.innerHTML = '<input value="server"><strong>Server</strong><!--/teleport-->';
+  document.body.append(root, target);
+  const serverInput = target.querySelector('input');
+  const tree = hydrateRender(h(Teleport, { to: '#hydrate-target' }, [
+    h('input', { key: 'draft', value: 'client' }),
+    h('strong', { key: 'label' }, 'Client')
+  ]), root);
+  assert.equal(tree.el, root.firstChild);
+  assert.equal(target.querySelector('input'), serverInput);
+  assert.equal(serverInput.value, 'client');
+  assert.equal(target.querySelector('strong').textContent, 'Client');
+
+  render(h(Teleport, { to: '#hydrate-target' }, [
+    h('input', { key: 'draft', value: 'updated' }),
+    h('strong', { key: 'label' }, 'Updated'),
+    h('em', { key: 'extra' }, 'Extra')
+  ]), root);
+  await nextTick();
+  assert.equal(target.querySelector('input'), serverInput);
+  assert.equal(serverInput.value, 'updated');
+  assert.equal(target.querySelector('em').textContent, 'Extra');
+  render(null, root);
+  assert.equal(root.childNodes.length, 0);
+  assert.equal(target.childNodes.length, 0);
+});
+
 test('KeepAlive caches keyed component instances across switches', async () => {
   const document = installDom();
   const root = document.createElement('main');
