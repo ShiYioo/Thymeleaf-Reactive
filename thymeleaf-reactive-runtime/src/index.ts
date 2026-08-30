@@ -1945,7 +1945,9 @@ function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode
     }
     return vnode;
   }
-  const isSvg = vnode.type === "svg" || (container as Element).namespaceURI === svgNamespace;
+  const parentIsForeignObject = (container as Element).tagName?.toLowerCase() === "foreignobject";
+  const isSvg = vnode.type !== "html" && !parentIsForeignObject
+    && (vnode.type === "svg" || (container as Element).namespaceURI === svgNamespace);
   const el = vnode.el = isSvg
     ? document.createElementNS(svgNamespace, vnode.type)
     : document.createElement(vnode.type);

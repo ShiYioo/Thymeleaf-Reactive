@@ -1480,6 +1480,18 @@ test('virtual DOM creates SVG trees in the SVG namespace', async () => {
   assert.equal(svg.getAttribute('viewBox'), '0 0 20 20');
 });
 
+test('virtual DOM switches to HTML namespace inside SVG foreignObject', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  render(h('svg', {}, [h('foreignObject', {}, [h('div', { class: 'embedded' }, [h('input', { type: 'text' })])])]), root);
+  const foreignObject = root.querySelector('foreignObject');
+  const embedded = root.querySelector('.embedded');
+  const input = root.querySelector('input');
+  assert.equal(foreignObject.namespaceURI, 'http://www.w3.org/2000/svg');
+  assert.equal(embedded.namespaceURI, 'http://www.w3.org/1999/xhtml');
+  assert.equal(input.namespaceURI, 'http://www.w3.org/1999/xhtml');
+});
+
 test('virtual DOM removes stale event listeners and style properties', async () => {
   const document = installDom();
   const root = document.createElement('main');
