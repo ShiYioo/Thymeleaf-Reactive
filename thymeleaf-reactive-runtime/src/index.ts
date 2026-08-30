@@ -19,9 +19,11 @@ export type PropOptions = {
   default?: unknown | (() => unknown);
 };
 export type ComponentProps = string[] | Record<string, PropOptions | PropConstructor | PropConstructor[]>;
+export type EmitValidator = ((...args: unknown[]) => boolean) | null;
+export type ComponentEmits = string[] | Record<string, EmitValidator>;
 export type ComponentOptions = {
   props?: ComponentProps;
-  emits?: string[];
+  emits?: ComponentEmits;
   inheritAttrs?: boolean;
   setup?: (props: Record<string, unknown>, context: ComponentContext) => ComponentRender | void;
   render?: ComponentRender;
@@ -847,8 +849,16 @@ function isObjectComponent(type: VNode["type"]): type is ComponentOptions {
   return typeof type === "object" && type !== null;
 }
 
-function emitComponentEvent(listeners: Record<string, unknown>, event: string, args: unknown[]): void {
-  const listener = listeners[`on${event.slice(0, 1).toUpperCase()}${event.slice(1)}`];
+function emitListenerName(event: string): string {
+  return `on${event.replace(/(?:^|-)([a-z])/g, (_match, letter) => letter.toUpperCase())}`;
+}
+
+function emitComponentEvent(listeners: Record<string, unknown>, event: string, args: unknown[], emits?: ComponentEmits): void {
+  const validator = !Array.isArray(emits) ? emits?.[event] : undefined;
+  if (typeof validator === "function" && !validator(...args)) {
+    console.warn(`[thymeleaf-reactive] invalid arguments for emitted event \"${event}\"`);
+  }
+  const listener = listeners[emitListenerName(event)];
   const candidates = Array.isArray(listener) ? listener : [listener];
   candidates.forEach(candidate => {
     if (typeof candidate === "function") candidate(...args);
@@ -877,10 +887,11 @@ function syncComponentProps(target: Record<string, unknown>, next: Record<string
   return changed;
 }
 
-function isEmitListener(key: string, emits: string[]): boolean {
+function isEmitListener(key: string, emits: ComponentEmits): boolean {
   if (!key.startsWith("on") || key.length < 3) return false;
   const event = key.slice(2).replace(/^./, letter => letter.toLowerCase());
-  return emits.some(name => name === event || name.replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase()) === event);
+  const names = Array.isArray(emits) ? emits : Object.keys(emits);
+  return names.some(name => name === event || name.replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase()) === event);
 }
 
 function normalizePropOptions(definition: ComponentOptions): Record<string, PropOptions> | undefined {
@@ -996,7 +1007,7 @@ function renderObjectComponent(instance: ComponentInstance): VNode {
         children: instance.children!,
         slots: componentSlots(instance),
         attrs: publicAttrs,
-        emit: (event, ...args) => emitComponentEvent(instance.listeners!, event, args)
+        emit: (event, ...args) => emitComponentEvent(instance.listeners!, event, args, definition.emits)
       }) ?? definition.render;
       if (!instance.render) throw new Error("Component requires setup() or render()");
     }

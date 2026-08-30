@@ -1408,6 +1408,32 @@ test('object components separate declared props, attrs, and emits', async () => 
   assert.equal(root.textContent, 'Hidden:1');
 });
 
+test('object components validate object emits and normalize kebab-case listeners', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const received = [];
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = warning => warnings.push(String(warning));
+  try {
+    const Child = {
+      props: [],
+      emits: { 'save-item': value => typeof value === 'number' },
+      setup(_props, { attrs, emit }) {
+        return () => h('button', { title: attrs.title, onClick: () => emit('save-item', 'invalid') }, 'Save');
+      }
+    };
+    render(h(Child, { title: 'attribute', onSaveItem: value => received.push(value) }), root);
+    const button = root.querySelector('button');
+    button.dispatchEvent(new Event('click'));
+    assert.deepEqual(received, ['invalid']);
+    assert.equal(button.title, 'attribute');
+    assert.equal(warnings.length, 1);
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
 test('object component setup exposes reactive default and named slots', async () => {
   const document = installDom();
   const root = document.createElement('main');
