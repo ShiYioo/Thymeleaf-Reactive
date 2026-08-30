@@ -1459,9 +1459,13 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
         const writeModel = (next: unknown) => writePath(scope, modelPath, normalizeSfcModelValue(next, modelModifiers));
         const componentModel = element.tagName.toLowerCase() === "component" || Boolean(resolveSfcComponent(element.tagName, scope));
         if (componentModel) {
+          const writeComponentModel = (next: unknown) => writePath(scope, modelPath, next);
           props[modelName] = readPath(scope, modelPath);
-          props[`onUpdate:${modelName}`] = writeModel;
-          if (modelModifiers.length) props[`${modelName}Modifiers`] = Object.fromEntries(modelModifiers.map(modifier => [modifier, true]));
+          props[`onUpdate:${modelName}`] = writeComponentModel;
+          if (modelModifiers.length) {
+            const modifierProp = modelName === "modelValue" ? "modelModifiers" : `${modelName}Modifiers`;
+            props[modifierProp] = Object.fromEntries(modelModifiers.map(modifier => [modifier, true]));
+          }
        } else {
          const inputType = element.tagName.toLowerCase() === "input"
            ? (element.getAttribute("type") ?? "text").toLowerCase()

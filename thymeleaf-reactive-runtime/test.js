@@ -2451,6 +2451,24 @@ test('SFC v-model supports named component models and modifiers', async () => {
   assert.equal(root.querySelector('strong').textContent, 'Ready!');
 });
 
+test('SFC component v-model leaves modifier normalization to the child', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Editor = defineComponent('sfc-model-modifier-boundary-test', {
+    props: { modelValue: String, modelModifiers: Object },
+    emits: ['update:modelValue'],
+    setup(props, { emit }) {
+      return () => h('button', { onClick: () => emit('update:modelValue', '  raw  ') }, `${props.modelModifiers?.trim}`);
+    }
+  });
+  const render = compileSfcComponent('<template><section><Editor v-model.trim="message"></Editor><strong>{{ message }}</strong></section></template><script setup>const message = ref(\'Ready\');</script>');
+  createApp(() => h(render, { components: { Editor } })).mount(root);
+  assert.equal(root.querySelector('button').textContent, 'true');
+  root.querySelector('button').dispatchEvent(new Event('click'));
+  await nextTick();
+  assert.equal(root.querySelector('strong').textContent, '  raw  ');
+});
+
 test('SFC expressions can call methods on scoped reactive values', () => {
   const document = installDom();
   const root = document.createElement('main');
