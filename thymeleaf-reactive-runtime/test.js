@@ -193,6 +193,16 @@ test('post-flush watches batch updates behind nextTick', async () => {
   assert.deepEqual(values, [2]);
 });
 
+test('stopped queued watches do not run after their job is invalidated', async () => {
+  const state = ref(0);
+  let runs = 0;
+  const stop = watch(state, () => { runs++; }, { flush: 'post' });
+  state.value = 1;
+  stop();
+  await nextTick();
+  assert.equal(runs, 0);
+});
+
 test('pre and post watchers observe the correct render boundary', async () => {
   const document = installDom();
   const root = document.createElement('main');

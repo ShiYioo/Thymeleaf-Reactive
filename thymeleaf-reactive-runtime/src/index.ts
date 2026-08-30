@@ -461,11 +461,13 @@ export function watch<T>(
   let value!: T;
   let previous: T | undefined;
   let cleanup: (() => void) | undefined;
+  let stopped = false;
   const runGetter = effect(() => {
     value = getter();
     if (options.deep || (!isRef(source) && typeof source === "object")) traverse(value);
   }, { lazy: true, scheduler: options.flush === "pre" ? () => queuePreJob(job) : options.flush === "post" ? () => queuePostJob(job) : job });
   function job(): void {
+    if (stopped) return;
     runGetter();
     if (forceTrigger || options.deep || !Object.is(value, previous)) {
       cleanup?.();
@@ -481,6 +483,8 @@ export function watch<T>(
     previous = value;
   }
   return () => {
+    if (stopped) return;
+    stopped = true;
     cleanup?.();
     runGetter.stop?.();
   };
