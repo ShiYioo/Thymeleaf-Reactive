@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { adoptComponentRoot, reactive, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onScopeDispose, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRaw, toRef, toRefs, unref, watch, watchEffect, withMemo } from './dist/index.js';
+import { adoptComponentRoot, reactive, shallowReactive, isReactive, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onScopeDispose, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRaw, toRef, toRefs, unref, watch, watchEffect, withMemo } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -76,6 +76,22 @@ test('shallowRef tracks replacement and triggerRef tracks manual deep mutation',
   state.value = { count: 2 };
   assert.equal(runs, 3);
   assert.equal(observed, '2');
+});
+
+test('shallowReactive tracks root properties without proxying nested values', () => {
+  const nested = { count: 0 };
+  const state = shallowReactive({ enabled: false, nested });
+  let runs = 0;
+  let observed = false;
+  effect(() => { runs++; observed = state.enabled; state.nested.count; });
+  assert.equal(isReactive(state), true);
+  assert.equal(isReactive(state.nested), false);
+  state.nested.count++;
+  assert.equal(runs, 1);
+  state.enabled = true;
+  assert.equal(runs, 2);
+  assert.equal(observed, true);
+  assert.notEqual(reactive(nested), state.nested);
 });
 
 test('reactive Map and Set track keyed and iteration dependencies', () => {

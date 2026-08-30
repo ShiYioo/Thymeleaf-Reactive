@@ -41,6 +41,7 @@ export type AsyncComponentOptions = {
 
 const effectStack: Effect[] = [];
 const proxyCache = new WeakMap<object, object>();
+const shallowProxyCache = new WeakMap<object, object>();
 const proxyToRaw = new WeakMap<object, object>();
 const reactiveProxies = new WeakSet<object>();
 const effectDeps = new WeakMap<Effect, Set<Set<Effect>>>();
@@ -185,14 +186,15 @@ export function toRaw<T>(value: T): T {
   return toRawValue(value);
 }
 
-function wrapCollectionValue<T>(value: T): T {
-  return isReactiveValue(value) ? reactive(value) : value;
+function wrapCollectionValue<T>(value: T, shallow = false): T {
+  return !shallow && isReactiveValue(value) ? reactive(value) : value;
 }
 
-export function reactive<T extends object>(value: T): T {
+function createReactive<T extends object>(value: T, shallow: boolean): T {
   if (reactiveProxies.has(value)) return value;
   const rawValue = toRawValue(value);
-  if (proxyCache.has(rawValue)) return proxyCache.get(rawValue) as T;
+  const cache = shallow ? shallowProxyCache : proxyCache;
+  if (cache.has(rawValue)) return cache.get(rawValue) as T;
   value = rawValue;
   const deps = new Map<unknown, Set<Effect>>();
   const subscribers = (key: unknown): Set<Effect> => {
@@ -212,7 +214,7 @@ export function reactive<T extends object>(value: T): T {
           const rawEntry = toRawValue(entry);
           trackEffect(subscribers(rawEntry));
           const result = target.get(rawEntry);
-          return isReactiveValue(result) ? reactive(result) : result;
+          return wrapCollectionValue(result, shallow);
         };
         if (key === "has") return (entry: unknown) => { const rawEntry = toRawValue(entry); trackEffect(subscribers(rawEntry)); return target.has(rawEntry); };
         if (key === "set") return (entry: unknown, next: unknown) => {
@@ -236,22 +238,22 @@ export function reactive<T extends object>(value: T): T {
         trackEffect(subscribers(ITERATE_KEY));
         if (key === "size") return target.size;
         if (key === "forEach") return (callback: (value: unknown, key: unknown, collection: object) => void, thisArg?: unknown) => {
-          target.forEach((value: unknown, entry: unknown) => callback.call(thisArg, wrapCollectionValue(value), wrapCollectionValue(entry), receiver));
+          target.forEach((value: unknown, entry: unknown) => callback.call(thisArg, wrapCollectionValue(value, shallow), wrapCollectionValue(entry, shallow), receiver));
         };
         if (key === "keys") return function* () {
-          for (const entry of (target as Map<unknown, unknown>).keys()) yield wrapCollectionValue(entry);
+          for (const entry of (target as Map<unknown, unknown>).keys()) yield wrapCollectionValue(entry, shallow);
         };
         return function* () {
           if (target instanceof Map) {
             for (const [entry, value] of target.entries()) {
-              const wrappedEntry = wrapCollectionValue(entry);
+              const wrappedEntry = wrapCollectionValue(entry, shallow);
               yield key === "entries" || key === Symbol.iterator
-                ? [wrappedEntry, wrapCollectionValue(value)]
-                : wrapCollectionValue(value);
+                ? [wrappedEntry, wrapCollectionValue(value, shallow)]
+                : wrapCollectionValue(value, shallow);
             }
           } else {
             for (const value of target.values()) {
-              const resolved = wrapCollectionValue(value);
+              const resolved = wrapCollectionValue(value, shallow);
               yield key === "entries" ? [resolved, resolved] : resolved;
             }
           }
@@ -259,7 +261,7 @@ export function reactive<T extends object>(value: T): T {
       }
       trackEffect(subscribers(key));
       const result = Reflect.get(target, key, receiver);
-      return isReactiveValue(result) ? reactive(result) : result;
+      return shallow ? result : isReactiveValue(result) ? reactive(result) : result;
     },
     set(target, key, next, receiver) {
       const oldLength = Array.isArray(target) ? target.length : 0;
@@ -293,10 +295,22 @@ export function reactive<T extends object>(value: T): T {
       return Reflect.ownKeys(target);
     }
   });
-  proxyCache.set(value, proxy);
+  cache.set(value, proxy);
   proxyToRaw.set(proxy, value);
   reactiveProxies.add(proxy);
   return proxy as T;
+}
+
+export function reactive<T extends object>(value: T): T {
+  return createReactive(value, false);
+}
+
+export function shallowReactive<T extends object>(value: T): T {
+  return createReactive(value, true);
+}
+
+export function isReactive(value: unknown): value is object {
+  return Boolean(value && typeof value === "object" && reactiveProxies.has(value));
 }
 
 export function effect(fn: Effect, options: EffectOptions = {}): Effect {
