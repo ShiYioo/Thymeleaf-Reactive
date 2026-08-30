@@ -850,6 +850,13 @@ function handleComponentError(instance: ComponentInstance, error: unknown, info:
   console.error("[thymeleaf-reactive] component error", error);
 }
 
+function invokeComponentHooks(instance: ComponentInstance, hooks: (() => void)[], info: string): void {
+  hooks.forEach(hook => {
+    try { hook(); }
+    catch (error) { handleComponentError(instance, error, info); }
+  });
+}
+
 export function provide(key: PropertyKey, value: unknown): void {
   const instance = currentComponentInstance();
   if (!instance) throw new Error("provide() must be called during component setup");
@@ -1010,7 +1017,7 @@ function areVNodeChildrenEqual(previous: VNode[], next: VNode[]): boolean {
 }
 
 function invokeComponentHook(vnode: VNode, name: "activatedHooks" | "deactivatedHooks"): void {
-  if (isObjectComponent(vnode.type) && vnode.instance) vnode.instance[name]?.forEach(hook => hook());
+  if (isObjectComponent(vnode.type) && vnode.instance) invokeComponentHooks(vnode.instance, vnode.instance[name] ?? [], name);
   else if (vnode.component) invokeComponentHook(vnode.component, name);
 }
 
@@ -1949,14 +1956,14 @@ function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode
     componentUpdate = instance.scope.run(() => effect(() => {
       const nextTree = renderObjectComponent(instance);
       if (!instance.isMounted) {
-        instance.beforeMountHooks!.forEach(hook => hook());
+        invokeComponentHooks(instance, instance.beforeMountHooks!, "beforeMount");
         mount(nextTree, container, anchor);
         instance.isMounted = true;
-        instance.mountedHooks!.forEach(hook => hook());
+        invokeComponentHooks(instance, instance.mountedHooks!, "mounted");
       } else {
-        instance.beforeUpdateHooks!.forEach(hook => hook());
+        invokeComponentHooks(instance, instance.beforeUpdateHooks!, "beforeUpdate");
         instance.tree = patch(instance.tree, nextTree, container) ?? instance.tree;
-        instance.updatedHooks!.forEach(hook => hook());
+        invokeComponentHooks(instance, instance.updatedHooks!, "updated");
       }
       instance.tree = nextTree;
       instance.vnode.component = nextTree;
@@ -2026,10 +2033,10 @@ function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode
 function unmount(vnode: VNode, container: Node): void {
   if (isObjectComponent(vnode.type) && vnode.instance) {
     const instance = vnode.instance;
-    instance.beforeUnmountHooks!.forEach(hook => hook());
+    invokeComponentHooks(instance, instance.beforeUnmountHooks!, "beforeUnmount");
     instance.dispose();
     unmount(instance.tree, container);
-    instance.unmountedHooks!.forEach(hook => hook());
+    invokeComponentHooks(instance, instance.unmountedHooks!, "unmounted");
     return;
   }
   if (typeof vnode.type === "function") {
@@ -2376,14 +2383,14 @@ function hydrateObjectComponent(vnode: VNode, node: Node | null, container: Node
   componentUpdate = instance.scope.run(() => effect(() => {
     const nextTree = renderObjectComponent(instance);
     if (!instance.isMounted) {
-      instance.beforeMountHooks!.forEach(hook => hook());
+      invokeComponentHooks(instance, instance.beforeMountHooks!, "beforeMount");
       instance.tree = hydrateVNode(nextTree, node, container);
       instance.isMounted = true;
-      instance.mountedHooks!.forEach(hook => hook());
+      invokeComponentHooks(instance, instance.mountedHooks!, "mounted");
     } else {
-      instance.beforeUpdateHooks!.forEach(hook => hook());
+      invokeComponentHooks(instance, instance.beforeUpdateHooks!, "beforeUpdate");
       instance.tree = patch(instance.tree, nextTree, container) ?? instance.tree;
-      instance.updatedHooks!.forEach(hook => hook());
+      invokeComponentHooks(instance, instance.updatedHooks!, "updated");
     }
     vnode.component = instance.tree;
     vnode.el = instance.tree.el;
@@ -2589,14 +2596,14 @@ export function adoptComponentRoot(root: Element, component: Component, props: R
     let componentUpdate!: Effect;
     componentUpdate = instance.scope.run(() => effect(() => {
       const nextTree = renderObjectComponent(instance);
-      if (!instance.isMounted) instance.beforeMountHooks!.forEach(hook => hook());
-      else instance.beforeUpdateHooks!.forEach(hook => hook());
+      if (!instance.isMounted) invokeComponentHooks(instance, instance.beforeMountHooks!, "beforeMount");
+      else invokeComponentHooks(instance, instance.beforeUpdateHooks!, "beforeUpdate");
       instance.tree = patch(instance.tree, nextTree, container) ?? instance.tree;
       if (!instance.isMounted) {
         instance.isMounted = true;
-        instance.mountedHooks!.forEach(hook => hook());
+        invokeComponentHooks(instance, instance.mountedHooks!, "mounted");
       } else {
-        instance.updatedHooks!.forEach(hook => hook());
+        invokeComponentHooks(instance, instance.updatedHooks!, "updated");
       }
       instance.vnode.component = instance.tree;
       instance.vnode.el = instance.tree.el;

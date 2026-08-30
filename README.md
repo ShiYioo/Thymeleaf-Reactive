@@ -97,7 +97,7 @@ const Counter = {
 };
 ```
 
-Object component `props` also accepts Vue-style option objects with `type`, `required`, and `default`. Default factories run once per component instance, Boolean props default to `false`, and undeclared values remain available through `attrs`. `emits` accepts an event-name array or an object of event validators; kebab-case events map to camel-case listeners such as `onSaveItem`. `setup` can also register `onErrorCaptured`, which receives descendant render errors and can return `true` to stop propagation while retaining the last successful tree.
+Object component `props` also accepts Vue-style option objects with `type`, `required`, and `default`. Default factories run once per component instance, Boolean props default to `false`, and undeclared values remain available through `attrs`. `emits` accepts an event-name array or an object of event validators; kebab-case events map to camel-case listeners such as `onSaveItem`. `setup` can also register `onErrorCaptured`, which receives descendant render and lifecycle errors and can return `true` to stop propagation while retaining the last successful tree.
 
 ## Virtual DOM Teleport
 

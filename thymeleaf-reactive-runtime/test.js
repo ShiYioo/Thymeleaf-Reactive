@@ -1211,6 +1211,37 @@ test('onErrorCaptured catches child render errors and preserves the last tree', 
   app.unmount();
 });
 
+test('onErrorCaptured handles lifecycle errors without aborting sibling updates', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const captured = [];
+  const Failing = {
+    props: ['value'],
+    setup(props) {
+      onUpdated(() => { if (props.value === 1) throw new Error('lifecycle failed'); });
+      return () => h('span', {}, `failing:${props.value}`);
+    }
+  };
+  const Stable = {
+    props: ['value'],
+    setup: props => () => h('strong', {}, `stable:${props.value}`)
+  };
+  const Boundary = {
+    props: ['value'],
+    setup(props) {
+      onErrorCaptured((error, info) => { captured.push([error.message, info]); return true; });
+      return () => h('div', {}, [h(Failing, { value: props.value }), h(Stable, { value: props.value })]);
+    }
+  };
+  const app = createApp(state => h(Boundary, { value: state.value }), { value: 0 });
+  const state = app.mount(root);
+  state.value = 1;
+  await nextTick();
+  assert.equal(root.textContent, 'failing:1stable:1');
+  assert.deepEqual(captured, [['lifecycle failed', 'updated']]);
+  app.unmount();
+});
+
 test('object components retain setup state and support lifecycle, emits, and injection', async () => {
   const document = installDom();
   const root = document.createElement('main');
