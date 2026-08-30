@@ -3411,9 +3411,9 @@ function readDynamicObject(source: any, expression: string): any {
 
 type EachRecord = { element: HTMLElement; scope: any; key: string | number };
 
-function parseEach(expression: string): { item: string; index?: string; collection: string } | null {
-  const match = expression.trim().match(/^([A-Za-z_$][\w$]*)(?:\s*,\s*([A-Za-z_$][\w$]*))?\s+(?:in|of)\s+(.+)$/);
-  return match ? { item: match[1], index: match[2], collection: match[3] } : null;
+function parseEach(expression: string): { item: string; alias?: string; index?: string; collection: string } | null {
+  const match = expression.trim().match(/^\(?\s*([A-Za-z_$][\w$]*)(?:\s*,\s*([A-Za-z_$][\w$]*))?(?:\s*,\s*([A-Za-z_$][\w$]*))?\s*\)?\s+(?:in|of)\s+(.+)$/);
+  return match ? { item: match[1], alias: match[2], index: match[3], collection: match[4] } : null;
 }
 
 function eachKey(element: Element, scope: any, index: number): string | number {
@@ -3463,23 +3463,36 @@ export function hydrate(root: Element, state: object, handlers: Record<string, (
     const records = new Map<string | number, EachRecord>();
     const runner = hydrationEffect(context, () => {
       const collection = readPath(reactiveState, parsed.collection);
-      const values = Array.isArray(collection) ? collection : collection && typeof collection === "object" ? Object.values(collection) : [];
+      const values = Array.isArray(collection)
+        ? collection.map((value, index) => ({ value, key: index, index }))
+        : typeof collection === "number" && Number.isFinite(collection) && collection > 0
+          ? Array.from({ length: Math.floor(collection) }, (_value, index) => ({ value: index + 1, key: index, index }))
+          : collection && typeof collection === "object"
+            ? Object.entries(collection).map(([key, value], index) => ({ value, key, index }))
+            : [];
+      const useServerRows = records.size === 0 && serverRows.some(row => row.parentNode === parent);
       const nextKeys = new Set<string | number>();
       const nextRecords: EachRecord[] = [];
-      values.forEach((item, index) => {
+      values.forEach(({ value, key: aliasKey, index }) => {
         const candidateScope = Object.assign(Object.create(reactiveState), {
-          [parsed.item]: item,
+          [parsed.item]: value,
+          ...(parsed.alias ? { [parsed.alias]: Array.isArray(collection) ? index : aliasKey } : {}),
           ...(parsed.index ? { [parsed.index]: index } : {})
         });
         const candidateKey = eachKey(blueprint, candidateScope, index);
         const previous = records.get(candidateKey);
         const scope = previous?.scope ?? reactive(candidateScope);
         if (previous) {
-          scope[parsed.item] = item;
+          scope[parsed.item] = value;
+          if (parsed.alias) scope[parsed.alias] = Array.isArray(collection) ? index : aliasKey;
           if (parsed.index) scope[parsed.index] = index;
         }
         const key = eachKey(blueprint, scope, index);
-        const record = previous ?? { element: serverRows[index] ?? cloneEachTemplate(blueprint), scope, key };
+        const record = previous ?? {
+          element: useServerRows ? serverRows[index] ?? cloneEachTemplate(blueprint) : cloneEachTemplate(blueprint),
+          scope,
+          key
+        };
         record.element.dataset.trKey = String(key);
         if (!previous) hydrate(record.element, scope, handlers);
         nextKeys.add(key);

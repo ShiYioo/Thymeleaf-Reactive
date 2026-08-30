@@ -2676,6 +2676,26 @@ test('hydrates tr:each of syntax and preserves keyed rows on updates', async () 
   assert.equal(rows[1], firstA);
 });
 
+test('hydrates tr:each numeric ranges and object value-key-index aliases', async () => {
+  const document = installDom();
+  const root = document.createElement('section');
+  root.innerHTML = [
+    '<ol><li data-tr-each="n in count" data-tr-text="n"></li></ol>',
+    '<dl>',
+    '<dt data-tr-each="(value, key, index) in records" data-tr-key-expression="key" data-tr-text="key + \'=\' + value + \':\' + index"></dt>',
+    '<dt data-tr-each="(value, key, index) in records" data-tr-key-expression="key" data-tr-text="key + \'=\' + value + \':\' + index"></dt>',
+    '</dl>'
+  ].join('');
+  const state = hydrate(root, { count: 3, records: { first: 'A', second: 'B' } });
+  assert.deepEqual([...root.querySelectorAll('ol li')].map(row => row.textContent), ['1', '2', '3']);
+  assert.deepEqual([...root.querySelectorAll('dt')].map(row => row.textContent), ['first=A:0', 'second=B:1']);
+  state.count = 2;
+  state.records = { second: 'B2', third: 'C' };
+  await nextTick();
+  assert.deepEqual([...root.querySelectorAll('ol li')].map(row => row.textContent), ['1', '2']);
+  assert.deepEqual([...root.querySelectorAll('dt')].map(row => row.textContent), ['second=B2:0', 'third=C:1']);
+});
+
 test('each row scopes inherit outer reactive state for expressions', async () => {
   const document = installDom();
   const root = document.createElement('ul');
