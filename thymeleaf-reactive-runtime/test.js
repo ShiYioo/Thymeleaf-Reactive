@@ -2395,6 +2395,17 @@ test('SFC resolves dynamic native and registered component targets', async () =>
   assert.equal(root.querySelector('strong').textContent, 'Child');
 });
 
+test('SFC self-closing components preserve following sibling boundaries', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Child = defineComponent('sfc-self-closing-test', () => h('i', {}, 'Child'));
+  const render = compileSfcComponent('<template><section><Child /><strong>Sibling</strong></section></template>');
+  createApp(() => h(render, { components: { Child } })).mount(root);
+  assert.equal(root.querySelector('i').textContent, 'Child');
+  assert.equal(root.querySelector('strong').textContent, 'Sibling');
+  assert.equal(root.querySelector('i').nextElementSibling, root.querySelector('strong'));
+});
+
 test('SFC supports object spread bindings for native and child component props', async () => {
   const document = installDom();
   const root = document.createElement('main');

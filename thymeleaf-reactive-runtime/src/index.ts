@@ -1661,6 +1661,43 @@ function extractSfcBlock(source: string, tagName: string): string | undefined {
   return undefined;
 }
 
+const sfcVoidTags = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"]);
+
+function normalizeSfcSelfClosingTags(source: string): string {
+  let output = "";
+  let cursor = 0;
+  while (cursor < source.length) {
+    const start = source.indexOf("<", cursor);
+    if (start < 0) return output + source.slice(cursor);
+    output += source.slice(cursor, start);
+    if (source.startsWith("<!--", start)) {
+      const end = source.indexOf("-->", start + 4);
+      if (end < 0) return output + source.slice(start);
+      output += source.slice(start, end + 3);
+      cursor = end + 3;
+      continue;
+    }
+    let end = start + 1;
+    let quote = "";
+    while (end < source.length) {
+      const character = source[end];
+      if (quote) {
+        if (character === quote) quote = "";
+      } else if (character === "\"" || character === "'") quote = character;
+      else if (character === ">") break;
+      end++;
+    }
+    if (end >= source.length) return output + source.slice(start);
+    const raw = source.slice(start, end + 1);
+    const match = raw.match(/^<\s*([A-Za-z][\w:.-]*)[\s\S]*\/\s*>$/);
+    const tagName = match?.[1].toLowerCase();
+    output += raw;
+    if (tagName && !sfcVoidTags.has(tagName)) output += `</${match![1]}>`;
+    cursor = end + 1;
+  }
+  return output;
+}
+
 /**
  * Compiles a resource-backed Vue SFC template plus a CSP-safe script-setup subset.
  * Supported setup declarations are ref(), reactive(), computed(() => expression),
@@ -1671,7 +1708,7 @@ export function compileSfcComponent(source: string): Component {
   const templateSource = extractSfcBlock(source, "template");
   if (!templateSource) throw new Error("Vue component is missing a <template> block");
   const template = document.createElement("template");
-  template.innerHTML = templateSource;
+  template.innerHTML = normalizeSfcSelfClosingTags(templateSource);
   const roots = Array.from(template.content.childNodes);
   const script = source.match(/<script\s+setup(?:\s[^>]*)?>([\s\S]*?)<\/script>/i)?.[1];
   if (!script) return (props, children) => {
