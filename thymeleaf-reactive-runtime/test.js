@@ -130,6 +130,17 @@ test('readonly proxies preserve values while rejecting writes', () => {
   assert.equal(isReadonly(values.get('item')), true);
 });
 
+test('readonly views retain dependency tracking from reactive sources', () => {
+  const source = reactive({ count: 0 });
+  const view = readonly(source);
+  let observed = 0;
+  effect(() => { observed = view.count; });
+  source.count = 1;
+  assert.equal(observed, 1);
+  view.count = 2;
+  assert.equal(source.count, 1);
+});
+
 test('reactive Map and Set track keyed and iteration dependencies', () => {
   const values = reactive(new Map([['a', 1]]));
   const tags = reactive(new Set(['a']));

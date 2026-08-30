@@ -338,7 +338,8 @@ function createReadonly<T extends object>(value: T, shallow: boolean): T {
   const rawValue = toRawValue(value);
   const cache = shallow ? shallowReadonlyProxyCache : readonlyProxyCache;
   if (cache.has(rawValue)) return cache.get(rawValue) as T;
-  const proxy = new Proxy(rawValue, {
+  const target = reactiveProxies.has(value) ? value : rawValue;
+  const proxy = new Proxy(target, {
     get(target, key, receiver) {
       if (target instanceof Map && key === "get") return (entry: unknown) => {
         const result = target.get(toRawValue(entry));
