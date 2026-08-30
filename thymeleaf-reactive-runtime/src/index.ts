@@ -69,6 +69,7 @@ const refValues = new WeakSet<object>();
 const refTriggers = new WeakMap<object, () => void>();
 let pendingFlush: Promise<void> | undefined;
 let activeEffectScope: EffectScope | undefined;
+let activeWatcherCleanup: ((cleanup: () => void) => void) | undefined;
 let nextComponentUid = 0;
 
 export class EffectScope {
@@ -530,6 +531,12 @@ export type WatchSource<T> = (() => T) | Ref<T> | T;
 export type WatchOptions = { immediate?: boolean; deep?: boolean; flush?: "sync" | "pre" | "post" };
 type WatchCallback<T> = (value: T, previous: T | undefined, onCleanup: (cleanup: () => void) => void) => void;
 
+/** Registers cleanup for the currently executing watch or watchEffect callback. */
+export function onWatcherCleanup(cleanup: () => void): void {
+  if (!activeWatcherCleanup) throw new Error("onWatcherCleanup() must be called synchronously inside watch() or watchEffect()");
+  activeWatcherCleanup(cleanup);
+}
+
 function traverse(value: unknown, seen = new Set<object>()): unknown {
   if (!value || typeof value !== "object" || seen.has(value)) return value;
   seen.add(value);
@@ -596,7 +603,10 @@ export function watch<T>(
     if (forceTrigger || options.deep || changed) {
       cleanup?.();
       let nextCleanup: (() => void) | undefined;
-      (callback as WatchCallback<T | unknown[]>)(value, previous, next => { nextCleanup = next; });
+      const registerCleanup = (next: () => void): void => { nextCleanup = next; };
+      activeWatcherCleanup = registerCleanup;
+      try { (callback as WatchCallback<T | unknown[]>)(value, previous, registerCleanup); }
+      finally { activeWatcherCleanup = undefined; }
       cleanup = nextCleanup;
       previous = value;
     }
@@ -620,7 +630,10 @@ export function watchEffect(run: (onCleanup: (cleanup: () => void) => void) => v
   const runner = effect(() => {
     cleanup?.();
     cleanup = undefined;
-    run(next => { cleanup = next; });
+    const registerCleanup = (next: () => void): void => { cleanup = next; };
+    activeWatcherCleanup = registerCleanup;
+    try { run(registerCleanup); }
+    finally { activeWatcherCleanup = undefined; }
   });
   return () => {
     runner.stop?.();

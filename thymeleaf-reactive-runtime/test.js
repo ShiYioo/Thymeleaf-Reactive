@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, readonly, shallowReadonly, isReadonly, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onErrorCaptured, onScopeDispose, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRaw, toRef, toRefs, unref, watch, watchEffect, withMemo } from './dist/index.js';
+import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, readonly, shallowReadonly, isReadonly, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onErrorCaptured, onScopeDispose, onWatcherCleanup, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRaw, toRef, toRefs, unref, watch, watchEffect, withMemo } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -331,6 +331,30 @@ test('watchEffect cleans up stale work and can be stopped', () => {
   stop();
   state.count = 2;
   assert.deepEqual(events, ['run:0', 'cleanup:1', 'run:1', 'cleanup:1']);
+});
+
+test('onWatcherCleanup registers cleanup for watch and watchEffect callbacks', () => {
+  const state = ref(0);
+  const events = [];
+  const stopWatch = watch(state, value => {
+    events.push(`watch:${value}`);
+    onWatcherCleanup(() => events.push(`watch-cleanup:${value}`));
+  }, { immediate: true });
+  state.value = 1;
+  stopWatch();
+
+  const stopEffect = watchEffect(() => {
+    events.push(`effect:${state.value}`);
+    onWatcherCleanup(() => events.push(`effect-cleanup:${state.value}`));
+  });
+  state.value = 2;
+  stopEffect();
+
+  assert.deepEqual(events, [
+    'watch:0', 'watch-cleanup:0', 'watch:1', 'watch-cleanup:1',
+    'effect:1', 'effect-cleanup:2', 'effect:2', 'effect-cleanup:2'
+  ]);
+  assert.throws(() => onWatcherCleanup(() => {}), /watch\(\) or watchEffect\(\)/);
 });
 
 test('async components render loading, resolved, and error states', async () => {
