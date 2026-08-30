@@ -2781,6 +2781,14 @@ function hydrateVNodeImpl(vnode: VNode, node: Node | null, container: Node): VNo
     }
     return vnode;
   }
+  if (vnode.type === Suspense) {
+    const content = vnode.children[0];
+    const active = content && !hasPendingAsync(content) ? content : suspenseFallback(vnode);
+    vnode.component = hydrateVNode(active, node, container);
+    vnode.el = vnode.component.el;
+    vnode.anchor = vnode.component.anchor;
+    return vnode;
+  }
   if (vnode.type === Text || vnode.type === Comment) {
     if (!node || (vnode.type === Text ? node.nodeType !== Node.TEXT_NODE : node.nodeType !== Node.COMMENT_NODE)) {
       return mount(vnode, container, node);

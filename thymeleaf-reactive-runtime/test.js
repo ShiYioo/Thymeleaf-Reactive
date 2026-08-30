@@ -1000,6 +1000,28 @@ test('hydrateRender adopts compatible SSR nodes and recovers structural mismatch
   assert.equal(section.textContent, 'done');
 });
 
+test('hydrateRender adopts a Suspense fallback before resolving async content', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  root.innerHTML = '<p class="server">Loading</p>';
+  const fallback = root.firstElementChild;
+  let resolve;
+  const Async = defineAsyncComponent(() => new Promise(done => { resolve = done; }));
+  const pending = () => h(Suspense, { fallback: h('p', { class: 'client' }, 'Loading') }, [h(Async)]);
+
+  const tree = hydrateRender(pending(), root);
+  assert.equal(tree.component.el, fallback);
+  assert.equal(root.firstElementChild, fallback);
+  assert.equal(fallback.className, 'client');
+
+  resolve(() => h('strong', {}, 'Ready'));
+  await Promise.resolve();
+  await nextTick();
+  render(pending(), root);
+  assert.equal(root.textContent, 'Ready');
+  assert.equal(root.querySelector('strong').textContent, 'Ready');
+});
+
 test('hydrateRender adopts multi-root SSR fragments as one patchable range', () => {
   const document = installDom();
   const root = document.createElement('main');
