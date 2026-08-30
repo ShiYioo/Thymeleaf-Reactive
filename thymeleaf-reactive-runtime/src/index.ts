@@ -530,6 +530,7 @@ export function proxyRefs<T extends object>(value: T): T {
 export type WatchSource<T> = (() => T) | Ref<T> | T;
 export type WatchOptions = { immediate?: boolean; deep?: boolean; once?: boolean; flush?: "sync" | "pre" | "post" };
 type WatchCallback<T> = (value: T, previous: T | undefined, onCleanup: (cleanup: () => void) => void) => void;
+export type WatchEffectOptions = { flush?: "sync" | "pre" | "post" };
 
 /** Registers cleanup for the currently executing watch or watchEffect callback. */
 export function onWatcherCleanup(cleanup: () => void): void {
@@ -634,10 +635,16 @@ export function watch<T>(
 }
 
 /** Runs immediately, tracks every reactive value it reads, and cleans up before reruns. */
-export function watchEffect(run: (onCleanup: (cleanup: () => void) => void) => void): () => void {
+export function watchEffect(run: (onCleanup: (cleanup: () => void) => void) => void, options: WatchEffectOptions = {}): () => void {
   let cleanup: (() => void)[] = [];
   const ownerScope = activeEffectScope;
-  const runner = effect(() => {
+  let runner!: Effect;
+  const schedule = options.flush === "pre"
+    ? () => queuePreJob(runner)
+    : options.flush === "post"
+      ? () => queuePostJob(runner)
+      : undefined;
+  runner = effect(() => {
     cleanup.forEach(current => current());
     cleanup = [];
     const registerCleanup = (next: () => void): void => { cleanup.push(next); };
@@ -645,7 +652,7 @@ export function watchEffect(run: (onCleanup: (cleanup: () => void) => void) => v
     activeWatcherCleanup = registerCleanup;
     try { run(registerCleanup); }
     finally { activeWatcherCleanup = previousWatcherCleanup; }
-  });
+  }, schedule ? { scheduler: schedule } : {});
   const stop = (): void => {
     runner.stop?.();
     cleanup.forEach(current => current());
@@ -654,6 +661,16 @@ export function watchEffect(run: (onCleanup: (cleanup: () => void) => void) => v
   };
   ownerScope?.cleanups.add(stop);
   return stop;
+}
+
+/** Runs a watch effect before component render jobs in the current flush. */
+export function watchSyncEffect(run: (onCleanup: (cleanup: () => void) => void) => void): () => void {
+  return watchEffect(run, { flush: "sync" });
+}
+
+/** Runs a watch effect after component render jobs in the current flush. */
+export function watchPostEffect(run: (onCleanup: (cleanup: () => void) => void) => void): () => void {
+  return watchEffect(run, { flush: "post" });
 }
 
 type AsyncComponentState = { component?: Component; error?: unknown; loading: boolean; pending: boolean };

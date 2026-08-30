@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, readonly, shallowReadonly, isReadonly, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onErrorCaptured, onScopeDispose, onWatcherCleanup, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRaw, toRef, toRefs, unref, watch, watchEffect, withMemo } from './dist/index.js';
+import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, readonly, shallowReadonly, isReadonly, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onErrorCaptured, onScopeDispose, onWatcherCleanup, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRaw, toRef, toRefs, unref, watch, watchEffect, watchPostEffect, watchSyncEffect, withMemo } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -328,6 +328,22 @@ test('pre and post watchers observe the correct render boundary', async () => {
   assert.deepEqual(events, []);
   await nextTick();
   assert.deepEqual(events, ['pre:0', 'post:2']);
+});
+
+test('watch effect flush options observe the render boundary', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const events = [];
+  const state = reactive({ count: 0 });
+  watchSyncEffect(() => events.push(`sync:${root.textContent}:${state.count}`));
+  watchEffect(() => events.push(`pre:${root.textContent}:${state.count}`), { flush: 'pre' });
+  watchPostEffect(() => events.push(`post:${root.textContent}:${state.count}`));
+  createApp(() => h('span', {}, state.count), state).mount(root);
+  events.length = 0;
+  state.count = 1;
+  assert.deepEqual(events, ['sync:0:1']);
+  await nextTick();
+  assert.deepEqual(events, ['sync:0:1', 'pre:0:1', 'post:1:1']);
 });
 
 test('nextTick accepts a callback after queued jobs flush', async () => {
