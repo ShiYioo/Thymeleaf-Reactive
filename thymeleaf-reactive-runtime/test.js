@@ -2433,10 +2433,11 @@ test('SFC event expressions execute updates lazily with $event scope', async () 
   const document = installDom();
   const root = document.createElement('main');
   const render = compileSfcComponent(`
-    <template><section><strong>{{ count }}</strong><em>{{ labels.join(',') }}</em><button @click="count++">increment</button><button @click="labels.push($event.detail)">append</button></section></template>
+    <template><section><strong>{{ count }}</strong><em>{{ labels.join(',') }}</em><p>{{ message }}</p><button @click="count++">increment</button><button @click="labels.push($event.detail)">append</button><button @click="count += 2">add</button><button @click="message = $event.detail">message</button></section></template>
     <script setup>
       const count = ref(0);
       const labels = ref(['A']);
+      const message = ref('empty');
     </script>
   `);
   createApp(() => h(render)).mount(root);
@@ -2446,6 +2447,12 @@ test('SFC event expressions execute updates lazily with $event scope', async () 
   root.querySelectorAll('button')[1].dispatchEvent(new CustomEvent('click', { detail: 'B' }));
   await nextTick();
   assert.equal(root.querySelector('em').textContent, 'A,B');
+  root.querySelectorAll('button')[2].dispatchEvent(new Event('click'));
+  await nextTick();
+  assert.equal(root.querySelector('strong').textContent, '3');
+  root.querySelectorAll('button')[3].dispatchEvent(new CustomEvent('click', { detail: 'ready' }));
+  await nextTick();
+  assert.equal(root.querySelector('p').textContent, 'ready');
 });
 
 test('SFC script setup compiles safe reactive declarations and event methods', async () => {

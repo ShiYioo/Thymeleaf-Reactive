@@ -1157,6 +1157,23 @@ function sfcEventHandler(expression: string, scope: Record<string, unknown>, mod
       writePath(scope, update[1], Number(current ?? 0) + (update[2] === "++" ? 1 : -1));
     });
   }
+  const assignment = normalized.match(/^([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*(\+=|-=|\*=|\/=|%=|=)\s+([\s\S]+)$/);
+  if (assignment) {
+    return wrap(event => {
+      const eventScope = Object.create(scope) as Record<string, unknown>;
+      eventScope.$event = event;
+      const right = readPath(eventScope, assignment[3]);
+      const left = readPath(scope, assignment[1]);
+      const next = assignment[2] === "="
+        ? right
+        : assignment[2] === "+=" ? left + (right as any)
+          : assignment[2] === "-=" ? (left as any) - (right as any)
+            : assignment[2] === "*=" ? (left as any) * (right as any)
+              : assignment[2] === "/=" ? (left as any) / (right as any)
+                : (left as any) % (right as any);
+      writePath(scope, assignment[1], next);
+    });
+  }
   if (normalized.includes("(") || normalized.includes("++") || normalized.includes("--") || normalized.includes("=")) {
     return wrap(event => {
       const eventScope = Object.create(scope) as Record<string, unknown>;
