@@ -1760,6 +1760,10 @@ test('virtual DOM removes stale event listeners and style properties', async () 
   assert.equal(newClicks, 1);
   assert.equal(button.style.color, 'green');
   assert.equal(button.style.background, '');
+  app.replaceRender(() => h('button', {}, 'go'));
+  button.dispatchEvent(new Event('click'));
+  assert.equal(newClicks, 1);
+  app.unmount();
 });
 
 test('runtime-dom normalizes class and style values and invokes event arrays', () => {

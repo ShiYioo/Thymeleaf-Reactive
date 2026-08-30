@@ -1725,7 +1725,8 @@ function transitionGroupElementProps(props: Record<string, unknown>): Record<str
   return Object.fromEntries(Object.entries(props).filter(([key]) => !isTransitionProp(key)));
 }
 
-const eventListeners = new WeakMap<Element, Map<string, EventListener>>();
+type EventInvoker = EventListener & { value: EventListener[] };
+const eventListeners = new WeakMap<Element, Map<string, EventInvoker>>();
 const svgNamespace = "http://www.w3.org/2000/svg";
 const componentNames = new WeakMap<Component, string>();
 const componentSources = new Map<string, string>();
@@ -1777,14 +1778,19 @@ function setProp(el: Element, key: string, value: unknown, previous?: unknown): 
   }
   if (key.startsWith("on")) {
     const event = key.slice(2).toLowerCase();
-    const listeners = eventListeners.get(el) ?? new Map<string, EventListener>();
+    const listeners = eventListeners.get(el) ?? new Map<string, EventInvoker>();
     const registered = listeners.get(event);
-    if (registered) el.removeEventListener(event, registered);
     const handlers = Array.isArray(value) ? value.filter(handler => typeof handler === "function") : [value];
-    if (handlers.length) {
+    if (registered && handlers.length) {
+      registered.value = handlers as EventListener[];
+    } else if (registered) {
+      el.removeEventListener(event, registered);
+      listeners.delete(event);
+    } else if (handlers.length) {
       const listener = ((eventValue: Event) => {
-        handlers.forEach(handler => (handler as EventListener).call(el, eventValue));
-      }) as EventListener;
+        listener.value.forEach(handler => handler.call(el, eventValue));
+      }) as EventInvoker;
+      listener.value = handlers as EventListener[];
       el.addEventListener(event, listener);
       listeners.set(event, listener);
     } else {
