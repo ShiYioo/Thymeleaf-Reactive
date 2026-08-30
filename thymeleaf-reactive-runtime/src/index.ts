@@ -21,6 +21,7 @@ export type PropOptions = {
 export type ComponentProps = string[] | Record<string, PropOptions | PropConstructor | PropConstructor[]>;
 export type EmitValidator = ((...args: unknown[]) => boolean) | null;
 export type ComponentEmits = string[] | Record<string, EmitValidator>;
+export type ErrorCapturedHook = (error: unknown, info: string) => boolean | void;
 export type ComponentOptions = {
   props?: ComponentProps;
   emits?: ComponentEmits;
@@ -37,6 +38,7 @@ export type ComponentOptions = {
   unmounted?: () => void;
   activated?: () => void;
   deactivated?: () => void;
+  errorCaptured?: ErrorCapturedHook;
 };
 export type Component = ComponentRender | ComponentOptions;
 export type RenderFunction = (state: any) => VNode;
@@ -731,6 +733,7 @@ type ComponentInstance = {
   beforeUnmountHooks?: (() => void)[];
   activatedHooks?: (() => void)[];
   deactivatedHooks?: (() => void)[];
+  errorCapturedHooks?: ErrorCapturedHook[];
   isMounted?: boolean;
   uid?: number;
   scope?: EffectScope;
@@ -830,6 +833,21 @@ export function onActivated(hook: () => void): void {
 
 export function onDeactivated(hook: () => void): void {
   registerLifecycleHook("deactivatedHooks", hook);
+}
+
+export function onErrorCaptured(hook: ErrorCapturedHook): void {
+  const instance = currentComponentInstance();
+  if (!instance) throw new Error("onErrorCaptured() must be called during component setup");
+  instance.errorCapturedHooks!.push(hook);
+}
+
+function handleComponentError(instance: ComponentInstance, error: unknown, info: string): void {
+  let current: ComponentInstance | undefined = instance.parent;
+  while (current) {
+    if (current.errorCapturedHooks?.some(hook => hook(error, info) === true)) return;
+    current = current.parent;
+  }
+  console.error("[thymeleaf-reactive] component error", error);
 }
 
 export function provide(key: PropertyKey, value: unknown): void {
@@ -1016,6 +1034,9 @@ function renderObjectComponent(instance: ComponentInstance): VNode {
     const tree = definition.inheritAttrs === false ? rendered : mergeFallthroughProps(rendered, instance.attrs!);
     attachComponentOwner(tree, instance);
     return tree;
+  } catch (error) {
+    handleComponentError(instance, error, "render");
+    return instance.tree ?? normalizeVNode("");
   } finally {
     componentInstanceStack.pop();
   }
@@ -1920,6 +1941,7 @@ function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode
     instance.unmountedHooks = definition.unmounted ? [definition.unmounted] : [];
     instance.activatedHooks = definition.activated ? [definition.activated] : [];
     instance.deactivatedHooks = definition.deactivated ? [definition.deactivated] : [];
+    instance.errorCapturedHooks = definition.errorCaptured ? [definition.errorCaptured] : [];
     instance.isMounted = false;
     instance.uid = nextComponentUid++;
     instance.scope = effectScope();
@@ -2347,6 +2369,7 @@ function hydrateObjectComponent(vnode: VNode, node: Node | null, container: Node
   instance.unmountedHooks = definition.unmounted ? [definition.unmounted] : [];
   instance.activatedHooks = definition.activated ? [definition.activated] : [];
   instance.deactivatedHooks = definition.deactivated ? [definition.deactivated] : [];
+  instance.errorCapturedHooks = definition.errorCaptured ? [definition.errorCaptured] : [];
   instance.uid = nextComponentUid++;
   instance.scope = effectScope();
   let componentUpdate!: Effect;
@@ -2558,6 +2581,7 @@ export function adoptComponentRoot(root: Element, component: Component, props: R
     instance.unmountedHooks = definition.unmounted ? [definition.unmounted] : [];
     instance.activatedHooks = definition.activated ? [definition.activated] : [];
     instance.deactivatedHooks = definition.deactivated ? [definition.deactivated] : [];
+    instance.errorCapturedHooks = definition.errorCaptured ? [definition.errorCaptured] : [];
     instance.isMounted = false;
     instance.uid = nextComponentUid++;
     instance.tree = tree;

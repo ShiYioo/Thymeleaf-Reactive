@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, readonly, shallowReadonly, isReadonly, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onScopeDispose, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRaw, toRef, toRefs, unref, watch, watchEffect, withMemo } from './dist/index.js';
+import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, readonly, shallowReadonly, isReadonly, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onErrorCaptured, onScopeDispose, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRaw, toRef, toRefs, unref, watch, watchEffect, withMemo } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -1176,6 +1176,38 @@ test('scheduler isolates a failed component job and continues flushing', async (
   assert.equal(root.textContent, '1');
   assert.equal(childUpdates, 1);
   assert.equal(errors.length, 1);
+  app.unmount();
+});
+
+test('onErrorCaptured catches child render errors and preserves the last tree', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const captured = [];
+  const Child = {
+    props: ['broken'],
+    setup(props) {
+      return () => {
+        if (props.broken) throw new Error('child render failed');
+        return h('span', {}, 'stable');
+      };
+    }
+  };
+  const Parent = {
+    props: ['broken'],
+    setup(props) {
+      onErrorCaptured((error, info) => {
+        captured.push([error.message, info]);
+        return true;
+      });
+      return () => h('div', {}, [h(Child, { broken: props.broken })]);
+    }
+  };
+  const app = createApp(state => h(Parent, { broken: state.broken }), { broken: false });
+  const state = app.mount(root);
+  state.broken = true;
+  await nextTick();
+  assert.equal(root.textContent, 'stable');
+  assert.deepEqual(captured, [['child render failed', 'render']]);
   app.unmount();
 });
 
