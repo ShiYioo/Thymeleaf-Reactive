@@ -956,6 +956,15 @@ test('VNode children preserve empty boolean and null positions as comments', asy
   app.unmount();
 });
 
+test('h supports Vue-style children shorthand and null props', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  render(h('section', [h('strong', 'shorthand'), h('em', null, 'explicit')]), root);
+  assert.equal(root.textContent, 'shorthandexplicit');
+  assert.equal(root.querySelector('strong').getAttribute('shorthand'), null);
+  assert.equal(root.querySelector('em').textContent, 'explicit');
+});
+
 test('Teleport patches and moves its child range without recreating keyed fields', async () => {
   const document = installDom();
   const root = document.createElement('main');
