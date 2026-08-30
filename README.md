@@ -81,7 +81,7 @@ For `tr:if` and `tr:show`, a false server value is emitted with the HTML `hidden
 
 Reactive binding expressions support safe member access plus common arithmetic, comparison, logical, and conditional operators. For example, `tr:text="count + 1"` and `tr:if="count > 0 && visible"` render consistently on the server and update in the browser. During hydration, dynamic attribute bindings reconcile both additions and removals, so a stale server attribute cannot survive a later client-state update.
 
-The browser runtime also exports `computed(() => ...)` for cached derived state when authoring render-function components. `shallowRef()` tracks only replacement of its value and `triggerRef()` can explicitly notify dependents after a deliberate deep mutation, which is useful for large state objects. `watch` accepts a getter, ref, reactive object, or an array of sources such as `watch([userId, () => route.name], callback)`. It supports explicit `flush: "sync"`, `flush: "pre"`, and `flush: "post"` scheduling; queued watchers are deduplicated and run around the component render queue.
+The browser runtime also exports `computed(() => ...)` for cached derived state when authoring render-function components. `shallowRef()` tracks only replacement of its value and `triggerRef()` can explicitly notify dependents after a deliberate deep mutation, which is useful for large state objects. `watch` accepts a getter, ref, reactive object, or an array of sources such as `watch([userId, () => route.name], callback)`. It supports `immediate`, `deep`, `once`, and explicit `flush: "sync"`, `flush: "pre"`, and `flush: "post"` scheduling; queued watchers are deduplicated and run around the component render queue.
 
 ## Component API
 

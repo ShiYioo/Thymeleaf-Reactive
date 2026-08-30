@@ -285,6 +285,26 @@ test('post-flush watches batch updates behind nextTick', async () => {
   assert.deepEqual(values, [2]);
 });
 
+test('once watchers stop after the first change and run cleanup', async () => {
+  const state = ref(0);
+  const events = [];
+  watch(state, value => {
+    events.push(`value:${value}`);
+    onWatcherCleanup(() => events.push(`cleanup:${value}`));
+  }, { once: true, flush: 'post' });
+  state.value = 1;
+  state.value = 2;
+  await nextTick();
+  state.value = 3;
+  await nextTick();
+  assert.deepEqual(events, ['value:2', 'cleanup:2']);
+
+  const immediate = [];
+  watch(state, value => immediate.push(value), { immediate: true, once: true });
+  state.value = 4;
+  assert.deepEqual(immediate, [3]);
+});
+
 test('stopped queued watches do not run after their job is invalidated', async () => {
   const state = ref(0);
   let runs = 0;

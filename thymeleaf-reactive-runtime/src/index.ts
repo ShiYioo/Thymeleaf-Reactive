@@ -528,7 +528,7 @@ export function proxyRefs<T extends object>(value: T): T {
 }
 
 export type WatchSource<T> = (() => T) | Ref<T> | T;
-export type WatchOptions = { immediate?: boolean; deep?: boolean; flush?: "sync" | "pre" | "post" };
+export type WatchOptions = { immediate?: boolean; deep?: boolean; once?: boolean; flush?: "sync" | "pre" | "post" };
 type WatchCallback<T> = (value: T, previous: T | undefined, onCleanup: (cleanup: () => void) => void) => void;
 
 /** Registers cleanup for the currently executing watch or watchEffect callback. */
@@ -587,6 +587,7 @@ export function watch<T>(
   let cleanup: (() => void)[] = [];
   let stopped = false;
   const ownerScope = activeEffectScope;
+  let stop!: () => void;
   const runGetter = effect(() => {
     value = getter();
     if (options.deep || forceTrigger) traverse(value);
@@ -612,14 +613,10 @@ export function watch<T>(
       finally { activeWatcherCleanup = previousWatcherCleanup; }
       cleanup = nextCleanup;
       previous = value;
+      if (options.once) stop();
     }
   }
-  if (options.immediate) job();
-  else {
-    runGetter();
-    previous = value;
-  }
-  const stop = (): void => {
+  stop = (): void => {
     if (stopped) return;
     stopped = true;
     cleanup.forEach(run => run());
@@ -628,6 +625,11 @@ export function watch<T>(
     ownerScope?.cleanups.delete(stop);
   };
   ownerScope?.cleanups.add(stop);
+  if (options.immediate) job();
+  else {
+    runGetter();
+    previous = value;
+  }
   return stop;
 }
 
