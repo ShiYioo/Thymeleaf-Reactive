@@ -1218,6 +1218,25 @@ export function resolveDynamicComponent(value: unknown): string | Component | ty
 
 type SfcOnceCache = Map<Node, VNode | VNode[]>;
 type SfcMemoCache = Map<Node, { dependencies: unknown[]; vnode: VNode }>;
+type SfcRefContext = { owner: Record<string, unknown>; arrays: Map<string, unknown[]>; collect: boolean };
+const sfcRefContexts = new WeakMap<object, SfcRefContext>();
+
+function assignSfcTemplateRef(scope: Record<string, unknown>, name: string, value: unknown, previous?: unknown): void {
+  const context = sfcRefContexts.get(scope);
+  if (!context?.collect) {
+    if (name in scope) scope[name] = value;
+    return;
+  }
+  const values = context.arrays.get(name) ?? reactive([]);
+  if (value == null) {
+    const index = values.indexOf(previous);
+    if (index >= 0) values.splice(index, 1);
+  } else if (!values.includes(value)) values.push(value);
+  context.arrays.set(name, values);
+  const ownerValue = context.owner[name];
+  if (isRef(ownerValue)) ownerValue.value = values;
+  else context.owner[name] = values;
+}
 
 function isSfcStaticNode(node: Node, scope: Record<string, unknown>): boolean {
   if (node.nodeType === Node.TEXT_NODE) {
@@ -1349,6 +1368,12 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
         [match[1]]: value,
         ...(match[2] ? { [match[2]]: index } : {})
       }) as Record<string, unknown>;
+      const parentRefContext = sfcRefContexts.get(scope);
+      sfcRefContexts.set(childScope, {
+        owner: parentRefContext?.owner ?? scope,
+        arrays: parentRefContext?.arrays ?? new Map(),
+        collect: true
+      });
       const clone = element.cloneNode(true) as Element;
       clone.removeAttribute("v-for");
       const rendered = renderSfcNode(clone, childScope, slots, onceCache, memoCache);
@@ -1430,8 +1455,10 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
     }
     else if (name === "ref") {
       const refName = value;
+      let current: unknown;
       props.ref = (value: unknown) => {
-        if (refName in scope) scope[refName] = value;
+        assignSfcTemplateRef(scope, refName, value, current);
+        current = value;
       };
     }
     else props[name] = value;
@@ -1616,6 +1643,7 @@ export function compileSfcComponent(source: string): Component {
         local[method.name] = () => runSfcSetupMethod(method.body, local, context);
       });
       const scope = proxyRefs(local);
+      sfcRefContexts.set(scope, { owner: local, arrays: new Map(), collect: false });
       const onceCache: SfcOnceCache = new Map();
       const memoCache: SfcMemoCache = new Map();
       let activeRender = hmrRender;

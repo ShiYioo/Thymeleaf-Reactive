@@ -1895,6 +1895,42 @@ test('SFC string refs bind setup refs without leaking DOM attributes', async () 
   app.unmount();
 });
 
+test('SFC refs inside v-for collect keyed nodes in DOM order', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Component = compileSfcComponent(`
+    <template>
+      <section>
+        <ul><li v-for="item in items" :key="item.id" ref="rows">{{ item.label }}</li></ul>
+        <small>{{ tick }}:{{ rows.length }}</small>
+        <button @click="touch">touch</button>
+      </section>
+    </template>
+    <script setup>
+      const rows = ref([]);
+      const tick = ref(0);
+      function touch() { tick.value++; }
+    </script>
+  `);
+  const app = createApp(state => h(Component, { items: state.items }), {
+    items: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }]
+  });
+  const state = app.mount(root);
+  root.querySelector('button').dispatchEvent(new Event('click'));
+  await nextTick();
+  assert.deepEqual(state.items, [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }]);
+  assert.equal(root.querySelector('small').textContent, '1:2');
+  const firstRows = [...root.querySelectorAll('li')];
+  state.items = [{ id: 'b', label: 'B2' }, { id: 'c', label: 'C' }];
+  await nextTick();
+  const updatedRows = [...root.querySelectorAll('li')];
+  assert.equal(updatedRows[0], firstRows[1]);
+  assert.notEqual(updatedRows[1], firstRows[0]);
+  assert.deepEqual(updatedRows.map(row => row.textContent), ['B2', 'C']);
+  assert.equal(root.querySelector('small').textContent, '1:2');
+  app.unmount();
+});
+
 test('SFC v-once caches static subtrees while dynamic siblings continue updating', async () => {
   const document = installDom();
   const root = document.createElement('main');
