@@ -584,7 +584,7 @@ export function watch<T>(
     : !isRef(source) && typeof source === "object";
   let value!: T | unknown[];
   let previous: T | unknown[] | undefined;
-  let cleanup: (() => void) | undefined;
+  let cleanup: (() => void)[] = [];
   let stopped = false;
   const runGetter = effect(() => {
     value = getter();
@@ -601,12 +601,14 @@ export function watch<T>(
       })()
       : !Object.is(value, previous);
     if (forceTrigger || options.deep || changed) {
-      cleanup?.();
-      let nextCleanup: (() => void) | undefined;
-      const registerCleanup = (next: () => void): void => { nextCleanup = next; };
+      cleanup.forEach(run => run());
+      cleanup = [];
+      const nextCleanup: (() => void)[] = [];
+      const registerCleanup = (next: () => void): void => { nextCleanup.push(next); };
+      const previousWatcherCleanup = activeWatcherCleanup;
       activeWatcherCleanup = registerCleanup;
       try { (callback as WatchCallback<T | unknown[]>)(value, previous, registerCleanup); }
-      finally { activeWatcherCleanup = undefined; }
+      finally { activeWatcherCleanup = previousWatcherCleanup; }
       cleanup = nextCleanup;
       previous = value;
     }
@@ -619,26 +621,28 @@ export function watch<T>(
   return () => {
     if (stopped) return;
     stopped = true;
-    cleanup?.();
+    cleanup.forEach(run => run());
+    cleanup = [];
     runGetter.stop?.();
   };
 }
 
 /** Runs immediately, tracks every reactive value it reads, and cleans up before reruns. */
 export function watchEffect(run: (onCleanup: (cleanup: () => void) => void) => void): () => void {
-  let cleanup: (() => void) | undefined;
+  let cleanup: (() => void)[] = [];
   const runner = effect(() => {
-    cleanup?.();
-    cleanup = undefined;
-    const registerCleanup = (next: () => void): void => { cleanup = next; };
+    cleanup.forEach(current => current());
+    cleanup = [];
+    const registerCleanup = (next: () => void): void => { cleanup.push(next); };
+    const previousWatcherCleanup = activeWatcherCleanup;
     activeWatcherCleanup = registerCleanup;
     try { run(registerCleanup); }
-    finally { activeWatcherCleanup = undefined; }
+    finally { activeWatcherCleanup = previousWatcherCleanup; }
   });
   return () => {
     runner.stop?.();
-    cleanup?.();
-    cleanup = undefined;
+    cleanup.forEach(current => current());
+    cleanup = [];
   };
 }
 

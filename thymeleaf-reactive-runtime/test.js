@@ -357,6 +357,25 @@ test('onWatcherCleanup registers cleanup for watch and watchEffect callbacks', (
   assert.throws(() => onWatcherCleanup(() => {}), /watch\(\) or watchEffect\(\)/);
 });
 
+test('onWatcherCleanup preserves outer scope and runs every registered cleanup', () => {
+  const state = ref(0);
+  const events = [];
+  const scope = effectScope();
+  let stop;
+  scope.run(() => {
+    stop = watch(state, value => {
+      onWatcherCleanup(() => events.push(`first:${value}`));
+      watchEffect(() => onWatcherCleanup(() => events.push(`nested:${value}`)));
+      onWatcherCleanup(() => events.push(`second:${value}`));
+    }, { immediate: true });
+  });
+  state.value = 1;
+  assert.deepEqual(events, ['first:0', 'second:0']);
+  stop();
+  assert.deepEqual(events, ['first:0', 'second:0', 'first:1', 'second:1']);
+  scope.stop();
+});
+
 test('async components render loading, resolved, and error states', async () => {
   const document = installDom();
   const root = document.createElement('main');
