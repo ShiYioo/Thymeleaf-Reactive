@@ -41,6 +41,7 @@ export type AsyncComponentOptions = {
 
 const effectStack: Effect[] = [];
 const proxyCache = new WeakMap<object, object>();
+const proxyToRaw = new WeakMap<object, object>();
 const reactiveProxies = new WeakSet<object>();
 const effectDeps = new WeakMap<Effect, Set<Set<Effect>>>();
 const effectSchedulers = new WeakMap<Effect, () => void>();
@@ -174,9 +175,17 @@ function triggerEffects(subscribers: Iterable<Effect>): void {
   });
 }
 
+function toRawValue<T>(value: T): T {
+  return value && typeof value === "object"
+    ? proxyToRaw.get(value as object) as T ?? value
+    : value;
+}
+
 export function reactive<T extends object>(value: T): T {
   if (reactiveProxies.has(value)) return value;
-  if (proxyCache.has(value)) return proxyCache.get(value) as T;
+  const rawValue = toRawValue(value);
+  if (proxyCache.has(rawValue)) return proxyCache.get(rawValue) as T;
+  value = rawValue;
   const deps = new Map<unknown, Set<Effect>>();
   const subscribers = (key: unknown): Set<Effect> => {
     let value = deps.get(key);
@@ -192,25 +201,27 @@ export function reactive<T extends object>(value: T): T {
     get(target, key, receiver) {
       if (target instanceof Map) {
         if (key === "get") return (entry: unknown) => {
-          trackEffect(subscribers(entry));
-          const result = target.get(entry);
+          const rawEntry = toRawValue(entry);
+          trackEffect(subscribers(rawEntry));
+          const result = target.get(rawEntry);
           return isReactiveValue(result) ? reactive(result) : result;
         };
-        if (key === "has") return (entry: unknown) => { trackEffect(subscribers(entry)); return target.has(entry); };
+        if (key === "has") return (entry: unknown) => { const rawEntry = toRawValue(entry); trackEffect(subscribers(rawEntry)); return target.has(rawEntry); };
         if (key === "set") return (entry: unknown, next: unknown) => {
-          const existed = target.has(entry); const previous = target.get(entry); target.set(entry, next);
-          if (!existed || !Object.is(previous, next)) triggerCollection(entry);
+          const rawEntry = toRawValue(entry); const rawNext = toRawValue(next);
+          const existed = target.has(rawEntry); const previous = target.get(rawEntry); target.set(rawEntry, rawNext);
+          if (!existed || !Object.is(previous, rawNext)) triggerCollection(rawEntry);
           return receiver;
         };
         if (key === "delete") return (entry: unknown) => {
-          const existed = target.delete(entry); if (existed) triggerCollection(entry); return existed;
+          const rawEntry = toRawValue(entry); const existed = target.delete(rawEntry); if (existed) triggerCollection(rawEntry); return existed;
         };
         if (key === "clear") return () => { if (target.size) { target.clear(); triggerCollection(); } };
       }
       if (target instanceof Set) {
-        if (key === "has") return (entry: unknown) => { trackEffect(subscribers(entry)); return target.has(entry); };
-        if (key === "add") return (entry: unknown) => { const existed = target.has(entry); target.add(entry); if (!existed) triggerCollection(entry); return receiver; };
-        if (key === "delete") return (entry: unknown) => { const existed = target.delete(entry); if (existed) triggerCollection(entry); return existed; };
+        if (key === "has") return (entry: unknown) => { const rawEntry = toRawValue(entry); trackEffect(subscribers(rawEntry)); return target.has(rawEntry); };
+        if (key === "add") return (entry: unknown) => { const rawEntry = toRawValue(entry); const existed = target.has(rawEntry); target.add(rawEntry); if (!existed) triggerCollection(rawEntry); return receiver; };
+        if (key === "delete") return (entry: unknown) => { const rawEntry = toRawValue(entry); const existed = target.delete(rawEntry); if (existed) triggerCollection(rawEntry); return existed; };
         if (key === "clear") return () => { if (target.size) { target.clear(); triggerCollection(); } };
       }
       if ((target instanceof Map || target instanceof Set) && (key === "size" || key === Symbol.iterator || key === "entries" || key === "values" || key === "keys" || key === "forEach")) {
@@ -274,6 +285,7 @@ export function reactive<T extends object>(value: T): T {
     }
   });
   proxyCache.set(value, proxy);
+  proxyToRaw.set(proxy, value);
   reactiveProxies.add(proxy);
   return proxy as T;
 }

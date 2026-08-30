@@ -118,6 +118,23 @@ test('reactive collection iterators proxy nested values and forEach collections'
   assert.deepEqual([...set.entries()][0], [setValue, setValue]);
 });
 
+test('reactive collections normalize raw and proxy object identities', () => {
+  const rawKey = { id: 1 };
+  const proxyKey = reactive(rawKey);
+  const map = reactive(new Map([[rawKey, 'value']]));
+  const set = reactive(new Set([rawKey]));
+  assert.equal(map.get(proxyKey), 'value');
+  assert.equal(map.has(proxyKey), true);
+  assert.equal(set.has(proxyKey), true);
+  map.set(proxyKey, 'updated');
+  assert.equal(map.size, 1);
+  assert.equal(map.get(rawKey), 'updated');
+  assert.equal(set.delete(proxyKey), true);
+  assert.equal(set.size, 0);
+  assert.equal(map.delete(proxyKey), true);
+  assert.equal(map.size, 0);
+});
+
 test('watch tracks getters and reactive objects while running registered cleanup', () => {
   const state = reactive({ count: 0, nested: { enabled: false } });
   const changes = [];
