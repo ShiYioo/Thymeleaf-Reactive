@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { adoptComponentRoot, reactive, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onScopeDispose, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRef, toRefs, unref, watch, watchEffect } from './dist/index.js';
+import { adoptComponentRoot, reactive, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onScopeDispose, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRef, toRefs, unref, watch, watchEffect, withMemo } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -1294,6 +1294,23 @@ test('SFC v-memo skips a subtree until its dependency array changes', async () =
   assert.equal(root.querySelector('strong'), strong);
   assert.equal(strong.textContent, '1');
   app.unmount();
+});
+
+test('withMemo reuses VNodes by dependency identity', () => {
+  const cache = [];
+  let renders = 0;
+  const renderMemo = value => withMemo([value], () => {
+    renders++;
+    return h('strong', {}, String(value));
+  }, cache, 0);
+  const first = renderMemo(1);
+  const second = renderMemo(1);
+  const third = renderMemo(2);
+  assert.equal(first, second);
+  assert.notEqual(second, third);
+  assert.equal(renders, 2);
+  assert.equal(isMemoSame(third, [2]), true);
+  assert.equal(isMemoSame(third, [1]), false);
 });
 
 test('SFC hoists static subtrees and invalidates them during template HMR', async () => {

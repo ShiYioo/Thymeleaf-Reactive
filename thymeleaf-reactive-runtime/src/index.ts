@@ -553,6 +553,7 @@ export type VNode = {
   cache?: Map<unknown, VNode>;
   activeKey?: unknown;
   text?: string;
+  memo?: unknown[];
 };
 
 export function h(type: VNode["type"], props: Record<string, unknown> = {}, children: VNodeChild = []): VNode {
@@ -565,6 +566,19 @@ export function h(type: VNode["type"], props: Record<string, unknown> = {}, chil
     key: props.key as string | number | undefined,
     slot: props.slot as string | undefined
   };
+}
+
+export function isMemoSame(vnode: VNode, dependencies: unknown[]): boolean {
+  return Boolean(vnode.memo && vnode.memo.length === dependencies.length && vnode.memo.every((value, index) => Object.is(value, dependencies[index])));
+}
+
+export function withMemo<T extends VNode>(dependencies: unknown[], render: () => T, cache: Array<T | undefined>, index: number): T {
+  const cached = cache[index];
+  if (cached && isMemoSame(cached, dependencies)) return cached;
+  const vnode = render();
+  vnode.memo = dependencies;
+  cache[index] = vnode;
+  return vnode;
 }
 
 function currentComponentInstance(): ComponentInstance | undefined {
@@ -839,7 +853,7 @@ export function resolveDynamicComponent(value: unknown): string | Component | ty
 }
 
 type SfcOnceCache = Map<Node, VNode | VNode[]>;
-type SfcMemoCache = Map<Node, { dependencies: unknown[]; vnode: VNode | VNode[] }>;
+type SfcMemoCache = Map<Node, { dependencies: unknown[]; vnode: VNode }>;
 
 function isSfcStaticNode(node: Node, scope: Record<string, unknown>): boolean {
   if (node.nodeType === Node.TEXT_NODE) {
@@ -951,7 +965,7 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
   const normalizedMemoDependencies = Array.isArray(memoDependencies) ? memoDependencies : [memoDependencies];
   if (memoExpression && memoCache) {
     const previous = memoCache.get(node);
-    if (previous && previous.dependencies.length === normalizedMemoDependencies.length && previous.dependencies.every((value, index) => Object.is(value, normalizedMemoDependencies[index]))) {
+    if (previous && isMemoSame(previous.vnode, normalizedMemoDependencies)) {
       return previous.vnode;
     }
   }
@@ -1078,7 +1092,10 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
   }
   const vnode = h(resolvedType, props, children);
   if (onceCache && (element.hasAttribute("v-once") || isSfcStaticNode(node, scope))) onceCache.set(node, vnode);
-  if (memoExpression && memoCache) memoCache.set(node, { dependencies: normalizedMemoDependencies, vnode });
+  if (memoExpression && memoCache) {
+    vnode.memo = normalizedMemoDependencies;
+    memoCache.set(node, { dependencies: normalizedMemoDependencies, vnode });
+  }
   return vnode;
 }
 
