@@ -1289,6 +1289,30 @@ test('object component default prop factories run once per instance', async () =
   app.unmount();
 });
 
+test('object components skip redundant child renders when parent state is unrelated', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  let childRenders = 0;
+  const Child = {
+    props: ['label'],
+    setup(props) {
+      return () => {
+        childRenders++;
+        return h('span', {}, props.label);
+      };
+    }
+  };
+  const state = reactive({ parentTick: 0 });
+  const app = createApp(() => h('section', {}, [h(Child, { label: 'stable' }), h('i', {}, String(state.parentTick))]));
+  app.mount(root);
+  assert.equal(childRenders, 1);
+  state.parentTick++;
+  await nextTick();
+  assert.equal(childRenders, 1);
+  assert.equal(root.querySelector('span').textContent, 'stable');
+  app.unmount();
+});
+
 test('object components separate declared props, attrs, and emits', async () => {
   const document = installDom();
   const root = document.createElement('main');

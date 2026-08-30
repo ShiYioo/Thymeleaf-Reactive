@@ -934,6 +934,19 @@ function componentSlots(instance: ComponentInstance): ComponentSlots {
   }) as ComponentSlots;
 }
 
+function areVNodeChildrenEqual(previous: VNode[], next: VNode[]): boolean {
+  if (previous.length !== next.length) return false;
+  return previous.every((child, index) => {
+    const candidate = next[index];
+    if (child.type !== candidate.type || child.key !== candidate.key || child.text !== candidate.text || child.slot !== candidate.slot) return false;
+    const previousProps = child.props;
+    const nextProps = candidate.props;
+    const propKeys = new Set([...Object.keys(previousProps), ...Object.keys(nextProps)]);
+    if ([...propKeys].some(key => !Object.is(previousProps[key], nextProps[key]))) return false;
+    return areVNodeChildrenEqual(child.children, candidate.children);
+  });
+}
+
 function invokeComponentHook(vnode: VNode, name: "activatedHooks" | "deactivatedHooks"): void {
   if (isObjectComponent(vnode.type) && vnode.instance) vnode.instance[name]?.forEach(hook => hook());
   else if (vnode.component) invokeComponentHook(vnode.component, name);
@@ -2218,13 +2231,14 @@ export function patch(oldVNode: VNode | undefined, newVNode: VNode | undefined, 
     if (!instance) return mount(newVNode, container, oldVNode.el);
     newVNode.instance = instance;
     instance.vnode = newVNode;
+    const previousChildren = instance.children!;
     instance.children = newVNode.children;
     const inputs = splitComponentProps(newVNode.type, newVNode.props, instance.defaultProps);
     const propsChanged = syncComponentProps(instance.props!, inputs.props);
     const attrsChanged = syncComponentProps(instance.attrs!, inputs.attrs);
     instance.listeners = inputs.listeners;
-    if (propsChanged || attrsChanged) queueJob(instance.update, instance.uid);
-    else instance.update();
+    const childrenChanged = !areVNodeChildrenEqual(previousChildren, newVNode.children);
+    if (propsChanged || attrsChanged || childrenChanged) queueJob(instance.update, instance.uid);
     newVNode.component = instance.tree;
     newVNode.el = instance.tree.el;
     newVNode.anchor = instance.tree.anchor;
