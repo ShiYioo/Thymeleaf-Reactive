@@ -121,7 +121,7 @@ For render-function applications, `hydrateRender(vnode, container)` adopts compa
 
 ## Virtual DOM Suspense
 
-The render-function runtime exports `Suspense` for async component boundaries. Its `fallback` VNode is rendered while a descendant created by `defineAsyncComponent` is pending; once the loader resolves, the fallback is patched into the resolved content in place.
+The render-function runtime exports `Suspense` for async component boundaries. Its `fallback` VNode is rendered while a descendant created by `defineAsyncComponent` is pending; once the loader resolves, the fallback is patched into the resolved content in place. `defineAsyncComponent` accepts Vue-compatible `loadingComponent`, `errorComponent`, `delay`, `timeout`, and `onError(error, retry, fail, attempts)` options, so a transient component or HMR module fetch can be retried without discarding the mounted async boundary.
 
 ```js
 h(Suspense, { fallback: h("p", {}, "Loading") }, [

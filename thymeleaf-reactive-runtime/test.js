@@ -460,6 +460,46 @@ test('async components render loading, resolved, and error states', async () => 
   assert.equal(root.textContent, 'Error:offline');
 });
 
+test('async components can retry or fail through the Vue-compatible error hook', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const attempts = [];
+  const Retryable = defineAsyncComponent({
+    loader: () => {
+      const attempt = attempts.length + 1;
+      attempts.push(attempt);
+      return attempt === 1 ? Promise.reject(new Error('offline')) : Promise.resolve(() => h('strong', {}, 'Recovered'));
+    },
+    onError(error, retry, fail, attempt) {
+      assert.equal(error.message, 'offline');
+      assert.equal(attempt, 1);
+      retry();
+      fail();
+    },
+    errorComponent: () => h('p', {}, 'Failed')
+  });
+  const retryApp = createApp(() => h(Suspense, { fallback: h('p', {}, 'Loading') }, [h(Retryable)]));
+  retryApp.mount(root);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  await nextTick();
+  assert.deepEqual(attempts, [1, 2]);
+  assert.equal(root.textContent, 'Recovered');
+  retryApp.unmount();
+
+  const Failed = defineAsyncComponent({
+    loader: () => Promise.reject(new Error('forbidden')),
+    onError(_error, _retry, fail, attempt) {
+      assert.equal(attempt, 1);
+      fail();
+    },
+    errorComponent: props => h('p', {}, `Error:${props.error.message}`)
+  });
+  createApp(() => h(Failed)).mount(root);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  await nextTick();
+  assert.equal(root.textContent, 'Error:forbidden');
+});
+
 test('proxyRefs unwraps genuine refs without confusing ordinary value properties', () => {
   const count = ref(1);
   const payload = { value: 'preserve me' };

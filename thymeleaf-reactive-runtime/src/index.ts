@@ -48,6 +48,7 @@ export type AsyncComponentOptions = {
   errorComponent?: Component;
   delay?: number;
   timeout?: number;
+  onError?: (error: unknown, retry: () => void, fail: () => void, attempts: number) => void;
 };
 
 const effectStack: Effect[] = [];
@@ -687,33 +688,65 @@ export function defineAsyncComponent(source: AsyncComponentOptions | (() => Prom
     loading: !options.delay,
     pending: true
   });
-  let settled = false;
-  if (options.delay && options.delay > 0) {
-    setTimeout(() => { if (!settled) state.loading = true; }, options.delay);
-  }
-  if (options.timeout && options.timeout > 0) {
-    setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        state.loading = false;
-        state.pending = false;
-        state.error = new Error(`Async component timed out after ${options.timeout}ms`);
+  let attempts = 0;
+  let request = 0;
+  const load = (): void => {
+    const currentRequest = ++request;
+    const currentAttempt = ++attempts;
+    let settled = false;
+    state.component = undefined;
+    state.error = undefined;
+    state.pending = true;
+    state.loading = !options.delay;
+    const isCurrent = () => request === currentRequest;
+    const fail = (error: unknown): void => {
+      if (settled || !isCurrent()) return;
+      settled = true;
+      state.loading = false;
+      state.pending = false;
+      state.error = error;
+    };
+    const recover = (error: unknown): void => {
+      if (settled || !isCurrent()) return;
+      if (!options.onError) {
+        fail(error);
+        return;
       }
-    }, options.timeout);
-  }
-  void options.loader().then(component => {
-    if (settled) return;
-    settled = true;
-    state.component = component;
-    state.loading = false;
-    state.pending = false;
-  }).catch(error => {
-    if (settled) return;
-    settled = true;
-    state.error = error;
-    state.loading = false;
-    state.pending = false;
-  });
+      let handled = false;
+      const retry = () => {
+        if (handled || settled || !isCurrent()) return;
+        handled = true;
+        settled = true;
+        load();
+      };
+      const abort = () => {
+        if (handled || settled || !isCurrent()) return;
+        handled = true;
+        fail(error);
+      };
+      options.onError(error, retry, abort, currentAttempt);
+    };
+    if (options.delay && options.delay > 0) {
+      setTimeout(() => { if (!settled && isCurrent()) state.loading = true; }, options.delay);
+    }
+    if (options.timeout && options.timeout > 0) {
+      setTimeout(() => recover(new Error(`Async component timed out after ${options.timeout}ms`)), options.timeout);
+    }
+    let loader: Promise<Component>;
+    try { loader = options.loader(); }
+    catch (error) {
+      recover(error);
+      return;
+    }
+    void loader.then(component => {
+      if (settled || !isCurrent()) return;
+      settled = true;
+      state.component = component;
+      state.loading = false;
+      state.pending = false;
+    }).catch(recover);
+  };
+  load();
   const component: ComponentRender = (props, children) => {
     if (state.component) return h(state.component, props, children);
     if (state.error && options.errorComponent) return h(options.errorComponent, { ...props, error: state.error }, children);
