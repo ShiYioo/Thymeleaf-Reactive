@@ -2433,6 +2433,24 @@ test('SFC v-model uses the Vue component modelValue update contract', async () =
   assert.equal(root.querySelector('strong').textContent, 'Ready!');
 });
 
+test('SFC v-model supports named component models and modifiers', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Editor = defineComponent('sfc-named-model-test', {
+    props: { title: String, titleModifiers: Object },
+    emits: ['update:title'],
+    setup(props, { emit }) {
+      return () => h('button', { onClick: () => emit('update:title', `${props.title}!`) }, `${props.title}:${props.titleModifiers?.trim}`);
+    }
+  });
+  const render = compileSfcComponent('<template><section><Editor v-model:title.trim="title"></Editor><strong>{{ title }}</strong></section></template><script setup>const title = ref(\'Ready\');</script>');
+  createApp(() => h(render, { components: { Editor } })).mount(root);
+  assert.equal(root.querySelector('button').textContent, 'Ready:true');
+  root.querySelector('button').dispatchEvent(new Event('click'));
+  await nextTick();
+  assert.equal(root.querySelector('strong').textContent, 'Ready!');
+});
+
 test('SFC expressions can call methods on scoped reactive values', () => {
   const document = installDom();
   const root = document.createElement('main');

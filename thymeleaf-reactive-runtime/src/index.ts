@@ -1450,15 +1450,18 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
        const [eventName, ...modifiers] = name.slice(5).split(".");
        addSfcEventHandler(props, resolveSfcDynamicName(eventName, scope), sfcEventHandler(value, scope, modifiers));
      }
-    else if (name === "v-model" || name.startsWith("v-model.")) {
-       const modelModifiers = name.slice("v-model".length).split(".").filter(Boolean);
-       const modelPath = value;
-       const writeModel = (next: unknown) => writePath(scope, modelPath, normalizeSfcModelValue(next, modelModifiers));
-       const componentModel = element.tagName.toLowerCase() === "component" || Boolean(resolveSfcComponent(element.tagName, scope));
-       if (componentModel) {
-         props.modelValue = readPath(scope, modelPath);
-         props["onUpdate:modelValue"] = writeModel;
-         if (modelModifiers.length) props.modelModifiers = Object.fromEntries(modelModifiers.map(modifier => [modifier, true]));
+     else if (name === "v-model" || name.startsWith("v-model.") || name.startsWith("v-model:")) {
+        const modelMatch = name.match(/^v-model(?::([^\.]+))?(?:\.(.+))?$/);
+        if (!modelMatch) return;
+        const modelName = modelMatch[1] || "modelValue";
+        const modelModifiers = modelMatch[2]?.split(".").filter(Boolean) ?? [];
+        const modelPath = value;
+        const writeModel = (next: unknown) => writePath(scope, modelPath, normalizeSfcModelValue(next, modelModifiers));
+        const componentModel = element.tagName.toLowerCase() === "component" || Boolean(resolveSfcComponent(element.tagName, scope));
+        if (componentModel) {
+          props[modelName] = readPath(scope, modelPath);
+          props[`onUpdate:${modelName}`] = writeModel;
+          if (modelModifiers.length) props[`${modelName}Modifiers`] = Object.fromEntries(modelModifiers.map(modifier => [modifier, true]));
        } else {
          const inputType = element.tagName.toLowerCase() === "input"
            ? (element.getAttribute("type") ?? "text").toLowerCase()
