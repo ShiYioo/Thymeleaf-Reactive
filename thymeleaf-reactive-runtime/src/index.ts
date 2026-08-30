@@ -1771,7 +1771,7 @@ function normalizeComponentSource(source: string): string {
 }
 
 function setProp(el: Element, key: string, value: unknown, previous?: unknown): void {
-  if (key === "key") return;
+  if (key === "key" || key === "ref") return;
   if (key === "innerHTML") {
     (el as HTMLElement).innerHTML = value == null ? "" : String(value);
     return;
@@ -1914,7 +1914,25 @@ function detachVNode(vnode: VNode): void {
   if (vnode.el?.parentNode) vnode.el.parentNode.removeChild(vnode.el);
 }
 
+function setVNodeRef(vnode: VNode, value: unknown): void {
+  const vnodeRef = vnode.props.ref;
+  if (typeof vnodeRef === "function") vnodeRef(value);
+  else if (vnodeRef && typeof vnodeRef === "object" && "value" in vnodeRef) {
+    (vnodeRef as { value: unknown }).value = value;
+  }
+}
+
+function vnodeRefValue(vnode: VNode): unknown {
+  return vnode.instance ?? vnode.component ?? vnode.el;
+}
+
 function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode {
+  const mounted = mountVNode(vnode, container, anchor);
+  setVNodeRef(vnode, vnodeRefValue(vnode));
+  return mounted;
+}
+
+function mountVNode(vnode: VNode, container: Node, anchor: Node | null = null): VNode {
   if (vnode.type === Text) {
     vnode.el = document.createTextNode(vnode.text ?? "");
     container.insertBefore(vnode.el, anchor);
@@ -2095,6 +2113,11 @@ function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode
 }
 
 function unmount(vnode: VNode, container: Node): void {
+  setVNodeRef(vnode, null);
+  unmountVNode(vnode, container);
+}
+
+function unmountVNode(vnode: VNode, container: Node): void {
   if (isObjectComponent(vnode.type) && vnode.instance) {
     const instance = vnode.instance;
     invokeComponentHooks(instance, instance.beforeUnmountHooks!, "beforeUnmount");
@@ -2239,14 +2262,14 @@ function patchChildren(
   });
 }
 
-export function patch(oldVNode: VNode | undefined, newVNode: VNode | undefined, container: Node): VNode | null {
+function patchVNode(oldVNode: VNode | undefined, newVNode: VNode | undefined, container: Node): VNode | null {
   if (!oldVNode && newVNode) return mount(newVNode, container);
   if (oldVNode && !newVNode) { unmount(oldVNode, container); return null; }
   if (!oldVNode || !newVNode) return null;
   if (oldVNode === newVNode) return newVNode;
   if (oldVNode.type !== newVNode.type || oldVNode.key !== newVNode.key) {
     const next = mount(newVNode, container, oldVNode.el);
-    unmount(oldVNode, container);
+    unmountVNode(oldVNode, container);
     return next;
   }
   newVNode.el = oldVNode.el;
@@ -2433,6 +2456,14 @@ export function patch(oldVNode: VNode | undefined, newVNode: VNode | undefined, 
   }
   if (element.tagName.toLowerCase() === "select") syncMultipleSelect(element, newVNode.props.value);
   return newVNode;
+}
+
+export function patch(oldVNode: VNode | undefined, newVNode: VNode | undefined, container: Node): VNode | null {
+  const sameVNode = Boolean(oldVNode && newVNode && oldVNode.type === newVNode.type && oldVNode.key === newVNode.key);
+  if (oldVNode && newVNode && (!sameVNode || oldVNode.props.ref !== newVNode.props.ref)) setVNodeRef(oldVNode, null);
+  const patched = patchVNode(oldVNode, newVNode, container);
+  if (patched && sameVNode) setVNodeRef(patched, vnodeRefValue(patched));
+  return patched;
 }
 
 const renderedTrees = new WeakMap<Node, VNode>();

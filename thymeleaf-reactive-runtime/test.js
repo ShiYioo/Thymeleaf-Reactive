@@ -947,6 +947,29 @@ test('virtual DOM patches changed content without replacing keyed input nodes', 
   assert.equal(root.querySelector('input').value, 'kept');
 });
 
+test('VNode refs follow native and component mount, patch, and unmount lifecycles', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const elementRef = ref(null);
+  const componentRef = ref(null);
+  const Child = { setup: () => () => h('span', {}, 'child') };
+  const app = createApp(() => h('section', {}, [
+    h('input', { ref: elementRef }),
+    h(Child, { ref: componentRef })
+  ]));
+  app.mount(root);
+  assert.equal(elementRef.value, root.querySelector('input'));
+  assert.ok(componentRef.value);
+  assert.equal(root.querySelector('input').hasAttribute('ref'), false);
+  const previousElement = elementRef.value;
+  app.replaceRender(() => h('section', {}, [h('textarea', { ref: elementRef })]));
+  assert.equal(elementRef.value, root.querySelector('textarea'));
+  assert.notEqual(elementRef.value, previousElement);
+  assert.equal(componentRef.value, null);
+  app.unmount();
+  assert.equal(elementRef.value, null);
+});
+
 test('render retains the previous tree and supports explicit unmounting', () => {
   const document = installDom();
   const root = document.createElement('main');
