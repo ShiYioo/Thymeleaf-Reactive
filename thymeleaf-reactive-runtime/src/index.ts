@@ -44,6 +44,9 @@ const proxyCache = new WeakMap<object, object>();
 const shallowProxyCache = new WeakMap<object, object>();
 const proxyToRaw = new WeakMap<object, object>();
 const reactiveProxies = new WeakSet<object>();
+const readonlyProxyCache = new WeakMap<object, object>();
+const shallowReadonlyProxyCache = new WeakMap<object, object>();
+const readonlyProxies = new WeakSet<object>();
 const rawSkip = new WeakSet<object>();
 const effectDeps = new WeakMap<Effect, Set<Set<Effect>>>();
 const effectSchedulers = new WeakMap<Effect, () => void>();
@@ -198,6 +201,7 @@ function wrapCollectionValue<T>(value: T, shallow = false): T {
 
 function createReactive<T extends object>(value: T, shallow: boolean): T {
   if (reactiveProxies.has(value)) return value;
+  if (readonlyProxies.has(value)) return value;
   const rawValue = toRawValue(value);
   if (rawSkip.has(rawValue)) return rawValue;
   const cache = shallow ? shallowProxyCache : proxyCache;
@@ -327,6 +331,70 @@ export function shallowReactive<T extends object>(value: T): T {
 
 export function isReactive(value: unknown): value is object {
   return Boolean(value && typeof value === "object" && reactiveProxies.has(value));
+}
+
+function createReadonly<T extends object>(value: T, shallow: boolean): T {
+  if (readonlyProxies.has(value)) return value;
+  const rawValue = toRawValue(value);
+  const cache = shallow ? shallowReadonlyProxyCache : readonlyProxyCache;
+  if (cache.has(rawValue)) return cache.get(rawValue) as T;
+  const proxy = new Proxy(rawValue, {
+    get(target, key, receiver) {
+      if (target instanceof Map && key === "get") return (entry: unknown) => {
+        const result = target.get(toRawValue(entry));
+        return shallow ? result : result && typeof result === "object" ? createReadonly(result, false) : result;
+      };
+      if (target instanceof Map && key === "has") return (entry: unknown) => target.has(toRawValue(entry));
+      if (target instanceof Set && key === "has") return (entry: unknown) => target.has(toRawValue(entry));
+      if (target instanceof Map || target instanceof Set) {
+        if (key === "set" || key === "add" || key === "delete" || key === "clear") return () => receiver;
+        if (key === "size") return target.size;
+        if (key === "forEach") return (callback: (value: unknown, key: unknown, collection: object) => void, thisArg?: unknown) => {
+          target.forEach((entry: unknown, keyValue: unknown) => {
+            const value = shallow ? entry : entry && typeof entry === "object" ? createReadonly(entry, false) : entry;
+            const key = shallow ? keyValue : keyValue && typeof keyValue === "object" ? createReadonly(keyValue, false) : keyValue;
+            callback.call(thisArg, value, key, receiver);
+          });
+        };
+        if (key === Symbol.iterator || key === "entries" || key === "values" || key === "keys") return function* () {
+          if (target instanceof Map) {
+            for (const [entry, entryValue] of target.entries()) {
+              const wrappedEntry = shallow ? entry : entry && typeof entry === "object" ? createReadonly(entry, false) : entry;
+              const wrappedValue = shallow ? entryValue : entryValue && typeof entryValue === "object" ? createReadonly(entryValue, false) : entryValue;
+              if (key === "keys") yield wrappedEntry;
+              else if (key === "values") yield wrappedValue;
+              else yield [wrappedEntry, wrappedValue];
+            }
+          } else {
+            for (const entry of target.values()) {
+              const wrappedEntry = shallow ? entry : entry && typeof entry === "object" ? createReadonly(entry, false) : entry;
+              yield key === "entries" ? [wrappedEntry, wrappedEntry] : wrappedEntry;
+            }
+          }
+        };
+      }
+      const result = Reflect.get(target, key, receiver);
+      return shallow ? result : result && typeof result === "object" ? createReadonly(result, false) : result;
+    },
+    set() { return true; },
+    deleteProperty() { return true; }
+  });
+  cache.set(rawValue, proxy);
+  proxyToRaw.set(proxy, rawValue);
+  readonlyProxies.add(proxy);
+  return proxy as T;
+}
+
+export function readonly<T extends object>(value: T): T {
+  return createReadonly(value, false);
+}
+
+export function shallowReadonly<T extends object>(value: T): T {
+  return createReadonly(value, true);
+}
+
+export function isReadonly(value: unknown): value is object {
+  return Boolean(value && typeof value === "object" && readonlyProxies.has(value));
 }
 
 export function effect(fn: Effect, options: EffectOptions = {}): Effect {

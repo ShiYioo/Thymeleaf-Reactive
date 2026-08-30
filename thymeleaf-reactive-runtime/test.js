@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onScopeDispose, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRaw, toRef, toRefs, unref, watch, watchEffect, withMemo } from './dist/index.js';
+import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, readonly, shallowReadonly, isReadonly, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onScopeDispose, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRaw, toRef, toRefs, unref, watch, watchEffect, withMemo } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -110,6 +110,24 @@ test('markRaw excludes third-party objects from reactive conversion', () => {
   assert.equal(isReactive(instance), false);
   instance.nested.value = 2;
   assert.equal(instance.nested.value, 2);
+});
+
+test('readonly proxies preserve values while rejecting writes', () => {
+  const raw = { count: 1, nested: { value: 2 } };
+  const state = readonly(raw);
+  const shallow = shallowReadonly(raw);
+  state.count = 3;
+  state.nested.value = 4;
+  assert.equal(state.count, 1);
+  assert.equal(state.nested.value, 2);
+  assert.equal(isReadonly(state), true);
+  assert.equal(isReadonly(state.nested), true);
+  assert.equal(isReadonly(shallow), true);
+  assert.equal(isReadonly(shallow.nested), false);
+  const values = readonly(new Map([['item', { label: 'A' }]]));
+  values.set('item', { label: 'B' });
+  assert.equal(values.get('item').label, 'A');
+  assert.equal(isReadonly(values.get('item')), true);
 });
 
 test('reactive Map and Set track keyed and iteration dependencies', () => {
