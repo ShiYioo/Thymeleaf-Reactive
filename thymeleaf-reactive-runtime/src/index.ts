@@ -524,6 +524,7 @@ export function proxyRefs<T extends object>(value: T): T {
 
 export type WatchSource<T> = (() => T) | Ref<T> | T;
 export type WatchOptions = { immediate?: boolean; deep?: boolean; flush?: "sync" | "pre" | "post" };
+type WatchCallback<T> = (value: T, previous: T | undefined, onCleanup: (cleanup: () => void) => void) => void;
 
 function traverse(value: unknown, seen = new Set<object>()): unknown {
   if (!value || typeof value !== "object" || seen.has(value)) return value;
@@ -545,30 +546,53 @@ function traverse(value: unknown, seen = new Set<object>()): unknown {
 /** Watches a ref, getter, or reactive object and returns a cleanup function. */
 export function watch<T>(
   source: WatchSource<T>,
-  callback: (value: T, previous: T | undefined, onCleanup: (cleanup: () => void) => void) => void,
+  callback: WatchCallback<T>,
+  options?: WatchOptions
+): () => void;
+export function watch(
+  source: WatchSource<unknown>[],
+  callback: WatchCallback<unknown[]>,
+  options?: WatchOptions
+): () => void;
+export function watch<T>(
+  source: WatchSource<T> | WatchSource<unknown>[],
+  callback: WatchCallback<T> | WatchCallback<unknown[]>,
   options: WatchOptions = {}
 ): () => void {
-  const getter = typeof source === "function"
-    ? source as () => T
-    : isRef(source)
-      ? () => source.value as T
-      : () => source;
-  const forceTrigger = !isRef(source) && typeof source === "object";
-  let value!: T;
-  let previous: T | undefined;
+  const sources = Array.isArray(source) ? source : undefined;
+  const sourceGetter = (entry: WatchSource<unknown>): unknown => typeof entry === "function"
+    ? (entry as () => unknown)()
+    : isRef(entry)
+      ? entry.value
+      : entry;
+  const getter = sources
+    ? () => sources.map(entry => sourceGetter(entry))
+    : () => sourceGetter(source as WatchSource<unknown>) as T;
+  const forceTrigger = sources
+    ? sources.some(entry => !isRef(entry) && typeof entry === "object")
+    : !isRef(source) && typeof source === "object";
+  let value!: T | unknown[];
+  let previous: T | unknown[] | undefined;
   let cleanup: (() => void) | undefined;
   let stopped = false;
   const runGetter = effect(() => {
     value = getter();
-    if (options.deep || (!isRef(source) && typeof source === "object")) traverse(value);
+    if (options.deep || forceTrigger) traverse(value);
   }, { lazy: true, scheduler: options.flush === "pre" ? () => queuePreJob(job) : options.flush === "post" ? () => queuePostJob(job) : job });
   function job(): void {
     if (stopped) return;
     runGetter();
-    if (forceTrigger || options.deep || !Object.is(value, previous)) {
+    const changed = sources
+      ? (() => {
+        const nextValues = value as unknown[];
+        const previousValues = Array.isArray(previous) ? previous : undefined;
+        return !previousValues || nextValues.length !== previousValues.length || nextValues.some((entry, index) => !Object.is(entry, previousValues[index]));
+      })()
+      : !Object.is(value, previous);
+    if (forceTrigger || options.deep || changed) {
       cleanup?.();
       let nextCleanup: (() => void) | undefined;
-      callback(value, previous, next => { nextCleanup = next; });
+      (callback as WatchCallback<T | unknown[]>)(value, previous, next => { nextCleanup = next; });
       cleanup = nextCleanup;
       previous = value;
     }

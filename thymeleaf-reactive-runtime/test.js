@@ -237,6 +237,24 @@ test('watch tracks getters and reactive objects while running registered cleanup
   stopNested();
 });
 
+test('watch observes multiple sources with indexed values and cleanup', async () => {
+  const first = ref(0);
+  const second = reactive({ value: 'A' });
+  const changes = [];
+  const stop = watch([first, () => second.value], (value, previous, onCleanup) => {
+    changes.push([value, previous]);
+    onCleanup(() => changes.push(['cleanup']));
+  }, { flush: 'post' });
+  first.value = 1;
+  second.value = 'B';
+  await nextTick();
+  assert.deepEqual(changes, [[[1, 'B'], [0, 'A']]]);
+  stop();
+  first.value = 2;
+  await nextTick();
+  assert.deepEqual(changes, [[[1, 'B'], [0, 'A']], ['cleanup']]);
+});
+
 test('deep watchers traverse Map, Set, and enumerable symbol properties', () => {
   const symbol = Symbol('enabled');
   const map = reactive(new Map([['item', { value: 0 }]]));
