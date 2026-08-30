@@ -115,6 +115,8 @@ Changing `to` moves the existing teleported DOM range to the new target instead 
 
 The VDOM creates `<svg>` roots and descendants in the SVG namespace and patches SVG attributes without replacing existing nodes.
 
+Render-function event props follow Vue's option suffixes: `onClickCapture`, `onClickPassive`, and `onClickOnce` map to native `addEventListener` options and can coexist with other handlers for the same event.
+
 For render-function applications, `hydrateRender(vnode, container)` adopts compatible server-rendered native DOM nodes and object/function component roots, patches their props and descendants, adopts multi-root `Fragment` ranges, removes stale server nodes, and locally replaces structural mismatches. Hydrated component instances retain their scope, lifecycle hooks, and local state for later scheduled updates, including named component HMR replacements. The adopted tree remains registered for later `render()` patches.
 
 ## Virtual DOM Suspense

@@ -1804,6 +1804,23 @@ test('virtual DOM removes stale event listeners and style properties', async () 
   app.unmount();
 });
 
+test('virtual DOM parses Vue event option suffixes', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const calls = [];
+  const app = createApp(() => h('div', { onClickCapture: () => calls.push('capture') }, [
+    h('button', { onClick: () => calls.push('bubble') }, 'bubble'),
+    h('button', { onClickOnce: () => calls.push('once') }, 'once')
+  ]));
+  app.mount(root);
+  const [bubble, once] = root.querySelectorAll('button');
+  bubble.dispatchEvent(new Event('click', { bubbles: true }));
+  once.dispatchEvent(new Event('click', { bubbles: true }));
+  once.dispatchEvent(new Event('click', { bubbles: true }));
+  assert.deepEqual(calls, ['capture', 'bubble', 'capture', 'once', 'capture']);
+  app.unmount();
+});
+
 test('runtime-dom normalizes class and style values and invokes event arrays', () => {
   const document = installDom();
   const root = document.createElement('main');

@@ -1920,6 +1920,38 @@ function normalizeComponentSource(source: string): string {
   }
 }
 
+function parseEventProp(key: string): { event: string; options?: AddEventListenerOptions; listenerKey: string } {
+  let name = key.slice(2);
+  const options: AddEventListenerOptions = {};
+  let hasOption = true;
+  while (hasOption) {
+    hasOption = false;
+    if (name.endsWith("Once")) {
+      options.once = true;
+      name = name.slice(0, -4);
+      hasOption = true;
+    } else if (name.endsWith("Passive")) {
+      options.passive = true;
+      name = name.slice(0, -7);
+      hasOption = true;
+    } else if (name.endsWith("Capture")) {
+      options.capture = true;
+      name = name.slice(0, -7);
+      hasOption = true;
+    }
+  }
+  const event = name.charAt(0).toLowerCase() + name.slice(1);
+  const normalizedOptions = Object.keys(options).length ? options : undefined;
+  const listenerKey = `${event}:${Boolean(options.capture)}:${Boolean(options.passive)}:${Boolean(options.once)}`;
+  return { event, options: normalizedOptions, listenerKey };
+}
+
+function eventOptionsEqual(left?: AddEventListenerOptions, right?: AddEventListenerOptions): boolean {
+  return ["capture", "passive", "once"].every(option =>
+    left?.[option as keyof AddEventListenerOptions] === right?.[option as keyof AddEventListenerOptions]
+  );
+}
+
 function setProp(el: Element, key: string, value: unknown, previous?: unknown): void {
   if (key === "key" || key === "ref") return;
   if (key === "innerHTML") {
@@ -1927,19 +1959,18 @@ function setProp(el: Element, key: string, value: unknown, previous?: unknown): 
     return;
   }
   if (key.startsWith("on")) {
-    const event = key.slice(2).toLowerCase();
+    const { event, options: propOptions, listenerKey } = parseEventProp(key);
     const listeners = eventListeners.get(el) ?? new Map<string, EventInvoker>();
-    const registered = listeners.get(event);
+    const registered = listeners.get(listenerKey);
     const handlers = (Array.isArray(value) ? value : [value]).filter(handler => typeof handler === "function") as EventListener[];
-    const options = (handlers[0] as SfcEventHandler | undefined)?.eventOptions;
-    const sameOptions = !registered || ["capture", "passive", "once"].every(option =>
-      registered.options?.[option as keyof AddEventListenerOptions] === options?.[option as keyof AddEventListenerOptions]
-    );
+    const handlerOptions = (handlers[0] as SfcEventHandler | undefined)?.eventOptions;
+    const options = propOptions || handlerOptions ? { ...propOptions, ...handlerOptions } : undefined;
+    const sameOptions = !registered || eventOptionsEqual(registered.options, options);
     if (registered && handlers.length && sameOptions) {
       registered.value = handlers;
     } else if (registered) {
       el.removeEventListener(event, registered, registered.options);
-      listeners.delete(event);
+      listeners.delete(listenerKey);
     } else if (handlers.length) {
       const listener = ((eventValue: Event) => {
         listener.value.forEach(handler => handler.call(el, eventValue));
@@ -1947,7 +1978,7 @@ function setProp(el: Element, key: string, value: unknown, previous?: unknown): 
       listener.value = handlers;
       listener.options = options;
       el.addEventListener(event, listener, options);
-      listeners.set(event, listener);
+      listeners.set(listenerKey, listener);
     } else {
       listeners.delete(event);
     }
