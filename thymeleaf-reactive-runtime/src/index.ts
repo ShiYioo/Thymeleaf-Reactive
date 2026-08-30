@@ -309,6 +309,10 @@ function createReactive<T extends object>(value: T, shallow: boolean): T {
       }
       return ok;
     },
+    has(target, key) {
+      trackEffect(subscribers(key));
+      return Reflect.has(target, key);
+    },
     deleteProperty(target, key) {
       const existed = key in target;
       const ok = Reflect.deleteProperty(target, key);

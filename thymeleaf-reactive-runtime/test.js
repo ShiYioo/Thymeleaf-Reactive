@@ -610,6 +610,15 @@ test('reactive effects clean stale branches and track array length changes', () 
   assert.equal(length, 1);
 });
 
+test('reactive objects track property existence checks', () => {
+  const state = reactive({});
+  const values = [];
+  effect(() => { values.push('ready' in state); });
+  state.ready = true;
+  delete state.ready;
+  assert.deepEqual(values, [false, true, false]);
+});
+
 test('effects can be stopped and apps can be unmounted cleanly', () => {
   const document = installDom();
   const state = reactive({ count: 0 });
