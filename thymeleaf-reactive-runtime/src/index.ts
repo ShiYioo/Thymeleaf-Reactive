@@ -729,14 +729,17 @@ export type VNode = {
   memo?: unknown[];
 };
 
-export function h(type: VNode["type"], props?: Record<string, unknown> | VNodeChild | null, children?: VNodeChild): VNode {
+export function h(type: VNode["type"], props?: Record<string, unknown> | VNodeChild | null, children?: VNodeChild, ...additionalChildren: VNodeChild[]): VNode {
   const isVNodeChild = props !== null && typeof props === "object" && !Array.isArray(props)
     && "type" in props && "props" in props && "children" in props;
   const hasProps = props !== null && typeof props === "object" && !Array.isArray(props) && !isVNodeChild;
   const resolvedProps = hasProps ? props as Record<string, unknown> : {};
+  const hasAdditionalChildren = additionalChildren.length > 0;
   const resolvedChildren = children === undefined
-    ? hasProps ? [] : props === undefined ? [] : props as VNodeChild
-    : children;
+    ? hasAdditionalChildren
+      ? [undefined, ...additionalChildren]
+      : hasProps || props === null || props === undefined ? [] : props as VNodeChild
+    : hasAdditionalChildren ? [children, ...additionalChildren] : children;
   const values = Array.isArray(resolvedChildren) ? resolvedChildren : [resolvedChildren];
   return {
     type,

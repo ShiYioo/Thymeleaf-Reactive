@@ -965,6 +965,15 @@ test('h supports Vue-style children shorthand and null props', () => {
   assert.equal(root.querySelector('em').textContent, 'explicit');
 });
 
+test('h accepts multiple children arguments without confusing props', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  render(h('section', null, h('strong', {}, 'one'), h('em', {}, 'two'), 'three'), root);
+  const section = root.querySelector('section');
+  assert.equal(section.textContent, 'onetwothree');
+  assert.equal(section.childNodes.length, 3);
+});
+
 test('Teleport patches and moves its child range without recreating keyed fields', async () => {
   const document = installDom();
   const root = document.createElement('main');
