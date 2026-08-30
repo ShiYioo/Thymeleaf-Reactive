@@ -734,7 +734,7 @@ export function h(type: VNode["type"], props: Record<string, unknown> = {}, chil
   return {
     type,
     props,
-    children: values.filter(value => value !== null && value !== undefined && value !== false).map(normalizeVNode),
+    children: values.map(normalizeVNode),
     el: null,
     key: props.key as string | number | undefined,
     slot: props.slot as string | undefined
@@ -1503,6 +1503,9 @@ export function compileSfcComponent(source: string): Component {
 function normalizeVNode(value: VNodeChild): VNode {
   if (typeof value === "object" && value !== null && "type" in value) return value as VNode;
   if (Array.isArray(value)) return h(Fragment, {}, value);
+  if (value === null || value === undefined || typeof value === "boolean") {
+    return { type: Comment, props: {}, children: [], el: null, text: "" };
+  }
   return { type: Text, props: {}, children: [], el: null, text: String(value ?? "") };
 }
 

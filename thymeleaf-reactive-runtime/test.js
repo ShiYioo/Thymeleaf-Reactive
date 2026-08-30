@@ -942,6 +942,20 @@ test('VNode children normalize nested arrays as Fragment ranges', () => {
   assert.equal(root.querySelectorAll('div > em').length, 1);
 });
 
+test('VNode children preserve empty boolean and null positions as comments', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const app = createApp(current => h('div', {}, [current.visible && h('strong', {}, 'Shown'), true, null, 'Stable']), { visible: false });
+  const state = app.mount(root);
+  assert.equal(root.textContent, 'Stable');
+  assert.equal(root.querySelector('div').childNodes.length, 4);
+  state.visible = true;
+  await nextTick();
+  assert.equal(root.querySelector('strong').textContent, 'Shown');
+  assert.equal(root.querySelector('div').childNodes.length, 4);
+  app.unmount();
+});
+
 test('Teleport patches and moves its child range without recreating keyed fields', async () => {
   const document = installDom();
   const root = document.createElement('main');
