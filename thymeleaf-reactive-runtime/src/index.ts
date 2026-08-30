@@ -898,7 +898,6 @@ function splitComponentProps(definition: ComponentOptions, source: Record<string
   Object.entries(source).forEach(([key, value]) => {
     if (key === "key" || key === "slot") return;
     if (key in options) {
-      delete defaultProps[key];
       props[key] = resolvePropValue(key, value, true, options[key]);
     }
     else if (isEmitListener(key, definition.emits ?? [])) listeners[key] = value;

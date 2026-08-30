@@ -1279,13 +1279,17 @@ test('object component default prop factories run once per instance', async () =
     }
   };
   const state = reactive({ tick: 0 });
-  const app = createApp(() => h('section', {}, [h(Child), h('i', {}, String(state.tick))]));
+  const app = createApp(() => h('section', {}, [h(Child, state.tick === 1 ? { options: { ready: false } } : {}), h('i', {}, String(state.tick))]));
   app.mount(root);
   assert.equal(factoryRuns, 1);
   state.tick++;
   await nextTick();
   assert.equal(factoryRuns, 1);
-  assert.equal(root.querySelector('span').textContent, 'true:2');
+  assert.equal(root.querySelector('span').textContent, 'false:2');
+  state.tick++;
+  await nextTick();
+  assert.equal(factoryRuns, 1);
+  assert.equal(root.querySelector('span').textContent, 'true:3');
   app.unmount();
 });
 
