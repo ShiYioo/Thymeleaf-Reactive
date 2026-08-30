@@ -2533,7 +2533,7 @@ function hydrateFragment(vnode: VNode, node: Node | null, container: Node): VNod
   return vnode;
 }
 
-function hydrateVNode(vnode: VNode, node: Node | null, container: Node): VNode {
+function hydrateVNodeImpl(vnode: VNode, node: Node | null, container: Node): VNode {
   if (isObjectComponent(vnode.type)) return hydrateObjectComponent(vnode, node, container);
   if (typeof vnode.type === "function") {
     const component = vnode.type(vnode.props, vnode.children);
@@ -2595,6 +2595,12 @@ function hydrateVNode(vnode: VNode, node: Node | null, container: Node): VNode {
   vnode.children.forEach((child, index) => hydrateVNode(child, serverChildren[index] ?? null, element));
   serverChildren.slice(vnode.children.length).forEach(child => child.parentNode === element && element.removeChild(child));
   return vnode;
+}
+
+function hydrateVNode(vnode: VNode, node: Node | null, container: Node): VNode {
+  const hydrated = hydrateVNodeImpl(vnode, node, container);
+  setVNodeRef(vnode, vnodeRefValue(vnode));
+  return hydrated;
 }
 
 /** Hydrates a native VNode tree against existing server-rendered DOM. */

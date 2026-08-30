@@ -1050,6 +1050,21 @@ test('hydrateRender creates component instances on top of SSR roots', async () =
   assert.equal(button.textContent, 'Count:1');
 });
 
+test('hydrateRender binds VNode refs and clears them on unmount', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  root.innerHTML = '<section><span>child</span></section>';
+  const elementRef = ref(null);
+  const componentRef = ref(null);
+  const Child = { setup: () => () => h('span', {}, 'child') };
+  hydrateRender(h('section', { ref: elementRef }, [h(Child, { ref: componentRef })]), root);
+  assert.equal(elementRef.value, root.querySelector('section'));
+  assert.ok(componentRef.value);
+  render(null, root);
+  assert.equal(elementRef.value, null);
+  assert.equal(componentRef.value, null);
+});
+
 test('hydrateRender registers named component instances for state-preserving HMR', async () => {
   const document = installDom();
   const root = document.createElement('main');
