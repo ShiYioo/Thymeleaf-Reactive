@@ -209,6 +209,25 @@ test('watch tracks getters and reactive objects while running registered cleanup
   stopNested();
 });
 
+test('deep watchers traverse Map, Set, and enumerable symbol properties', () => {
+  const symbol = Symbol('enabled');
+  const map = reactive(new Map([['item', { value: 0 }]]));
+  const set = reactive(new Set([{ value: 0 }]));
+  const object = reactive({ [symbol]: { value: 0 } });
+  let mapRuns = 0;
+  let setRuns = 0;
+  let symbolRuns = 0;
+  watch(map, () => { mapRuns++; }, { deep: true });
+  watch(set, () => { setRuns++; }, { deep: true });
+  watch(object, () => { symbolRuns++; }, { deep: true });
+  map.get('item').value++;
+  [...set][0].value++;
+  object[symbol].value++;
+  assert.equal(mapRuns, 1);
+  assert.equal(setRuns, 1);
+  assert.equal(symbolRuns, 1);
+});
+
 test('post-flush watches batch updates behind nextTick', async () => {
   const state = reactive({ count: 0 });
   const values = [];

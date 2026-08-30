@@ -517,7 +517,17 @@ export type WatchOptions = { immediate?: boolean; deep?: boolean; flush?: "sync"
 function traverse(value: unknown, seen = new Set<object>()): unknown {
   if (!value || typeof value !== "object" || seen.has(value)) return value;
   seen.add(value);
-  Object.values(value).forEach(entry => traverse(entry, seen));
+  if (value instanceof Map || value instanceof Set) {
+    value.forEach((entry: unknown, key: unknown) => {
+      traverse(key, seen);
+      traverse(entry, seen);
+    });
+    return value;
+  }
+  Reflect.ownKeys(value).forEach(key => {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (descriptor?.enumerable) traverse((value as Record<PropertyKey, unknown>)[key], seen);
+  });
   return value;
 }
 
