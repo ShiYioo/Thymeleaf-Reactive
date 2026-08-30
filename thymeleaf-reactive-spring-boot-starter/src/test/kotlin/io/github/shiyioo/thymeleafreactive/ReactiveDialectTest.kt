@@ -130,6 +130,20 @@ class ReactiveDialectTest {
     }
 
     @Test
+    fun `renders numeric each ranges on the server`() {
+        val engine = TemplateEngine().apply {
+            setTemplateResolver(StringTemplateResolver())
+            addDialect(ReactiveDialect(ObjectMapper()))
+        }
+        val output = engine.process(
+            """<ol><li tr:each="n in 3" tr:text="n">stale</li></ol>""",
+            Context()
+        )
+        assertThat(output).contains(">1<", ">2<", ">3<", "data-tr-each=\"n in 3\"")
+        assertThat(output).doesNotContain("stale", "tr:each")
+    }
+
+    @Test
     fun `uses reactive truthiness for if and show`() {
         val engine = TemplateEngine().apply {
             setTemplateResolver(StringTemplateResolver())

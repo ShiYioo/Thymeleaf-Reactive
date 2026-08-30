@@ -46,7 +46,12 @@ private class ReactiveEachProcessor : AbstractAttributeTagProcessor(
         val match = syntax.matchEntire(attributeValue) ?: return
         val variable = match.groupValues[1]
         val status = match.groupValues[2].ifBlank { null }
-        val collection = evaluate(context, match.groupValues[3]) ?: emptyList<Any>()
+        val evaluated = evaluate(context, match.groupValues[3])
+        val collection = when (evaluated) {
+            is Number -> List(evaluated.toDouble().toInt().coerceAtLeast(0)) { it + 1 }
+            null -> emptyList<Any>()
+            else -> evaluated
+        }
         structureHandler.setAttribute("data-tr-each", attributeValue)
         structureHandler.removeAttribute(attributeName)
         structureHandler.iterateElement(variable, status, collection)
