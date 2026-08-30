@@ -252,6 +252,27 @@ test('effect scopes stop nested effects and run registered cleanup', () => {
   assert.equal(disposed, true);
 });
 
+test('effect scopes stop owned children while detached scopes survive', () => {
+  const state = reactive({ count: 0 });
+  const parent = effectScope();
+  const child = parent.run(() => effectScope());
+  const detached = parent.run(() => effectScope(true));
+  let childRuns = 0;
+  let detachedRuns = 0;
+  child.run(() => effect(() => { childRuns++; state.count; }));
+  detached.run(() => effect(() => { detachedRuns++; state.count; }));
+  state.count++;
+  assert.equal(childRuns, 2);
+  assert.equal(detachedRuns, 2);
+  parent.stop();
+  state.count++;
+  assert.equal(childRuns, 2);
+  assert.equal(detachedRuns, 3);
+  detached.stop();
+  state.count++;
+  assert.equal(detachedRuns, 3);
+});
+
 test('HMR polling replays every missed version in order', async () => {
   installDom();
   globalThis.EventSource = undefined;

@@ -58,7 +58,13 @@ export class EffectScope {
   active = true;
   readonly effects = new Set<Effect>();
   readonly cleanups = new Set<() => void>();
-  readonly parent = activeEffectScope;
+  readonly scopes = new Set<EffectScope>();
+  readonly parent?: EffectScope;
+
+  constructor(detached = false) {
+    this.parent = detached ? undefined : activeEffectScope;
+    this.parent?.scopes.add(this);
+  }
 
   run<T>(fn: () => T): T | undefined {
     if (!this.active) return undefined;
@@ -71,15 +77,18 @@ export class EffectScope {
   stop(): void {
     if (!this.active) return;
     this.active = false;
+    this.scopes.forEach(scope => scope.stop());
+    this.scopes.clear();
     this.effects.forEach(run => run.stop?.());
     this.effects.clear();
     this.cleanups.forEach(cleanup => cleanup());
     this.cleanups.clear();
+    this.parent?.scopes.delete(this);
   }
 }
 
-export function effectScope(): EffectScope {
-  return new EffectScope();
+export function effectScope(detached = false): EffectScope {
+  return new EffectScope(detached);
 }
 
 export function onScopeDispose(cleanup: () => void): void {
