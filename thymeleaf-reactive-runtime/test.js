@@ -1230,6 +1230,65 @@ test('object component props and attrs are readonly but remain reactive', async 
   app.unmount();
 });
 
+test('object components normalize Vue-style prop options and preserve attrs boundaries', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Child = {
+    props: {
+      label: { type: String, required: true },
+      enabled: Boolean,
+      count: { type: Number, default: 3 },
+      meta: { type: Object, default: () => ({ source: 'default' }) }
+    },
+    setup(props, { attrs }) {
+      return () => h('output', { title: attrs.title }, `${props.label}:${props.enabled}:${props.count}:${props.meta.source}`);
+    }
+  };
+  const app = createApp(() => h(Child, { label: 'Ready', enabled: '', title: 'fallthrough' }), {});
+  app.mount(root);
+
+  const output = root.querySelector('output');
+  assert.equal(output.textContent, 'Ready:true:3:default');
+  assert.equal(output.title, 'fallthrough');
+  assert.equal(output.getAttribute('enabled'), null);
+  assert.equal(output.getAttribute('count'), null);
+
+  app.replaceRender(() => h(Child, { label: 'Updated', enabled: false, count: 7, meta: { source: 'passed' }, title: 'next' }));
+  await nextTick();
+  assert.equal(output.textContent, 'Updated:false:7:passed');
+  assert.equal(output.title, 'next');
+  app.replaceRender(() => h(Child, { label: 'Default again', title: 'final' }));
+  await nextTick();
+  assert.equal(output.textContent, 'Default again:false:3:default');
+  assert.equal(output.title, 'final');
+  app.unmount();
+});
+
+test('object component default prop factories run once per instance', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  let factoryRuns = 0;
+  let renders = 0;
+  const Child = {
+    props: { options: { type: Object, default: () => { factoryRuns++; return { ready: true }; } } },
+    setup(props) {
+      return () => {
+        renders++;
+        return h('span', {}, `${props.options.ready}:${renders}`);
+      };
+    }
+  };
+  const state = reactive({ tick: 0 });
+  const app = createApp(() => h('section', {}, [h(Child), h('i', {}, String(state.tick))]));
+  app.mount(root);
+  assert.equal(factoryRuns, 1);
+  state.tick++;
+  await nextTick();
+  assert.equal(factoryRuns, 1);
+  assert.equal(root.querySelector('span').textContent, 'true:2');
+  app.unmount();
+});
+
 test('object components separate declared props, attrs, and emits', async () => {
   const document = installDom();
   const root = document.createElement('main');

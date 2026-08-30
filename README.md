@@ -97,6 +97,8 @@ const Counter = {
 };
 ```
 
+Object component `props` also accepts Vue-style option objects with `type`, `required`, and `default`. Default factories run once per component instance, Boolean props default to `false`, and undeclared values remain available through `attrs`.
+
 ## Virtual DOM Teleport
 
 The render-function runtime exports `Teleport` for rendering a VNode subtree into a different DOM target while retaining keyed updates and component state. Its `to` property accepts a CSS selector or an `Element`.

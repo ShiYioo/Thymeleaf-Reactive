@@ -12,8 +12,15 @@ export type ComponentContext = {
   attrs: Record<string, unknown>;
   emit: (event: string, ...args: unknown[]) => void;
 };
+export type PropConstructor = StringConstructor | NumberConstructor | BooleanConstructor | ObjectConstructor | ArrayConstructor | FunctionConstructor | DateConstructor | RegExpConstructor;
+export type PropOptions = {
+  type?: PropConstructor | PropConstructor[];
+  required?: boolean;
+  default?: unknown | (() => unknown);
+};
+export type ComponentProps = string[] | Record<string, PropOptions | PropConstructor | PropConstructor[]>;
 export type ComponentOptions = {
-  props?: string[];
+  props?: ComponentProps;
   emits?: string[];
   inheritAttrs?: boolean;
   setup?: (props: Record<string, unknown>, context: ComponentContext) => ComponentRender | void;
@@ -683,6 +690,7 @@ type ComponentInstance = {
   update: Effect;
   dispose: () => void;
   props?: Record<string, unknown>;
+  defaultProps?: Record<string, unknown>;
   attrs?: Record<string, unknown>;
   listeners?: Record<string, unknown>;
   children?: VNode[];
@@ -841,15 +849,66 @@ function isEmitListener(key: string, emits: string[]): boolean {
   return emits.some(name => name === event || name.replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase()) === event);
 }
 
-function splitComponentProps(definition: ComponentOptions, source: Record<string, unknown>): { props: Record<string, unknown>; attrs: Record<string, unknown>; listeners: Record<string, unknown> } {
-  if (!definition.props) return { props: source, attrs: {}, listeners: source };
+function normalizePropOptions(definition: ComponentOptions): Record<string, PropOptions> | undefined {
+  if (!definition.props) return undefined;
+  if (Array.isArray(definition.props)) return Object.fromEntries(definition.props.map(name => [name, {}]));
+  return Object.fromEntries(Object.entries(definition.props).map(([name, option]) => [name,
+    typeof option === "function" || Array.isArray(option) ? { type: option } : option ?? {}
+  ]));
+}
+
+function propTypeName(type: PropConstructor): string {
+  return type.name || "custom type";
+}
+
+function isValidPropType(value: unknown, type: PropConstructor): boolean {
+  if (type === String) return typeof value === "string";
+  if (type === Number) return typeof value === "number";
+  if (type === Boolean) return typeof value === "boolean";
+  if (type === Object) return value !== null && typeof value === "object" && !Array.isArray(value);
+  if (type === Array) return Array.isArray(value);
+  if (type === Function) return typeof value === "function";
+  if (type === Date) return value instanceof Date;
+  if (type === RegExp) return value instanceof RegExp;
+  return value instanceof (type as unknown as new (...args: any[]) => object);
+}
+
+function resolvePropValue(name: string, value: unknown, present: boolean, option: PropOptions): unknown {
+  let resolved = value;
+  const types = option.type ? (Array.isArray(option.type) ? option.type : [option.type]) : [];
+  if (!present) {
+    if ("default" in option) resolved = typeof option.default === "function" ? (option.default as () => unknown)() : option.default;
+    else if (types.includes(Boolean)) resolved = false;
+  } else if (types.includes(Boolean) && (value === "" || value === name)) resolved = true;
+  if (present && types.length && resolved != null && !types.some(type => isValidPropType(resolved, type))) {
+    console.warn(`[thymeleaf-reactive] invalid prop \"${name}\": expected ${types.map(propTypeName).join(" or ")}`);
+  }
+  if (!present && option.required && !("default" in option) && !types.includes(Boolean)) {
+    console.warn(`[thymeleaf-reactive] missing required prop \"${name}\"`);
+  }
+  return resolved;
+}
+
+function splitComponentProps(definition: ComponentOptions, source: Record<string, unknown>, defaultProps: Record<string, unknown> = {}): { props: Record<string, unknown>; attrs: Record<string, unknown>; listeners: Record<string, unknown> } {
+  const options = normalizePropOptions(definition);
+  if (!options) return { props: source, attrs: {}, listeners: source };
   const props: Record<string, unknown> = {};
   const attrs: Record<string, unknown> = {};
   const listeners: Record<string, unknown> = {};
   Object.entries(source).forEach(([key, value]) => {
-    if (definition.props!.includes(key)) props[key] = value;
+    if (key === "key" || key === "slot") return;
+    if (key in options) {
+      delete defaultProps[key];
+      props[key] = resolvePropValue(key, value, true, options[key]);
+    }
     else if (isEmitListener(key, definition.emits ?? [])) listeners[key] = value;
     else attrs[key] = value;
+  });
+  Object.entries(options).forEach(([key, option]) => {
+    if (!(key in props)) {
+      if (!(key in defaultProps)) defaultProps[key] = resolvePropValue(key, undefined, false, option);
+      props[key] = defaultProps[key];
+    }
   });
   return { props, attrs, listeners };
 }
@@ -1786,7 +1845,8 @@ function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode
     const instance = {} as ComponentInstance;
     instance.vnode = vnode;
     instance.parent = vnode.owner;
-    const inputs = splitComponentProps(definition, vnode.props);
+    instance.defaultProps = {};
+    const inputs = splitComponentProps(definition, vnode.props, instance.defaultProps);
     instance.props = reactive({ ...inputs.props });
     instance.attrs = reactive({ ...inputs.attrs });
     instance.listeners = inputs.listeners;
@@ -2159,7 +2219,7 @@ export function patch(oldVNode: VNode | undefined, newVNode: VNode | undefined, 
     newVNode.instance = instance;
     instance.vnode = newVNode;
     instance.children = newVNode.children;
-    const inputs = splitComponentProps(newVNode.type, newVNode.props);
+    const inputs = splitComponentProps(newVNode.type, newVNode.props, instance.defaultProps);
     const propsChanged = syncComponentProps(instance.props!, inputs.props);
     const attrsChanged = syncComponentProps(instance.attrs!, inputs.attrs);
     instance.listeners = inputs.listeners;
@@ -2206,10 +2266,11 @@ const renderedTrees = new WeakMap<Node, VNode>();
 
 function hydrateObjectComponent(vnode: VNode, node: Node | null, container: Node): VNode {
   const definition = vnode.type as ComponentOptions;
-  const inputs = splitComponentProps(definition, vnode.props);
   const instance = {} as ComponentInstance;
   instance.vnode = vnode;
   instance.parent = vnode.owner;
+  instance.defaultProps = {};
+  const inputs = splitComponentProps(definition, vnode.props, instance.defaultProps);
   instance.props = reactive({ ...inputs.props });
   instance.attrs = reactive({ ...inputs.attrs });
   instance.listeners = inputs.listeners;
@@ -2419,7 +2480,8 @@ export function adoptComponentRoot(root: Element, component: Component, props: R
     const vnode: VNode = { type: definition, props, children: tree.children, el: tree.el, anchor: tree.anchor, component: tree };
     const instance = {} as ComponentInstance;
     instance.vnode = vnode;
-    const inputs = splitComponentProps(definition, props);
+    instance.defaultProps = {};
+    const inputs = splitComponentProps(definition, props, instance.defaultProps);
     instance.props = reactive({ ...inputs.props });
     instance.attrs = reactive({ ...inputs.attrs });
     instance.listeners = inputs.listeners;
