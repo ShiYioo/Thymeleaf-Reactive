@@ -3321,6 +3321,14 @@ function evaluateAst(node: any, scope: any): any {
       const property = node.computed ? evaluateAst(node.property, scope) : node.property.name;
       return readMember(target, property);
     }
+    case "CallExpression": {
+      const callee = evaluateAst(node.callee, scope);
+      if (typeof callee !== "function") return undefined;
+      const thisArg = node.callee?.type === "MemberExpression"
+        ? evaluateAst(node.callee.object, scope)
+        : scope;
+      return callee.apply(thisArg, node.arguments.map((argument: any) => evaluateAst(argument, scope)));
+    }
     case "ArrayExpression": return node.elements.map((element: any) => evaluateAst(element, scope));
     case "ObjectExpression": {
       const result: Record<string, any> = {};

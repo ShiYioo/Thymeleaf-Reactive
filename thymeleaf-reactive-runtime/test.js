@@ -2414,6 +2414,21 @@ test('SFC supports object spread bindings for native and child component props',
   assert.equal(root.querySelector('strong').textContent, 'Done:false');
 });
 
+test('SFC expressions can call methods on scoped reactive values', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const render = compileSfcComponent(`
+    <template><section><strong>{{ labels.join('-') }}</strong><em>{{ labels.includes(active) ? 'yes' : 'no' }}</em></section></template>
+    <script setup>
+      const labels = ref(['A', 'B']);
+      const active = ref('B');
+    </script>
+  `);
+  createApp(() => h(render)).mount(root);
+  assert.equal(root.querySelector('strong').textContent, 'A-B');
+  assert.equal(root.querySelector('em').textContent, 'yes');
+});
+
 test('SFC script setup compiles safe reactive declarations and event methods', async () => {
   const document = installDom();
   const root = document.createElement('main');
