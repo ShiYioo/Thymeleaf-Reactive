@@ -130,6 +130,23 @@ test('readonly proxies preserve values while rejecting writes', () => {
   assert.equal(isReadonly(values.get('item')), true);
 });
 
+test('readonly Map and Set mutators return Vue-compatible values without mutating', () => {
+  const rawMap = new Map([['item', 1]]);
+  const rawSet = new Set(['item']);
+  const map = readonly(rawMap);
+  const set = readonly(rawSet);
+
+  assert.equal(map.set('next', 2), map);
+  assert.equal(map.delete('item'), false);
+  assert.equal(map.clear(), undefined);
+  assert.deepEqual([...rawMap], [['item', 1]]);
+
+  assert.equal(set.add('next'), set);
+  assert.equal(set.delete('item'), false);
+  assert.equal(set.clear(), undefined);
+  assert.deepEqual([...rawSet], ['item']);
+});
+
 test('readonly views retain dependency tracking from reactive sources', () => {
   const source = reactive({ count: 0 });
   const view = readonly(source);

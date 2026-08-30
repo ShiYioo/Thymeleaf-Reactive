@@ -348,7 +348,10 @@ function createReadonly<T extends object>(value: T, shallow: boolean): T {
       if (target instanceof Map && key === "has") return (entry: unknown) => target.has(toRawValue(entry));
       if (target instanceof Set && key === "has") return (entry: unknown) => target.has(toRawValue(entry));
       if (target instanceof Map || target instanceof Set) {
-        if (key === "set" || key === "add" || key === "delete" || key === "clear") return () => receiver;
+        if (target instanceof Map && key === "set") return () => receiver;
+        if (target instanceof Set && key === "add") return () => receiver;
+        if (key === "delete") return () => false;
+        if (key === "clear") return () => undefined;
         if (key === "size") return target.size;
         if (key === "forEach") return (callback: (value: unknown, key: unknown, collection: object) => void, thisArg?: unknown) => {
           target.forEach((entry: unknown, keyValue: unknown) => {
