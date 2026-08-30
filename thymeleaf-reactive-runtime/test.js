@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { adoptComponentRoot, reactive, shallowReactive, isReactive, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onScopeDispose, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRaw, toRef, toRefs, unref, watch, watchEffect, withMemo } from './dist/index.js';
+import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onScopeDispose, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRaw, toRef, toRefs, unref, watch, watchEffect, withMemo } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -101,6 +101,15 @@ test('reactive arrays find raw values through proxy identity methods', () => {
   assert.equal(values.includes(proxy), true);
   assert.equal(values.indexOf(proxy), 0);
   assert.equal(values.lastIndexOf(proxy), 0);
+});
+
+test('markRaw excludes third-party objects from reactive conversion', () => {
+  const instance = markRaw({ nested: { value: 1 } });
+  assert.equal(reactive(instance), instance);
+  assert.equal(shallowReactive(instance), instance);
+  assert.equal(isReactive(instance), false);
+  instance.nested.value = 2;
+  assert.equal(instance.nested.value, 2);
 });
 
 test('reactive Map and Set track keyed and iteration dependencies', () => {

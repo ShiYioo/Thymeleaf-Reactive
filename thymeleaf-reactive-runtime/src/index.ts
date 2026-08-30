@@ -44,6 +44,7 @@ const proxyCache = new WeakMap<object, object>();
 const shallowProxyCache = new WeakMap<object, object>();
 const proxyToRaw = new WeakMap<object, object>();
 const reactiveProxies = new WeakSet<object>();
+const rawSkip = new WeakSet<object>();
 const effectDeps = new WeakMap<Effect, Set<Set<Effect>>>();
 const effectSchedulers = new WeakMap<Effect, () => void>();
 const ITERATE_KEY = Symbol("iterate");
@@ -186,6 +187,11 @@ export function toRaw<T>(value: T): T {
   return toRawValue(value);
 }
 
+export function markRaw<T extends object>(value: T): T {
+  rawSkip.add(value);
+  return value;
+}
+
 function wrapCollectionValue<T>(value: T, shallow = false): T {
   return !shallow && isReactiveValue(value) ? reactive(value) : value;
 }
@@ -193,6 +199,7 @@ function wrapCollectionValue<T>(value: T, shallow = false): T {
 function createReactive<T extends object>(value: T, shallow: boolean): T {
   if (reactiveProxies.has(value)) return value;
   const rawValue = toRawValue(value);
+  if (rawSkip.has(rawValue)) return rawValue;
   const cache = shallow ? shallowProxyCache : proxyCache;
   if (cache.has(rawValue)) return cache.get(rawValue) as T;
   value = rawValue;
