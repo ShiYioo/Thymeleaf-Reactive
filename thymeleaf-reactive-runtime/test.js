@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { adoptComponentRoot, reactive, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onScopeDispose, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRef, toRefs, unref, watch, watchEffect, withMemo } from './dist/index.js';
+import { adoptComponentRoot, reactive, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onScopeDispose, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRaw, toRef, toRefs, unref, watch, watchEffect, withMemo } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -121,7 +121,8 @@ test('reactive collection iterators proxy nested values and forEach collections'
 test('reactive collections normalize raw and proxy object identities', () => {
   const rawKey = { id: 1 };
   const proxyKey = reactive(rawKey);
-  const map = reactive(new Map([[rawKey, 'value']]));
+  const rawMap = new Map([[rawKey, 'value']]);
+  const map = reactive(rawMap);
   const set = reactive(new Set([rawKey]));
   assert.equal(map.get(proxyKey), 'value');
   assert.equal(map.has(proxyKey), true);
@@ -133,6 +134,8 @@ test('reactive collections normalize raw and proxy object identities', () => {
   assert.equal(set.size, 0);
   assert.equal(map.delete(proxyKey), true);
   assert.equal(map.size, 0);
+  assert.equal(toRaw(proxyKey), rawKey);
+  assert.equal(toRaw(map), rawMap);
 });
 
 test('watch tracks getters and reactive objects while running registered cleanup', () => {

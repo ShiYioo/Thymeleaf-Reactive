@@ -181,6 +181,14 @@ function toRawValue<T>(value: T): T {
     : value;
 }
 
+export function toRaw<T>(value: T): T {
+  return toRawValue(value);
+}
+
+function wrapCollectionValue<T>(value: T): T {
+  return isReactiveValue(value) ? reactive(value) : value;
+}
+
 export function reactive<T extends object>(value: T): T {
   if (reactiveProxies.has(value)) return value;
   const rawValue = toRawValue(value);
@@ -228,21 +236,22 @@ export function reactive<T extends object>(value: T): T {
         trackEffect(subscribers(ITERATE_KEY));
         if (key === "size") return target.size;
         if (key === "forEach") return (callback: (value: unknown, key: unknown, collection: object) => void, thisArg?: unknown) => {
-          target.forEach((value: unknown, entry: unknown) => callback.call(thisArg, isReactiveValue(value) ? reactive(value) : value, entry, receiver));
+          target.forEach((value: unknown, entry: unknown) => callback.call(thisArg, wrapCollectionValue(value), wrapCollectionValue(entry), receiver));
         };
         if (key === "keys") return function* () {
-          for (const entry of (target as Map<unknown, unknown>).keys()) yield entry;
+          for (const entry of (target as Map<unknown, unknown>).keys()) yield wrapCollectionValue(entry);
         };
         return function* () {
           if (target instanceof Map) {
             for (const [entry, value] of target.entries()) {
+              const wrappedEntry = wrapCollectionValue(entry);
               yield key === "entries" || key === Symbol.iterator
-                ? [entry, isReactiveValue(value) ? reactive(value) : value]
-                : isReactiveValue(value) ? reactive(value) : value;
+                ? [wrappedEntry, wrapCollectionValue(value)]
+                : wrapCollectionValue(value);
             }
           } else {
             for (const value of target.values()) {
-              const resolved = isReactiveValue(value) ? reactive(value) : value;
+              const resolved = wrapCollectionValue(value);
               yield key === "entries" ? [resolved, resolved] : resolved;
             }
           }
