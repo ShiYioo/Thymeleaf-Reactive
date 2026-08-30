@@ -898,6 +898,11 @@ function handleComponentError(instance: ComponentInstance, error: unknown, info:
   console.error("[thymeleaf-reactive] component error", error);
 }
 
+function handleFunctionComponentError(owner: ComponentInstance | undefined, error: unknown, info: string): void {
+  if (owner) handleComponentError({ parent: owner } as ComponentInstance, error, info);
+  else console.error("[thymeleaf-reactive] component error", error);
+}
+
 function invokeComponentHooks(instance: ComponentInstance, hooks: (() => void)[], info: string): void {
   hooks.forEach(hook => {
     try { hook(); }
@@ -2024,7 +2029,12 @@ function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode
     return vnode;
   }
   if (typeof vnode.type === "function") {
-    vnode.component = vnode.type(vnode.props, vnode.children);
+    try {
+      vnode.component = vnode.type(vnode.props, vnode.children);
+    } catch (error) {
+      handleFunctionComponentError(vnode.owner, error, "render");
+      vnode.component = normalizeVNode("");
+    }
     mount(vnode.component, container, anchor);
     vnode.el = vnode.component.el;
     vnode.anchor = vnode.component.anchor;
@@ -2374,14 +2384,31 @@ export function patch(oldVNode: VNode | undefined, newVNode: VNode | undefined, 
     const instance = oldVNode.instance;
     if (instance) {
       instance.vnode = newVNode;
-      const nextComponent = newVNode.type(newVNode.props, newVNode.children);
+      let nextComponent: VNode;
+      try { nextComponent = newVNode.type(newVNode.props, newVNode.children); }
+      catch (error) {
+        handleFunctionComponentError(newVNode.owner, error, "render");
+        newVNode.component = instance.tree;
+        newVNode.instance = instance;
+        newVNode.el = instance.tree.el;
+        newVNode.anchor = instance.tree.anchor;
+        return newVNode;
+      }
       instance.tree = patch(instance.tree, nextComponent, container) ?? instance.tree;
       newVNode.component = instance.tree;
       newVNode.instance = instance;
       newVNode.el = instance.tree.el;
       newVNode.anchor = instance.tree.anchor;
     } else {
-      const nextComponent = newVNode.type(newVNode.props, newVNode.children);
+      let nextComponent: VNode;
+      try { nextComponent = newVNode.type(newVNode.props, newVNode.children); }
+      catch (error) {
+        handleFunctionComponentError(newVNode.owner, error, "render");
+        newVNode.component = oldVNode.component ?? normalizeVNode("");
+        newVNode.el = newVNode.component.el;
+        newVNode.anchor = newVNode.component.anchor;
+        return newVNode;
+      }
       newVNode.component = patch(oldVNode.component, nextComponent, container) ?? nextComponent;
       newVNode.el = newVNode.component.el;
       newVNode.anchor = newVNode.component.anchor;

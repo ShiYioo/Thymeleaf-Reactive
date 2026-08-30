@@ -1349,6 +1349,33 @@ test('onErrorCaptured handles lifecycle errors without aborting sibling updates'
   app.unmount();
 });
 
+test('onErrorCaptured catches function component render errors and preserves its tree', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const captured = [];
+  const Child = props => {
+    if (props.failed) throw new Error('function render failed');
+    return h('span', {}, `stable:${props.value}`);
+  };
+  const Parent = {
+    setup(props) {
+      onErrorCaptured((error, info) => { captured.push([error.message, info]); return true; });
+      return () => h('section', {}, [h(Child, { failed: props.failed, value: props.value }), h('i', {}, 'sibling')]);
+    }
+  };
+  const app = createApp(state => h(Parent, { failed: state.failed, value: state.value }), { failed: false, value: 0 });
+  const state = app.mount(root);
+  const child = root.querySelector('span');
+  state.failed = true;
+  state.value = 1;
+  await nextTick();
+  assert.equal(root.querySelector('span'), child);
+  assert.equal(child.textContent, 'stable:0');
+  assert.equal(root.querySelector('i').textContent, 'sibling');
+  assert.deepEqual(captured, [['function render failed', 'render']]);
+  app.unmount();
+});
+
 test('object components retain setup state and support lifecycle, emits, and injection', async () => {
   const document = installDom();
   const root = document.createElement('main');
