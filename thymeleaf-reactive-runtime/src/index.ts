@@ -927,6 +927,10 @@ function isObjectComponent(type: VNode["type"]): type is ComponentOptions {
   return typeof type === "object" && type !== null;
 }
 
+function camelize(value: string): string {
+  return value.replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase());
+}
+
 function emitListenerName(event: string): string {
   return `on${event.replace(/(?:^|-)([a-z])/g, (_match, letter) => letter.toUpperCase())}`;
 }
@@ -967,9 +971,9 @@ function syncComponentProps(target: Record<string, unknown>, next: Record<string
 
 function isEmitListener(key: string, emits: ComponentEmits): boolean {
   if (!key.startsWith("on") || key.length < 3) return false;
-  const event = key.slice(2).replace(/^./, letter => letter.toLowerCase());
+  const event = camelize(key.slice(2).replace(/^./, letter => letter.toLowerCase()));
   const names = Array.isArray(emits) ? emits : Object.keys(emits);
-  return names.some(name => name === event || name.replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase()) === event);
+  return names.some(name => name === event || camelize(name) === event);
 }
 
 function normalizePropOptions(definition: ComponentOptions): Record<string, PropOptions> | undefined {
@@ -1020,10 +1024,14 @@ function splitComponentProps(definition: ComponentOptions, source: Record<string
   const listeners: Record<string, unknown> = {};
   Object.entries(source).forEach(([key, value]) => {
     if (key === "key" || key === "slot") return;
-    if (key in options) {
-      props[key] = resolvePropValue(key, value, true, options[key]);
+    const propName = Object.keys(options).find(name => name === key || name === camelize(key));
+    if (propName) {
+      props[propName] = resolvePropValue(propName, value, true, options[propName]);
     }
-    else if (isEmitListener(key, definition.emits ?? [])) listeners[key] = value;
+    else if (isEmitListener(key, definition.emits ?? [])) {
+      const event = camelize(key.slice(2).replace(/^./, letter => letter.toLowerCase()));
+      listeners[emitListenerName(event)] = value;
+    }
     else attrs[key] = value;
   });
   Object.entries(options).forEach(([key, option]) => {
@@ -1117,7 +1125,8 @@ function interpolateSfcText(value: string, scope: Record<string, unknown>): stri
 }
 
 function sfcEventPropName(name: string): string {
-  return `on${name.slice(0, 1).toUpperCase()}${name.slice(1)}`;
+  const normalized = camelize(name);
+  return `on${normalized.slice(0, 1).toUpperCase()}${normalized.slice(1)}`;
 }
 
 function resolveSfcDynamicName(name: string, scope: Record<string, unknown>): string {

@@ -2406,6 +2406,24 @@ test('SFC self-closing components preserve following sibling boundaries', () => 
   assert.equal(root.querySelector('i').nextElementSibling, root.querySelector('strong'));
 });
 
+test('SFC component props and emits normalize kebab-case names', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Child = {
+    props: { userName: String },
+    emits: ['save-event'],
+    setup(props, { emit }) {
+      return () => h('button', { onClick: () => emit('save-event', props.userName) }, props.userName);
+    }
+  };
+  const render = compileSfcComponent('<template><section><Child user-name="Ada" @save-event="handle"></Child><strong>{{ result }}</strong></section></template>');
+  createApp(state => h(render, { components: { Child }, result: state.result, handle: value => { state.result = value; } }), { result: 'none' }).mount(root);
+  assert.equal(root.querySelector('button').textContent, 'Ada');
+  root.querySelector('button').dispatchEvent(new Event('click'));
+  await nextTick();
+  assert.equal(root.querySelector('strong').textContent, 'Ada');
+});
+
 test('SFC supports object spread bindings for native and child component props', async () => {
   const document = installDom();
   const root = document.createElement('main');
