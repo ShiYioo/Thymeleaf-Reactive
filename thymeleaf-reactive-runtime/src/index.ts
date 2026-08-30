@@ -1150,6 +1150,20 @@ function sfcEventHandler(expression: string, scope: Record<string, unknown>, mod
       method.call(scope, argument);
     });
   }
+  const update = normalized.match(/^(.+?)\s*(\+\+|--)$/);
+  if (update) {
+    return wrap(() => {
+      const current = readPath(scope, update[1]);
+      writePath(scope, update[1], Number(current ?? 0) + (update[2] === "++" ? 1 : -1));
+    });
+  }
+  if (normalized.includes("(") || normalized.includes("++") || normalized.includes("--") || normalized.includes("=")) {
+    return wrap(event => {
+      const eventScope = Object.create(scope) as Record<string, unknown>;
+      eventScope.$event = event;
+      readPath(eventScope, normalized);
+    });
+  }
   const method = readPath(scope, normalized);
   if (typeof method !== "function") return undefined;
   return wrap((event: Event) => method.call(scope, event));
@@ -3311,6 +3325,20 @@ function readMember(source: any, property: any): any {
   return source[property];
 }
 
+function writeAstTarget(node: any, scope: any, value: any): boolean {
+  if (node?.type === "Identifier") {
+    if (unsafePropertyNames.has(node.name)) return false;
+    scope[node.name] = value;
+    return true;
+  }
+  if (node?.type !== "MemberExpression") return false;
+  const target = evaluateAst(node.object, scope);
+  const property = node.computed ? evaluateAst(node.property, scope) : node.property.name;
+  if (target == null || unsafePropertyNames.has(String(property))) return false;
+  target[property] = value;
+  return true;
+}
+
 function evaluateAst(node: any, scope: any): any {
   switch (node?.type) {
     case "Literal": return node.value;
@@ -3328,6 +3356,32 @@ function evaluateAst(node: any, scope: any): any {
         ? evaluateAst(node.callee.object, scope)
         : scope;
       return callee.apply(thisArg, node.arguments.map((argument: any) => evaluateAst(argument, scope)));
+    }
+    case "UpdateExpression": {
+      const current = evaluateAst(node.argument, scope);
+      const next = node.operator === "++" ? Number(current) + 1 : Number(current) - 1;
+      writeAstTarget(node.argument, scope, next);
+      return node.prefix ? next : current;
+    }
+    case "AssignmentExpression": {
+      const right = evaluateAst(node.right, scope);
+      if (node.operator === "=") {
+        writeAstTarget(node.left, scope, right);
+        return right;
+      }
+      const left = evaluateAst(node.left, scope);
+      const values: Record<string, (left: any, right: any) => any> = {
+        "+=": (current, next) => current + next,
+        "-=": (current, next) => current - next,
+        "*=": (current, next) => current * next,
+        "/=": (current, next) => current / next,
+        "%=": (current, next) => current % next
+      };
+      const operation = values[node.operator];
+      if (!operation) return undefined;
+      const next = operation(left, right);
+      writeAstTarget(node.left, scope, next);
+      return next;
     }
     case "ArrayExpression": return node.elements.map((element: any) => evaluateAst(element, scope));
     case "ObjectExpression": {
