@@ -1780,9 +1780,9 @@ function setProp(el: Element, key: string, value: unknown, previous?: unknown): 
     const event = key.slice(2).toLowerCase();
     const listeners = eventListeners.get(el) ?? new Map<string, EventInvoker>();
     const registered = listeners.get(event);
-    const handlers = Array.isArray(value) ? value.filter(handler => typeof handler === "function") : [value];
+    const handlers = (Array.isArray(value) ? value : [value]).filter(handler => typeof handler === "function") as EventListener[];
     if (registered && handlers.length) {
-      registered.value = handlers as EventListener[];
+      registered.value = handlers;
     } else if (registered) {
       el.removeEventListener(event, registered);
       listeners.delete(event);
@@ -1790,7 +1790,7 @@ function setProp(el: Element, key: string, value: unknown, previous?: unknown): 
       const listener = ((eventValue: Event) => {
         listener.value.forEach(handler => handler.call(el, eventValue));
       }) as EventInvoker;
-      listener.value = handlers as EventListener[];
+      listener.value = handlers;
       el.addEventListener(event, listener);
       listeners.set(event, listener);
     } else {

@@ -1824,6 +1824,8 @@ test('runtime-dom normalizes class and style values and invokes event arrays', (
   assert.equal(button.className, 'next');
   assert.equal(button.style.color, 'blue');
   assert.equal(button.style.display, '');
+  button.dispatchEvent(new Event('click'));
+  assert.equal(calls, 3);
 });
 
 test('SFC render tracks state, loops keyed children, and writes v-model values back', async () => {
