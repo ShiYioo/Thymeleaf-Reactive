@@ -2190,6 +2190,25 @@ test('SFC event modifiers prevent, stop, filter, and limit handlers', () => {
   assert.equal(state.onceRuns, 1);
 });
 
+test('SFC capture event modifier runs before bubbling handlers', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const render = compileSfcComponent(`
+    <template>
+      <div @click.capture="capture">
+        <button @click="bubble">Click</button>
+      </div>
+    </template>
+  `);
+  const state = createApp(render, {
+    calls: [],
+    capture() { this.calls.push('capture'); },
+    bubble() { this.calls.push('bubble'); }
+  }).mount(root);
+  root.querySelector('button').dispatchEvent(new Event('click', { bubbles: true }));
+  assert.deepEqual(state.calls, ['capture', 'bubble']);
+});
+
 test('SFC event modifiers filter keyboard, mouse, and system inputs', () => {
   const document = installDom();
   const root = document.createElement('main');
@@ -2865,6 +2884,19 @@ test('hydrates tr:on handlers with event arguments and modifiers', () => {
   assert.deepEqual(received, [state, 'click']);
   assert.equal(calls, 1);
   assert.equal(event.defaultPrevented, true);
+});
+
+test('hydrates tr:on capture handlers before bubbling handlers', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  root.innerHTML = '<div data-tr-on="click.capture:capture"><button data-tr-on="click:bubble">Click</button></div>';
+  const calls = [];
+  hydrate(root, {}, {
+    capture() { calls.push('capture'); },
+    bubble() { calls.push('bubble'); }
+  });
+  root.querySelector('button').dispatchEvent(new Event('click', { bubbles: true }));
+  assert.deepEqual(calls, ['capture', 'bubble']);
 });
 
 test('hydrates tr:html content reactively', async () => {

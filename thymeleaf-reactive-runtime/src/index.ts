@@ -1141,8 +1141,10 @@ function resolveSfcDynamicName(name: string, scope: Record<string, unknown>): st
   return String(value ?? "");
 }
 
-function sfcEventHandler(expression: string, scope: Record<string, unknown>, modifiers: string[] = []): ((event: Event) => void) | undefined {
-  const wrap = (handler: (event: Event) => void): ((event: Event) => void) =>
+type SfcEventHandler = ((event: Event) => void) & { eventOptions?: AddEventListenerOptions };
+
+function sfcEventHandler(expression: string, scope: Record<string, unknown>, modifiers: string[] = []): SfcEventHandler | undefined {
+  const wrap = (handler: (event: Event) => void): SfcEventHandler =>
     modifiers.length ? sfcEventModifierHandler(handler, modifiers) : handler;
   const normalized = expression.trim();
   const call = normalized.match(/^([A-Za-z_$][\w$]*)\s*\(\s*\)$/);
@@ -1195,9 +1197,9 @@ function sfcEventHandler(expression: string, scope: Record<string, unknown>, mod
   return wrap((event: Event) => method.call(scope, event));
 }
 
-function sfcEventModifierHandler(handler: (event: Event) => void, modifiers: string[]): (event: Event) => void {
+function sfcEventModifierHandler(handler: (event: Event) => void, modifiers: string[]): SfcEventHandler {
   let called = false;
-  return event => {
+  const wrapped = ((event: Event) => {
     if (modifiers.includes("self") && event.target !== event.currentTarget) return;
     const keyboard = event as KeyboardEvent;
     const mouse = event as MouseEvent;
@@ -1219,16 +1221,24 @@ function sfcEventModifierHandler(handler: (event: Event) => void, modifiers: str
     if (modifiers.includes("prevent")) event.preventDefault();
     if (modifiers.includes("stop")) event.stopPropagation();
     handler(event);
-  };
+  }) as SfcEventHandler;
+  const options: AddEventListenerOptions = {};
+  if (modifiers.includes("capture")) options.capture = true;
+  if (modifiers.includes("passive")) options.passive = true;
+  if (modifiers.includes("once")) options.once = true;
+  if (Object.keys(options).length) wrapped.eventOptions = options;
+  return wrapped;
 }
 
-function addSfcEventHandler(props: Record<string, unknown>, eventName: string, handler: ((event: Event) => void) | undefined): void {
+function addSfcEventHandler(props: Record<string, unknown>, eventName: string, handler: SfcEventHandler | undefined): void {
   if (!handler) return;
   const key = sfcEventPropName(eventName);
   const previous = props[key];
-  props[key] = typeof previous === "function"
-    ? (event: Event) => { (previous as (event: Event) => void)(event); handler(event); }
-    : handler;
+  if (typeof previous === "function") {
+    const combined = ((event: Event) => { (previous as (event: Event) => void)(event); handler(event); }) as SfcEventHandler;
+    combined.eventOptions = handler.eventOptions ?? (previous as SfcEventHandler).eventOptions;
+    props[key] = combined;
+  } else props[key] = handler;
 }
 
 function resolveSfcComponent(tagName: string, scope: Record<string, unknown>): Component | undefined {
@@ -1865,7 +1875,7 @@ function transitionGroupElementProps(props: Record<string, unknown>): Record<str
   return Object.fromEntries(Object.entries(props).filter(([key]) => !isTransitionProp(key)));
 }
 
-type EventInvoker = EventListener & { value: EventListener[] };
+type EventInvoker = EventListener & { value: EventListener[]; options?: AddEventListenerOptions };
 const eventListeners = new WeakMap<Element, Map<string, EventInvoker>>();
 const svgNamespace = "http://www.w3.org/2000/svg";
 const componentNames = new WeakMap<Component, string>();
@@ -1921,17 +1931,22 @@ function setProp(el: Element, key: string, value: unknown, previous?: unknown): 
     const listeners = eventListeners.get(el) ?? new Map<string, EventInvoker>();
     const registered = listeners.get(event);
     const handlers = (Array.isArray(value) ? value : [value]).filter(handler => typeof handler === "function") as EventListener[];
-    if (registered && handlers.length) {
+    const options = (handlers[0] as SfcEventHandler | undefined)?.eventOptions;
+    const sameOptions = !registered || ["capture", "passive", "once"].every(option =>
+      registered.options?.[option as keyof AddEventListenerOptions] === options?.[option as keyof AddEventListenerOptions]
+    );
+    if (registered && handlers.length && sameOptions) {
       registered.value = handlers;
     } else if (registered) {
-      el.removeEventListener(event, registered);
+      el.removeEventListener(event, registered, registered.options);
       listeners.delete(event);
     } else if (handlers.length) {
       const listener = ((eventValue: Event) => {
         listener.value.forEach(handler => handler.call(el, eventValue));
       }) as EventInvoker;
       listener.value = handlers;
-      el.addEventListener(event, listener);
+      listener.options = options;
+      el.addEventListener(event, listener, options);
       listeners.set(event, listener);
     } else {
       listeners.delete(event);
@@ -3789,8 +3804,8 @@ export function hydrate(root: Element, state: object, handlers: Record<string, (
         eventObject => handler(reactiveState, eventObject),
         modifiers
       );
-      element.addEventListener(event, listener);
-      cleanup(() => element.removeEventListener(event, listener));
+      element.addEventListener(event, listener, listener.eventOptions);
+      cleanup(() => element.removeEventListener(event, listener, listener.eventOptions));
     }
   });
   return reactiveState;
