@@ -1451,16 +1451,22 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
        addSfcEventHandler(props, resolveSfcDynamicName(eventName, scope), sfcEventHandler(value, scope, modifiers));
      }
     else if (name === "v-model" || name.startsWith("v-model.")) {
-      const modelModifiers = name.slice("v-model".length).split(".").filter(Boolean);
-      const modelPath = value;
-      const writeModel = (next: unknown) => writePath(scope, modelPath, normalizeSfcModelValue(next, modelModifiers));
-      const inputType = element.tagName.toLowerCase() === "input"
-        ? (element.getAttribute("type") ?? "text").toLowerCase()
-        : "text";
-      const current = readPath(scope, modelPath);
-      if (inputType === "checkbox") {
-        const option = element.getAttribute("value");
-        props.checked = Array.isArray(current) && option != null
+       const modelModifiers = name.slice("v-model".length).split(".").filter(Boolean);
+       const modelPath = value;
+       const writeModel = (next: unknown) => writePath(scope, modelPath, normalizeSfcModelValue(next, modelModifiers));
+       const componentModel = element.tagName.toLowerCase() === "component" || Boolean(resolveSfcComponent(element.tagName, scope));
+       if (componentModel) {
+         props.modelValue = readPath(scope, modelPath);
+         props["onUpdate:modelValue"] = writeModel;
+         if (modelModifiers.length) props.modelModifiers = Object.fromEntries(modelModifiers.map(modifier => [modifier, true]));
+       } else {
+         const inputType = element.tagName.toLowerCase() === "input"
+           ? (element.getAttribute("type") ?? "text").toLowerCase()
+           : "text";
+         const current = readPath(scope, modelPath);
+         if (inputType === "checkbox") {
+         const option = element.getAttribute("value");
+         props.checked = Array.isArray(current) && option != null
           ? current.map(String).includes(option)
           : Boolean(current);
         props.onChange = (event: Event) => {
@@ -1473,13 +1479,13 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
                : values.filter(item => item !== option));
            } else writeModel(checked);
         };
-      } else if (inputType === "radio") {
+         } else if (inputType === "radio") {
         const option = element.getAttribute("value") ?? "";
         props.checked = String(current ?? "") === option;
         props.onChange = (event: Event) => {
            if ((event.target as HTMLInputElement).checked) writeModel(option);
         };
-      } else if (element.tagName.toLowerCase() === "select") {
+         } else if (element.tagName.toLowerCase() === "select") {
         const select = element as HTMLSelectElement;
         if (select.multiple) {
           const selected = new Set((Array.isArray(current) ? current : []).map(String));
@@ -1493,11 +1499,12 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
           props.value = current;
            props.onChange = (event: Event) => writeModel((event.target as HTMLSelectElement).value);
         }
-      } else {
-        props.value = current;
-        const eventProp = modelModifiers.includes("lazy") ? "onChange" : "onInput";
-        props[eventProp] = (event: Event) => writeModel((event.target as HTMLInputElement).value);
-      }
+         } else {
+         props.value = current;
+         const eventProp = modelModifiers.includes("lazy") ? "onChange" : "onInput";
+         props[eventProp] = (event: Event) => writeModel((event.target as HTMLInputElement).value);
+         }
+       }
     }
     else if (name === "ref") {
       const refName = value;

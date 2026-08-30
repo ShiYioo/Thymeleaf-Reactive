@@ -2414,6 +2414,25 @@ test('SFC supports object spread bindings for native and child component props',
   assert.equal(root.querySelector('strong').textContent, 'Done:false');
 });
 
+test('SFC v-model uses the Vue component modelValue update contract', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Editor = defineComponent('sfc-model-component-test', {
+    props: { modelValue: String },
+    emits: ['update:modelValue'],
+    setup(props, { emit }) {
+      return () => h('button', { onClick: () => emit('update:modelValue', `${props.modelValue}!`) }, props.modelValue);
+    }
+  });
+  const render = compileSfcComponent('<template><section><Editor v-model="message"></Editor><strong>{{ message }}</strong></section></template><script setup>const message = ref(\'Ready\');</script>');
+  createApp(() => h(render, { components: { Editor } })).mount(root);
+  assert.equal(root.querySelector('button').textContent, 'Ready');
+  assert.equal(root.querySelector('strong').textContent, 'Ready');
+  root.querySelector('button').dispatchEvent(new Event('click'));
+  await nextTick();
+  assert.equal(root.querySelector('strong').textContent, 'Ready!');
+});
+
 test('SFC expressions can call methods on scoped reactive values', () => {
   const document = installDom();
   const root = document.createElement('main');
