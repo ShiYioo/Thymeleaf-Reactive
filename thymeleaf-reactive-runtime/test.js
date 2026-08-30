@@ -94,6 +94,15 @@ test('shallowReactive tracks root properties without proxying nested values', ()
   assert.notEqual(reactive(nested), state.nested);
 });
 
+test('reactive arrays find raw values through proxy identity methods', () => {
+  const raw = { id: 1 };
+  const values = reactive([raw]);
+  const proxy = reactive(raw);
+  assert.equal(values.includes(proxy), true);
+  assert.equal(values.indexOf(proxy), 0);
+  assert.equal(values.lastIndexOf(proxy), 0);
+});
+
 test('reactive Map and Set track keyed and iteration dependencies', () => {
   const values = reactive(new Map([['a', 1]]));
   const tags = reactive(new Set(['a']));

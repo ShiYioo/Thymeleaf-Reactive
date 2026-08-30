@@ -209,6 +209,15 @@ function createReactive<T extends object>(value: T, shallow: boolean): T {
   };
   const proxy = new Proxy(value, {
     get(target, key, receiver) {
+      if (Array.isArray(target) && (key === "includes" || key === "indexOf" || key === "lastIndexOf")) {
+        return (...args: unknown[]) => {
+          for (let index = 0; index < target.length; index++) trackEffect(subscribers(index));
+          const method = Array.prototype[key as "includes" | "indexOf" | "lastIndexOf"] as (...values: unknown[]) => unknown;
+          const result = method.apply(target, args);
+          if (result === false || result === -1) return method.apply(target, args.map(toRawValue));
+          return result;
+        };
+      }
       if (target instanceof Map) {
         if (key === "get") return (entry: unknown) => {
           const rawEntry = toRawValue(entry);
