@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, readonly, shallowReadonly, isReadonly, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, customRef, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onEffectCleanup, onErrorCaptured, onScopeDispose, onWatcherCleanup, refreshComponentsFromPage, render, Teleport, inject, isProxy, isRef, isShallow, onMounted, onUnmounted, onUpdated, pauseTracking, enableTracking, resetTracking, provide, proxyRefs, stop, toRaw, toReactive, toReadonly, toRef, toRefs, toValue, traverse, unref, watch, watchEffect, watchPostEffect, watchSyncEffect, withMemo, startBatch, endBatch, getCurrentScope, getCurrentWatcher } from './dist/index.js';
+import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, readonly, shallowReadonly, isReadonly, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, customRef, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onEffectCleanup, onErrorCaptured, onScopeDispose, onWatcherCleanup, refreshComponentsFromPage, render, Teleport, inject, isProxy, isRef, isShallow, onMounted, onUnmounted, onUpdated, pauseTracking, enableTracking, resetTracking, provide, proxyRefs, queueJob, queuePostFlushCb, flushOnAppMount, stop, toRaw, toReactive, toReadonly, toRef, toRefs, toValue, traverse, unref, watch, watchEffect, watchPostEffect, watchSyncEffect, withMemo, startBatch, endBatch, getCurrentScope, getCurrentWatcher, SchedulerJobFlags } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -434,6 +434,63 @@ test('traverse is exported for manual deep dependency collection', () => {
   state.list[0].x = 7;
   assert.equal(reruns, 3);
   stop(runner);
+});
+
+test('SchedulerJobFlags QUEUED flag deduplicates concurrent queueJob calls', async () => {
+  let runs = 0;
+  const job = () => { runs++; };
+  queueJob(job);
+  queueJob(job);            // second call should be deduped (QUEUED already set)
+  queueJob(job);
+  await nextTick();
+  assert.equal(runs, 1);    // only one flush, one execution
+});
+
+test('SchedulerJobFlags DISPOSED skips the job on flush', async () => {
+  let runs = 0;
+  const job = () => { runs++; };
+  job.flags = SchedulerJobFlags.DISPOSED;
+  queueJob(job);
+  await nextTick();
+  assert.equal(runs, 0);    // skipped
+});
+
+test('SchedulerJobFlags recursion limit stops infinite self-rescheduling', async () => {
+  let count = 0;
+  const errs = [];
+  const origErr = console.error;
+  console.error = (...a) => { errs.push(a.join('')); };
+  try {
+    const selfJob = () => {
+      count++;
+      queueJob(selfJob, Infinity, true); // re-queue self (ALLOW_RECURSE)
+    };
+    queueJob(selfJob, Infinity, true);
+    await nextTick();
+    // should be limited to ~100-101 runs
+    assert.ok(count >= 98 && count <= 102, `count=${count} should be ~100`);
+    assert.ok(errs.length > 0, 'should have error about recursion limit');
+    assert.ok(errs[0].includes('recursive'), errs[0]);
+  } finally {
+    console.error = origErr;
+  }
+});
+
+test('queuePostFlushCb runs after main queue', async () => {
+  const order = [];
+  const job = () => { order.push('main'); };
+  queueJob(job);
+  queuePostFlushCb(() => { order.push('post'); });
+  await nextTick();
+  assert.deepEqual(order, ['main', 'post']);
+});
+
+test('flushOnAppMount flushes synchronously without pending microtask', () => {
+  let ran = 0;
+  const job = () => { ran++; };
+  queueJob(job);
+  flushOnAppMount(); // synchronously flushes
+  assert.equal(ran, 1);
 });
 
 test('ref values participate in dependency tracking', () => {

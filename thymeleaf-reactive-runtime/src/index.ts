@@ -66,6 +66,19 @@ const ITERATE_KEY = Symbol("iterate");
 const queuedPreJobs = new Set<() => void>();
 const queuedJobs = new Map<() => void, number>();
 const queuedPostJobs = new Set<() => void>();
+/** Vue 3.6 scheduler: bit flags carried on queued jobs. */
+export enum SchedulerJobFlags {
+  QUEUED = 1 << 0,
+  /** Job may re-trigger itself while flushing (component updates, watch callbacks). */
+  ALLOW_RECURSE = 1 << 1,
+  /** Skip the job when flushing (it has been stopped). */
+  DISPOSED = 1 << 2,
+}
+export interface SchedulerJob extends Function {
+  flags?: SchedulerJobFlags;
+  order?: number;
+}
+const RECURSION_LIMIT = 100;
 const refValues = new WeakSet<object>();
 const shallowValues = new WeakSet<object>();
 const refTriggers = new WeakMap<object, () => void>();
@@ -122,20 +135,50 @@ export function onScopeDispose(cleanup: () => void): void {
   activeEffectScope.cleanups.add(cleanup);
 }
 
-function queueJob(job: () => void, order = Number.POSITIVE_INFINITY): void {
-  if (!queuedJobs.has(job) || order < queuedJobs.get(job)!) queuedJobs.set(job, order);
+/**
+ * Queues a job to run in the next flush (Vue 3.6 public scheduler API).
+ * Jobs are deduplicated by identity (QUEUED flag); a component/render job
+ * may pass allowRecurse to permit re-triggering itself while flushing.
+ */
+export function queueJob(job: () => void, order = Number.POSITIVE_INFINITY, allowRecurse = false): void {
+  const sj = job as SchedulerJob;
+  if (allowRecurse) sj.flags = (sj.flags ?? 0) | SchedulerJobFlags.ALLOW_RECURSE;
+  const flags = sj.flags ?? 0;
+  if (flags & SchedulerJobFlags.QUEUED) {
+    // Already queued: only allow moving it earlier in the queue.
+    if (order < (queuedJobs.get(job) ?? Number.POSITIVE_INFINITY)) queuedJobs.set(job, order);
+    return;
+  }
+  sj.flags = flags | SchedulerJobFlags.QUEUED;
+  queuedJobs.set(job, order);
   queueFlush();
 }
 
-function queuePreJob(job: () => void): void {
+function queuePreJob(job: () => void, allowRecurse = false): void {
+  const sj = job as SchedulerJob;
+  if (allowRecurse) sj.flags = (sj.flags ?? 0) | SchedulerJobFlags.ALLOW_RECURSE;
   queuedPreJobs.add(job);
   queueFlush();
 }
 
-function queuePostJob(job: () => void): void {
+/** Queues a callback to run after the current flush (Vue 3.6 public API). */
+export function queuePostFlushCb(job: () => void): void {
+  queuePostJob(job);
+}
+
+function queuePostJob(job: () => void, allowRecurse = false): void {
+  const sj = job as SchedulerJob;
+  if (allowRecurse) sj.flags = (sj.flags ?? 0) | SchedulerJobFlags.ALLOW_RECURSE;
   queuedPostJobs.add(job);
   queueFlush();
 }
+
+/** Synchronously flushes any pending pre/job/post queue (Vue 3.6 flushOnAppMount). */
+export function flushOnAppMount(): void {
+  if (!isFlushing) flushJobs();
+}
+
+let isFlushing = false;
 
 function queueFlush(): void {
   if (pendingFlush) return;
@@ -143,28 +186,59 @@ function queueFlush(): void {
 }
 
 function flushJobs(): void {
+  if (isFlushing) return;
+  isFlushing = true;
   try {
+    const seen = new Map<() => void, number>();
     while (queuedPreJobs.size || queuedJobs.size || queuedPostJobs.size) {
       const preJobs = [...queuedPreJobs];
       queuedPreJobs.clear();
-      preJobs.forEach(runScheduledJob);
+      preJobs.forEach(job => runScheduledJob(job, seen));
       const jobs = [...queuedJobs.entries()]
         .sort((left, right) => left[1] - right[1])
         .map(([job]) => job);
       queuedJobs.clear();
-      jobs.forEach(runScheduledJob);
+      jobs.forEach(job => runScheduledJob(job, seen));
       const postJobs = [...queuedPostJobs];
       queuedPostJobs.clear();
-      postJobs.forEach(runScheduledJob);
+      postJobs.forEach(job => runScheduledJob(job, seen));
     }
   } finally {
     pendingFlush = undefined;
+    isFlushing = false;
   }
 }
 
-function runScheduledJob(job: () => void): void {
-  try { job(); }
-  catch (error) { console.error("[thymeleaf-reactive] scheduler job failed", error); }
+function runScheduledJob(job: () => void, seen: Map<() => void, number>): void {
+  const sj = job as SchedulerJob;
+  const flags = sj.flags ?? 0;
+  if (flags & SchedulerJobFlags.DISPOSED) {
+    // A disposed job is skipped, but its queue marker must still be released
+    // so it can be explicitly reactivated and queued again later.
+    sj.flags = flags & ~SchedulerJobFlags.QUEUED;
+    return;
+  }
+  const count = seen.get(job) || 0;
+  if (count > RECURSION_LIMIT) {
+    console.error("[thymeleaf-reactive] Maximum recursive updates exceeded. The update queue keeps rescheduling this job; stopping it to avoid an infinite loop.");
+    sj.flags = flags & ~SchedulerJobFlags.QUEUED; // release so a later trigger can queue it again
+    return;
+  }
+  seen.set(job, count + 1);
+  if (flags & SchedulerJobFlags.ALLOW_RECURSE) {
+    // Vue 3.6: recursive jobs may re-trigger themselves while running.
+    sj.flags = flags & ~SchedulerJobFlags.QUEUED;
+  }
+  try {
+    job();
+  } catch (error) {
+    console.error("[thymeleaf-reactive] scheduler job failed", error);
+  } finally {
+    const current = sj.flags ?? 0;
+    if (!(current & SchedulerJobFlags.ALLOW_RECURSE)) {
+      sj.flags = current & ~SchedulerJobFlags.QUEUED;
+    }
+  }
 }
 
 export function nextTick(): Promise<void>;
@@ -794,7 +868,7 @@ export function watch<T>(
           : 1;
       traverse(value, depth);
     }
-  }, { lazy: true, scheduler: options.flush === "pre" ? () => queuePreJob(job) : options.flush === "post" ? () => queuePostJob(job) : job });
+  }, { lazy: true, scheduler: options.flush === "pre" ? () => queuePreJob(job, true) : options.flush === "post" ? () => queuePostJob(job, true) : job });
   function job(): void {
     if (stopped) return;
     runGetter();
@@ -846,9 +920,9 @@ export function watchEffect(run: (onCleanup: (cleanup: () => void) => void) => v
   const ownerScope = activeEffectScope;
   let runner!: Effect;
   const schedule = options.flush === "pre"
-    ? () => queuePreJob(runner)
+    ? () => queuePreJob(runner, true)
     : options.flush === "post"
-      ? () => queuePostJob(runner)
+      ? () => queuePostJob(runner, true)
       : undefined;
   runner = effect(() => {
     cleanup.forEach(current => current());
@@ -2470,7 +2544,7 @@ function mountVNode(vnode: VNode, container: Node, anchor: Node | null = null): 
       instance.vnode.component = nextTree;
       instance.vnode.el = nextTree.el;
       instance.vnode.anchor = nextTree.anchor;
-    }, { scheduler: () => queueJob(componentUpdate, instance.uid) }))!;
+    }, { scheduler: () => queueJob(componentUpdate, instance.uid, true) }))!;
     instance.update = componentUpdate;
     instance.dispose = () => instance.scope?.stop();
     vnode.instance = instance;
@@ -2827,7 +2901,7 @@ function patchVNode(oldVNode: VNode | undefined, newVNode: VNode | undefined, co
     const attrsChanged = syncComponentProps(instance.attrs!, inputs.attrs);
     instance.listeners = inputs.listeners;
     const childrenChanged = !areVNodeChildrenEqual(previousChildren, newVNode.children);
-    if (propsChanged || attrsChanged || childrenChanged) queueJob(instance.update, instance.uid);
+    if (propsChanged || attrsChanged || childrenChanged) queueJob(instance.update, instance.uid, true);
     newVNode.component = instance.tree;
     newVNode.el = instance.tree.el;
     newVNode.anchor = instance.tree.anchor;
@@ -2931,7 +3005,7 @@ function hydrateObjectComponent(vnode: VNode, node: Node | null, container: Node
     vnode.component = instance.tree;
     vnode.el = instance.tree.el;
     vnode.anchor = instance.tree.anchor;
-  }, { scheduler: () => queueJob(componentUpdate, instance.uid) }))!;
+  }, { scheduler: () => queueJob(componentUpdate, instance.uid, true) }))!;
   instance.update = componentUpdate;
   instance.dispose = () => instance.scope?.stop();
   vnode.instance = instance;
@@ -3090,7 +3164,7 @@ export function createApp(render: (state: any) => VNode, state: object = {}) {
       const uid = nextComponentUid++;
       let rootUpdate!: Effect;
       rootUpdate = effect(() => { tree = patch(tree, currentRender(reactiveState), root) ?? undefined; }, {
-        scheduler: () => queueJob(rootUpdate, uid)
+        scheduler: () => queueJob(rootUpdate, uid, true)
       });
       rerender = rootUpdate;
       mountedApps.add(rerender);
@@ -3184,7 +3258,7 @@ export function adoptComponentRoot(root: Element, component: Component, props: R
       instance.vnode.component = instance.tree;
       instance.vnode.el = instance.tree.el;
       instance.vnode.anchor = instance.tree.anchor;
-    }, { scheduler: () => queueJob(componentUpdate, instance.uid) }))!;
+    }, { scheduler: () => queueJob(componentUpdate, instance.uid, true) }))!;
     instance.update = componentUpdate;
     const update = () => {
       if (entry && isObjectComponent(entry.render) && hotUpdateObjectComponent(vnode, entry.render)) return;
@@ -3397,7 +3471,7 @@ function disposeHydration(root: Element): void {
 
 function hydrationEffect(context: HydrationContext, fn: () => void): Effect {
   let runner!: Effect;
-  runner = context.scope.run(() => effect(fn as Effect, { scheduler: () => queueJob(runner, context.uid) }))!;
+  runner = context.scope.run(() => effect(fn as Effect, { scheduler: () => queueJob(runner, context.uid, true) }))!;
   return runner;
 }
 
