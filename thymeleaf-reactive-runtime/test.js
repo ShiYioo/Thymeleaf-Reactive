@@ -342,6 +342,54 @@ test('onWatcherCleanup accepts failSilently outside watchers', () => {
   onWatcherCleanup(() => {}, true); // no throw when failSilently
 });
 
+test('watch deep accepts a numeric depth (Vue 3.6)', () => {
+  const state = reactive({ root: 0, a: { b: { c: 1 } } });
+  let rootCalls = 0;
+  const w1 = watch(() => state, () => { rootCalls++; }, { deep: 1 });
+  assert.equal(rootCalls, 0);
+  state.root = 1;        // root property: within depth 1
+  assert.equal(rootCalls, 1);
+  state.a.b.c = 99;      // 3 levels deep: beyond depth 1
+  assert.equal(rootCalls, 1);
+  w1();
+
+  let twoCalls = 0;
+  const w2 = watch(() => state, () => { twoCalls++; }, { deep: 2 });
+  state.a.b = { c: 5 };  // level-2 property: within depth 2
+  assert.equal(twoCalls, 1);
+  state.a.b.c = 7;       // level-3 property: beyond depth 2
+  assert.equal(twoCalls, 1);
+  w2();
+});
+
+test('watch deep true still traverses all levels', () => {
+  const state = reactive({ a: { b: { c: 1 } } });
+  let calls = 0;
+  const w = watch(() => state, () => { calls++; }, { deep: true });
+  state.a.b.c = 42;
+  assert.equal(calls, 1);
+  w();
+});
+
+test('watch deep 0 or false limits to root properties of a reactive source', () => {
+  const state = reactive({ root: 0, a: { b: 1 } });
+  let zeroCalls = 0;
+  const w0 = watch(state, () => { zeroCalls++; }, { deep: 0 });
+  state.root = 2;
+  assert.equal(zeroCalls, 1);
+  state.a.b = 3;
+  assert.equal(zeroCalls, 1);
+  w0();
+
+  let falseCalls = 0;
+  const wf = watch(state, () => { falseCalls++; }, { deep: false });
+  state.root = 4;
+  assert.equal(falseCalls, 1);
+  state.a.b = 5;
+  assert.equal(falseCalls, 1);
+  wf();
+});
+
 test('ref values participate in dependency tracking', () => {
   const count = ref(0);
   let observed = -1;

@@ -669,7 +669,7 @@ export function proxyRefs<T extends object>(value: T): T {
 }
 
 export type WatchSource<T> = (() => T) | Ref<T> | T;
-export type WatchOptions = { immediate?: boolean; deep?: boolean; once?: boolean; flush?: "sync" | "pre" | "post" };
+export type WatchOptions = { immediate?: boolean; deep?: boolean | number; once?: boolean; flush?: "sync" | "pre" | "post" };
 type WatchCallback<T> = (value: T, previous: T | undefined, onCleanup: (cleanup: () => void) => void) => void;
 export type WatchEffectOptions = { flush?: "sync" | "pre" | "post" };
 /** Vue 3.6 WatchHandle: a callable stop function that also exposes pause/resume. */
@@ -709,19 +709,27 @@ export function onEffectCleanup(cleanup: () => void, failSilently = false): void
   if (!failSilently) throw new Error("onEffectCleanup() must be called synchronously inside an active effect");
 }
 
-function traverse(value: unknown, seen = new Set<object>()): unknown {
-  if (!value || typeof value !== "object" || seen.has(value)) return value;
-  seen.add(value);
+/**
+ * Deep-reads value so every nested property becomes a dependency (Vue 3.6
+ * depth-aware traversal). depth limits how many levels are visited;
+ * seen maps each object to the remaining depth it was visited with so a
+ * shared/cyclic object is only re-entered when reached from a shallower path.
+ */
+function traverse(value: unknown, depth = Infinity, seen = new Map<object, number>()): unknown {
+  if (depth <= 0 || !value || typeof value !== "object") return value;
+  if ((seen.get(value) || 0) >= depth) return value;
+  seen.set(value, depth);
+  depth--;
   if (value instanceof Map || value instanceof Set) {
     value.forEach((entry: unknown, key: unknown) => {
-      traverse(key, seen);
-      traverse(entry, seen);
+      traverse(key, depth, seen);
+      traverse(entry, depth, seen);
     });
     return value;
   }
   Reflect.ownKeys(value).forEach(key => {
     const descriptor = Object.getOwnPropertyDescriptor(value, key);
-    if (descriptor?.enumerable) traverse((value as Record<PropertyKey, unknown>)[key], seen);
+    if (descriptor?.enumerable) traverse((value as Record<PropertyKey, unknown>)[key], depth, seen);
   });
   return value;
 }
@@ -762,7 +770,17 @@ export function watch<T>(
   let stop!: WatchHandle;
   const runGetter = effect(() => {
     value = getter();
-    if (options.deep || forceTrigger) traverse(value);
+    if (options.deep || forceTrigger) {
+      // Vue 3.6: deep: true -> Infinity; deep: N -> N levels;
+      // deep: false/0 on a reactive source -> 1 level (root properties only).
+      const deep = options.deep;
+      const depth = deep === true || deep === undefined
+        ? Infinity
+        : typeof deep === "number" && deep > 0
+          ? deep
+          : 1;
+      traverse(value, depth);
+    }
   }, { lazy: true, scheduler: options.flush === "pre" ? () => queuePreJob(job) : options.flush === "post" ? () => queuePostJob(job) : job });
   function job(): void {
     if (stopped) return;
