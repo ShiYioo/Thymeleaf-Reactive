@@ -183,10 +183,45 @@ function trackEffect(subscribers: Set<Effect>): void {
   tracked.add(subscribers);
 }
 
+// === Synchronous batching (Vue 3.5 "batch" design) ===
+// Multiple reactive mutations inside a startBatch()/endBatch() pair trigger
+// their effects only once, without paying microtask latency. Effects that
+// carry a scheduler (e.g. render effects) are still deferred through their
+// scheduler; plain effects run synchronously when the outermost batch ends.
+let batchDepth = 0;
+let batchedEffects: Set<Effect> | undefined;
+
+function batchEffect(run: Effect): void {
+  if (!batchedEffects) batchedEffects = new Set();
+  batchedEffects.add(run);
+}
+
+/** Enters a synchronous reactive batch. Nestable; must be balanced. */
+export function startBatch(): void {
+  batchDepth++;
+}
+
+/** Flushes all effects batched since the outermost startBatch(). */
+export function endBatch(): void {
+  if (--batchDepth > 0) return;
+  if (!batchedEffects) return;
+  const effects = batchedEffects;
+  batchedEffects = undefined;
+  effects.forEach(run => {
+    const scheduler = effectSchedulers.get(run);
+    if (scheduler) scheduler();
+    else run();
+  });
+}
+
 function triggerEffects(subscribers: Iterable<Effect>): void {
   const active = effectStack.at(-1);
   [...new Set(subscribers)].forEach(run => {
     if (run === active) return;
+    if (batchDepth > 0) {
+      batchEffect(run);
+      return;
+    }
     const scheduler = effectSchedulers.get(run);
     if (scheduler) scheduler();
     else run();

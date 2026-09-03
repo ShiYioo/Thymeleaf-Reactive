@@ -6,3 +6,6 @@ build/
 .kotlin/
 .idea/
 *.iml
+
+.vue-*.ts
+.vue36-*.ts

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, readonly, shallowReadonly, isReadonly, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onErrorCaptured, onScopeDispose, onWatcherCleanup, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRaw, toRef, toRefs, unref, watch, watchEffect, watchPostEffect, watchSyncEffect, withMemo } from './dist/index.js';
+import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, readonly, shallowReadonly, isReadonly, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onErrorCaptured, onScopeDispose, onWatcherCleanup, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRaw, toRef, toRefs, unref, watch, watchEffect, watchPostEffect, watchSyncEffect, withMemo, startBatch, endBatch } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -51,6 +51,83 @@ test('computed values cache work and propagate invalidation to effects', () => {
   assert.equal(evaluations, 2);
   assert.equal(doubled.value, 6);
   assert.equal(evaluations, 3);
+});
+
+test('startBatch and endBatch coalesce multiple mutations into one effect run', () => {
+  const state = reactive({ count: 0, label: 'a' });
+  const seen = [];
+  effect(() => { seen.push(`${state.label}:${state.count}`); });
+  startBatch();
+  state.count = 1;
+  state.label = 'b';
+  state.count = 2;
+  assert.deepEqual(seen, ['a:0']); // queued, not yet run
+  endBatch();
+  assert.deepEqual(seen, ['a:0', 'b:2']); // ran exactly once, with final values
+});
+
+test('startBatch and endBatch nest and flush only at the outermost end', () => {
+  const state = reactive({ count: 0 });
+  let runs = 0;
+  effect(() => { runs++; state.count; });
+  startBatch();
+  state.count = 1;
+  startBatch();
+  state.count = 2;
+  endBatch();
+  assert.equal(runs, 1); // inner end() does not flush
+  state.count = 3;
+  assert.equal(runs, 1); // still inside the outer batch
+  endBatch();
+  assert.equal(runs, 2); // single flush after the outermost end()
+  assert.equal(state.count, 3);
+});
+
+test('batches across effects deduplicate a shared subscriber', () => {
+  const state = reactive({ a: 1, b: 2 });
+  let leftRuns = 0; let rightRuns = 0; let bothRuns = 0;
+  effect(() => { leftRuns++; state.a; });
+  effect(() => { rightRuns++; state.b; });
+  effect(() => { bothRuns++; state.a; state.b; });
+  startBatch();
+  state.a = 10;
+  state.b = 20;
+  endBatch();
+  assert.equal(leftRuns, 2);
+  assert.equal(rightRuns, 2);
+  assert.equal(bothRuns, 2); // one per batch, not one per mutation
+});
+
+test('computed values propagate once through a batch', () => {
+  const state = reactive({ count: 1 });
+  const doubled = computed(() => state.count * 2);
+  let observed = 0;
+  effect(() => { observed = doubled.value; });
+  assert.equal(observed, 2);
+  startBatch();
+  state.count = 2;
+  state.count = 3;
+  assert.equal(observed, 2); // not yet flushed
+  endBatch();
+  assert.equal(observed, 6); // single flush sees the final computed value
+  assert.equal(doubled.value, 6);
+});
+
+test('scheduled effects flush once through a batch via their scheduler', async () => {
+  const state = reactive({ count: 0 });
+  let runs = 0;
+  const seen = [];
+  const job = () => { runs++; seen.push(state.count); };
+  effect(job, { scheduler: () => queueMicrotask(job) });
+  assert.deepEqual(seen, [0]);
+  startBatch();
+  state.count = 1;
+  state.count = 2;
+  endBatch();
+  assert.deepEqual(seen, [0]); // scheduler queued, job not run yet
+  await nextTick();
+  assert.deepEqual(seen, [0, 2]); // one deferred run with the final value
+  assert.equal(runs, 2);
 });
 
 test('ref values participate in dependency tracking', () => {

@@ -83,6 +83,18 @@ Reactive binding expressions support safe member access plus common arithmetic, 
 
 The browser runtime also exports `computed(() => ...)` for cached derived state when authoring render-function components. `shallowRef()` tracks only replacement of its value and `triggerRef()` can explicitly notify dependents after a deliberate deep mutation, which is useful for large state objects. `watch` accepts a getter, ref, reactive object, or an array of sources such as `watch([userId, () => route.name], callback)`. It supports `immediate`, `deep`, `once`, and explicit `flush: "sync"`, `flush: "pre"`, and `flush: "post"` scheduling; queued watchers are deduplicated and run around the component render queue. `watchEffect()` accepts the same flush options, with `watchSyncEffect()` and `watchPostEffect()` as convenience APIs.
 
+State mutations are also coalescible through synchronous batches (Vue 3.5's `batch` design): effects triggered between `startBatch()` and `endBatch()` run once with the final values instead of once per mutation. Batches nest, and effects with a scheduler still flush through their scheduler when the outermost batch ends.
+
+```js
+import { startBatch, endBatch } from "@thymeleaf-reactive/runtime";
+
+startBatch();
+state.count = state.count + 1;
+state.label = "saved";
+state.dirty = false;
+endBatch(); // dependents run exactly once, seeing all final values
+```
+
 ## Component API
 
 Alongside function components, the runtime supports object components with `setup`, `render`, `props`, `emits`, `inheritAttrs`, `beforeMount`, `mounted`, `beforeUpdate`, `updated`, `beforeUnmount`, `unmounted`, `activated`, and `deactivated`. Declared props are reactive, declared event listeners are available through `emit()`, and undeclared attributes are exposed as reactive `attrs` and fall through to a single-root native element unless `inheritAttrs` is `false`. `setup` receives reactive props plus `attrs`, `emit`, and lazy `slots` functions (`slots.default()` or `slots.header()`). Render-function children can use `h("strong", { slot: "header" }, "Title")` for named slots. Slots stay connected to the latest parent children while the component instance and its local state are preserved. `setup` can use `ref`, `computed`, `watch`, `provide`, `inject`, `onBeforeMount`, `onMounted`, `onBeforeUpdate`, `onUpdated`, `onBeforeUnmount`, `onUnmounted`, `onActivated`, and `onDeactivated` to keep local component state and coordinate with ancestor components. `watch` accepts a getter, ref, or reactive object, supports `immediate` and `deep`, and returns a stop function. `proxyRefs` automatically unwraps refs for render-oriented scopes. `effectScope()` and `onScopeDispose()` group effects and cleanup callbacks; object components create one scope per instance and stop it on unmount. Explicit `watch` flush modes are `sync`, `pre`, and `post`; queued watchers are deduplicated around component rendering.
