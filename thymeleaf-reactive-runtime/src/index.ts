@@ -67,6 +67,7 @@ const queuedPreJobs = new Set<() => void>();
 const queuedJobs = new Map<() => void, number>();
 const queuedPostJobs = new Set<() => void>();
 const refValues = new WeakSet<object>();
+const shallowValues = new WeakSet<object>();
 const refTriggers = new WeakMap<object, () => void>();
 let pendingFlush: Promise<void> | undefined;
 let activeEffectScope: EffectScope | undefined;
@@ -370,6 +371,7 @@ function createReactive<T extends object>(value: T, shallow: boolean): T {
   cache.set(value, proxy);
   proxyToRaw.set(proxy, value);
   reactiveProxies.add(proxy);
+  if (shallow) shallowValues.add(proxy);
   return proxy as T;
 }
 
@@ -438,6 +440,7 @@ function createReadonly<T extends object>(value: T, shallow: boolean): T {
   cache.set(rawValue, proxy);
   proxyToRaw.set(proxy, rawValue);
   readonlyProxies.add(proxy);
+  if (shallow) shallowValues.add(proxy);
   return proxy as T;
 }
 
@@ -451,6 +454,43 @@ export function shallowReadonly<T extends object>(value: T): T {
 
 export function isReadonly(value: unknown): value is object {
   return Boolean(value && typeof value === "object" && readonlyProxies.has(value));
+}
+
+/** Returns true when the value is a reactive or readonly proxy (not a ref). */
+export function isProxy(value: unknown): value is object {
+  return (isReactive(value) || isReadonly(value)) && !refValues.has(value as object);
+}
+
+/** Returns true when the value was created with shallow* (shallowReactive, shallowReadonly, shallowRef). */
+export function isShallow(value: unknown): value is object {
+  return Boolean(value && typeof value === "object" && shallowValues.has(value));
+}
+
+/** Unwraps a ref, gets the value of a getter, or returns the value as-is. */
+export function toValue<T>(source: T | Ref<T> | (() => T)): T {
+  return typeof source === "function" ? (source as () => T)() : unref(source);
+}
+
+/**
+ * Creates a custom ref with explicit track/trigger control.
+ * The factory receives `track` and `trigger` callbacks.
+ */
+export function customRef<T>(factory: (track: () => void, trigger: () => void) => { get: () => T; set: (value: T) => void }): Ref<T> {
+  const subscribers = new Set<Effect>();
+  const track = () => trackEffect(subscribers);
+  const trigger = () => triggerEffects(subscribers);
+  const { get, set } = factory(track, trigger);
+  const result = {
+    get value(): T { return get(); },
+    set value(next: T) { set(next); }
+  };
+  refValues.add(result);
+  return result;
+}
+
+/** Returns the current active effect scope, or undefined if none is active. */
+export function getCurrentScope(): EffectScope | undefined {
+  return activeEffectScope;
 }
 
 export function effect(fn: Effect, options: EffectOptions = {}): Effect {
@@ -499,6 +539,7 @@ function createRef<T>(value: T, shallow: boolean): Ref<T> {
     }
   };
   refValues.add(result);
+  if (shallow) shallowValues.add(result);
   refTriggers.set(result, () => triggerEffects(subscribers));
   return result;
 }

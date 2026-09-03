@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, readonly, shallowReadonly, isReadonly, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onErrorCaptured, onScopeDispose, onWatcherCleanup, refreshComponentsFromPage, render, Teleport, inject, isRef, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRaw, toRef, toRefs, unref, watch, watchEffect, watchPostEffect, watchSyncEffect, withMemo, startBatch, endBatch } from './dist/index.js';
+import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, readonly, shallowReadonly, isReadonly, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, customRef, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onErrorCaptured, onScopeDispose, onWatcherCleanup, refreshComponentsFromPage, render, Teleport, inject, isProxy, isRef, isShallow, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRaw, toRef, toRefs, toValue, unref, watch, watchEffect, watchPostEffect, watchSyncEffect, withMemo, startBatch, endBatch, getCurrentScope } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -169,6 +169,88 @@ test('shallowReactive tracks root properties without proxying nested values', ()
   assert.equal(runs, 2);
   assert.equal(observed, true);
   assert.notEqual(reactive(nested), state.nested);
+});
+
+test('isShallow detects shallow proxies and shallow refs only', () => {
+  assert.equal(isShallow(shallowReactive({})), true);
+  assert.equal(isShallow(shallowReadonly({})), true);
+  assert.equal(isShallow(shallowRef(1)), true);
+  assert.equal(isShallow(reactive({})), false);
+  assert.equal(isShallow(readonly({})), false);
+  assert.equal(isShallow(ref(1)), false);
+  assert.equal(isShallow({}), false);
+});
+
+test('isProxy detects reactive and readonly proxies but not raw objects or refs', () => {
+  assert.equal(isProxy(reactive({})), true);
+  assert.equal(isProxy(readonly({})), true);
+  assert.equal(isProxy(shallowReactive({})), true);
+  assert.equal(isProxy({}), false);
+  assert.equal(isProxy(ref(1)), false);
+  assert.equal(isProxy(shallowRef(1)), false);
+  const state = reactive({ inner: { count: 1 } });
+  assert.equal(isProxy(state.inner), true);
+});
+
+test('toValue unwraps refs and invokes getters', () => {
+  const count = ref(2);
+  const doubled = () => count.value * 2;
+  const state = reactive({ label: 'hello' });
+  assert.equal(toValue(5), 5);
+  assert.equal(toValue(count), 2);
+  assert.equal(toValue(doubled), 4);
+  assert.equal(toValue(() => state.label), 'hello');
+  let observed = 0;
+  effect(() => { observed = toValue(() => state.label.length); });
+  assert.equal(observed, 5);
+  state.label = 'bye';
+  assert.equal(observed, 3);
+});
+
+test('customRef controls when effects are tracked and triggered', () => {
+  let raw = 0;
+  const debounced = customRef((track, trigger) => ({
+    get() { track(); return raw; },
+    set(value) { raw = value; trigger(); }
+  }));
+  let observed = -1;
+  let runs = 0;
+  effect(() => { runs++; observed = debounced.value; });
+  assert.equal(observed, 0);
+  debounced.value = 5;
+  assert.equal(observed, 5);
+  assert.equal(runs, 2);
+  assert.equal(debounced.value, 5);
+});
+
+test('customRef can gate dependency tracking and triggering independently', () => {
+  const source = { value: 1 };
+  const tracked = customRef((track, trigger) => ({
+    get() { track(); return source.value; },
+    set(next) { source.value = next; trigger(); }
+  }));
+  let observed = 0;
+  effect(() => { observed = tracked.value; });
+  assert.equal(observed, 1);
+  tracked.value = 2;
+  assert.equal(observed, 2);
+});
+
+test('getCurrentScope reflects the running effect scope', () => {
+  assert.equal(getCurrentScope(), undefined);
+  const scope = effectScope();
+  scope.run(() => {
+    assert.equal(getCurrentScope(), scope);
+  });
+  assert.equal(getCurrentScope(), undefined);
+  const parent = effectScope();
+  parent.run(() => {
+    const child = effectScope();
+    child.run(() => {
+      assert.equal(getCurrentScope(), child);
+    });
+    assert.equal(getCurrentScope(), parent);
+  });
 });
 
 test('reactive arrays find raw values through proxy identity methods', () => {
