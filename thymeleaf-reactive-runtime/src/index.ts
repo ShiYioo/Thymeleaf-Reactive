@@ -489,6 +489,16 @@ export function isReadonly(value: unknown): value is object {
   return Boolean(value && typeof value === "object" && readonlyProxies.has(value));
 }
 
+/** Vue 3.6: wraps an object in a reactive proxy, or returns the value as-is. */
+export function toReactive<T>(value: T): T {
+  return value && typeof value === "object" ? reactive(value as object) as T : value;
+}
+
+/** Vue 3.6: wraps an object in a readonly proxy, or returns the value as-is. */
+export function toReadonly<T>(value: T): T {
+  return value && typeof value === "object" ? readonly(value as object) as T : value;
+}
+
 /** Returns true when the value is a reactive or readonly proxy (not a ref). */
 export function isProxy(value: unknown): value is object {
   return (isReactive(value) || isReadonly(value)) && !refValues.has(value as object);
@@ -573,6 +583,11 @@ export function effect(fn: Effect, options: EffectOptions = {}): Effect {
   activeEffectScope?.effects.add(run);
   if (!options.lazy) run();
   return run;
+}
+
+/** Vue 3.6: stops an effect runner returned by effect() (or its .stop). */
+export function stop(runner: Effect): void {
+  runner.stop?.();
 }
 
 export type ComputedRef<T> = { readonly value: T };
@@ -711,11 +726,9 @@ export function onEffectCleanup(cleanup: () => void, failSilently = false): void
 
 /**
  * Deep-reads value so every nested property becomes a dependency (Vue 3.6
- * depth-aware traversal). depth limits how many levels are visited;
- * seen maps each object to the remaining depth it was visited with so a
- * shared/cyclic object is only re-entered when reached from a shallower path.
+ * depth-aware traversal, also exported for manual dependency collection).
  */
-function traverse(value: unknown, depth = Infinity, seen = new Map<object, number>()): unknown {
+export function traverse(value: unknown, depth = Infinity, seen = new Map<object, number>()): unknown {
   if (depth <= 0 || !value || typeof value !== "object") return value;
   if ((seen.get(value) || 0) >= depth) return value;
   seen.set(value, depth);

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, readonly, shallowReadonly, isReadonly, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, customRef, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onEffectCleanup, onErrorCaptured, onScopeDispose, onWatcherCleanup, refreshComponentsFromPage, render, Teleport, inject, isProxy, isRef, isShallow, onMounted, onUnmounted, onUpdated, pauseTracking, enableTracking, resetTracking, provide, proxyRefs, toRaw, toRef, toRefs, toValue, unref, watch, watchEffect, watchPostEffect, watchSyncEffect, withMemo, startBatch, endBatch, getCurrentScope, getCurrentWatcher } from './dist/index.js';
+import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, readonly, shallowReadonly, isReadonly, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, customRef, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onEffectCleanup, onErrorCaptured, onScopeDispose, onWatcherCleanup, refreshComponentsFromPage, render, Teleport, inject, isProxy, isRef, isShallow, onMounted, onUnmounted, onUpdated, pauseTracking, enableTracking, resetTracking, provide, proxyRefs, stop, toRaw, toReactive, toReadonly, toRef, toRefs, toValue, traverse, unref, watch, watchEffect, watchPostEffect, watchSyncEffect, withMemo, startBatch, endBatch, getCurrentScope, getCurrentWatcher } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -388,6 +388,52 @@ test('watch deep 0 or false limits to root properties of a reactive source', () 
   state.a.b = 5;
   assert.equal(falseCalls, 1);
   wf();
+});
+
+test('toReactive and toReadonly wrap objects and pass through non-objects (Vue 3.6)', () => {
+  const raw = { n: 1 };
+  const r = toReactive(raw);
+  assert.equal(isReactive(r), true);
+  assert.notEqual(r, raw);
+  assert.equal(isReactive(toReactive(r)), true); // already wrapped: same cache
+  assert.equal(isReadonly(toReactive(toReadonly(raw))), true); // reactive wraps underlying readonly target? -> creates reactive over readonly raw; still works
+  assert.equal(toReactive(5), 5);
+  assert.equal(toReactive(null), null);
+  assert.equal(toReadonly('x'), 'x');
+  const ro = toReadonly(raw);
+  assert.equal(isReadonly(ro), true);
+  assert.equal(isReadonly(toReadonly(ro)), true); // already readonly: identity
+  const another = toReadonly({ a: 1 });
+  assert.equal(isReadonly(another), true);
+  another.a = 2; // readonly writes are silently ignored (prod semantics)
+  assert.equal(another.a, 1);
+});
+
+test('stop(runner) stops an effect runner (Vue 3.6)', () => {
+  const count = ref(0);
+  let runs = 0;
+  const runner = effect(() => { runs++; count.value; });
+  count.value = 1;
+  assert.equal(runs, 2);
+  stop(runner);
+  count.value = 2;
+  assert.equal(runs, 2); // no more runs after stop
+  // stopping twice is a no-op
+  stop(runner);
+  count.value = 3;
+  assert.equal(runs, 2);
+});
+
+test('traverse is exported for manual deep dependency collection', () => {
+  const state = reactive({ a: { b: 1 }, list: [{ x: 1 }] });
+  let reruns = 0;
+  const runner = effect(() => { reruns++; traverse(state); });
+  assert.equal(reruns, 1);
+  state.a.b = 5;
+  assert.equal(reruns, 2);
+  state.list[0].x = 7;
+  assert.equal(reruns, 3);
+  stop(runner);
 });
 
 test('ref values participate in dependency tracking', () => {
