@@ -2,7 +2,7 @@ import jsep from "jsep";
 
 type Primitive = string | number | boolean | null | undefined;
 type VNodeChild = VNode | Primitive | VNodeChild[];
-export type Effect = (() => void) & { stop?: () => void };
+export type Effect = (() => void) & { stop?: () => void; pause?: () => void; resume?: () => void };
 type EffectOptions = { lazy?: boolean; scheduler?: () => void };
 export type ComponentRender = (props: Record<string, unknown>, children: VNode[]) => VNode;
 export type ComponentSlots = Record<string, () => VNode[]>;
@@ -69,6 +69,10 @@ const queuedPostJobs = new Set<() => void>();
 const refValues = new WeakSet<object>();
 const shallowValues = new WeakSet<object>();
 const refTriggers = new WeakMap<object, () => void>();
+const effectCleanups = new WeakMap<Effect, (() => void)[]>();
+const pausedEffects = new WeakSet<Effect>();
+const dirtyEffects = new WeakSet<Effect>();
+let activeWatcher: Effect | undefined = undefined;
 let pendingFlush: Promise<void> | undefined;
 let activeEffectScope: EffectScope | undefined;
 let activeWatcherCleanup: ((cleanup: () => void) => void) | undefined;
@@ -209,6 +213,10 @@ export function endBatch(): void {
   const effects = batchedEffects;
   batchedEffects = undefined;
   effects.forEach(run => {
+    if (pausedEffects.has(run)) {
+      dirtyEffects.add(run);
+      return;
+    }
     const scheduler = effectSchedulers.get(run);
     if (scheduler) scheduler();
     else run();
@@ -221,6 +229,10 @@ function triggerEffects(subscribers: Iterable<Effect>): void {
     if (run === active) return;
     if (batchDepth > 0) {
       batchEffect(run);
+      return;
+    }
+    if (pausedEffects.has(run)) {
+      dirtyEffects.add(run);
       return;
     }
     const scheduler = effectSchedulers.get(run);
@@ -497,8 +509,17 @@ export function effect(fn: Effect, options: EffectOptions = {}): Effect {
   let active = true;
   const run: Effect = () => {
     if (!active) return;
+    if (pausedEffects.has(run)) {
+      dirtyEffects.add(run);
+      return;
+    }
     effectDeps.get(run)?.forEach(subscribers => subscribers.delete(run));
     effectDeps.delete(run);
+    const pending = effectCleanups.get(run);
+    if (pending) {
+      effectCleanups.delete(run);
+      pending.forEach(fn => { try { fn(); } catch (error) { console.error("[thymeleaf-reactive] effect cleanup failed", error); } });
+    }
     effectStack.push(run);
     try { fn(); } finally { effectStack.pop(); }
   };
@@ -508,6 +529,24 @@ export function effect(fn: Effect, options: EffectOptions = {}): Effect {
     effectDeps.get(run)?.forEach(subscribers => subscribers.delete(run));
     effectDeps.delete(run);
     effectSchedulers.delete(run);
+    pausedEffects.delete(run);
+    dirtyEffects.delete(run);
+    const pending = effectCleanups.get(run);
+    if (pending) {
+      effectCleanups.delete(run);
+      pending.forEach(fn => { try { fn(); } catch (error) { console.error("[thymeleaf-reactive] effect cleanup failed", error); } });
+    }
+  };
+  run.pause = () => { if (active) pausedEffects.add(run); };
+  run.resume = () => {
+    if (!pausedEffects.has(run)) return;
+    pausedEffects.delete(run);
+    if (dirtyEffects.has(run)) {
+      dirtyEffects.delete(run);
+      const scheduler = effectSchedulers.get(run);
+      if (scheduler) scheduler();
+      else run();
+    }
   };
   if (options.scheduler) effectSchedulers.set(run, options.scheduler);
   activeEffectScope?.effects.add(run);
@@ -619,6 +658,31 @@ export function onWatcherCleanup(cleanup: () => void): void {
   activeWatcherCleanup(cleanup);
 }
 
+/** Returns the watcher effect currently running, if inside watch()/watchEffect(). */
+export function getCurrentWatcher(): Effect | undefined {
+  return activeWatcher;
+}
+
+/**
+ * Registers a cleanup for the current active effect (Vue 3.6 `onEffectCleanup`).
+ * The cleanup runs right before the effect's next run and when it stops.
+ * Inside watch()/watchEffect() it behaves like onWatcherCleanup().
+ */
+export function onEffectCleanup(cleanup: () => void, failSilently = false): void {
+  const active = effectStack.at(-1);
+  if (active) {
+    let list = effectCleanups.get(active);
+    if (!list) effectCleanups.set(active, list = []);
+    list.push(cleanup);
+    return;
+  }
+  if (activeWatcherCleanup) {
+    activeWatcherCleanup(cleanup);
+    return;
+  }
+  if (!failSilently) throw new Error("onEffectCleanup() must be called synchronously inside an active effect");
+}
+
 function traverse(value: unknown, seen = new Set<object>()): unknown {
   if (!value || typeof value !== "object" || seen.has(value)) return value;
   seen.add(value);
@@ -690,9 +754,11 @@ export function watch<T>(
       const nextCleanup: (() => void)[] = [];
       const registerCleanup = (next: () => void): void => { nextCleanup.push(next); };
       const previousWatcherCleanup = activeWatcherCleanup;
+      const previousWatcher = activeWatcher;
       activeWatcherCleanup = registerCleanup;
+      activeWatcher = runGetter;
       try { (callback as WatchCallback<T | unknown[]>)(value, previous, registerCleanup); }
-      finally { activeWatcherCleanup = previousWatcherCleanup; }
+      finally { activeWatcherCleanup = previousWatcherCleanup; activeWatcher = previousWatcher; }
       cleanup = nextCleanup;
       previous = value;
       if (options.once) stop();
@@ -730,9 +796,11 @@ export function watchEffect(run: (onCleanup: (cleanup: () => void) => void) => v
     cleanup = [];
     const registerCleanup = (next: () => void): void => { cleanup.push(next); };
     const previousWatcherCleanup = activeWatcherCleanup;
+    const previousWatcher = activeWatcher;
     activeWatcherCleanup = registerCleanup;
+    activeWatcher = runner;
     try { run(registerCleanup); }
-    finally { activeWatcherCleanup = previousWatcherCleanup; }
+    finally { activeWatcherCleanup = previousWatcherCleanup; activeWatcher = previousWatcher; }
   }, schedule ? { scheduler: schedule } : {});
   const stop = (): void => {
     runner.stop?.();

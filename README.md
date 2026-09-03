@@ -97,6 +97,17 @@ endBatch(); // dependents run exactly once, seeing all final values
 
 The reactivity API also includes Vue-compatible guards and helpers: `isShallow()` distinguishes shallow proxies and shallow refs, `isProxy()` detects reactive/readonly proxies (but not refs), `toValue()` unwraps a ref or calls a getter, `customRef((track, trigger) => ({ get, set }))` builds refs with explicit dependency control, and `getCurrentScope()` returns the active `effectScope()` when called inside one.
 
+Vue 3.6-style effect control is also available: every `effect()` runner exposes `pause()` and `resume()`. A paused effect ignores dependency triggers; `resume()` replays exactly one run with the final values when a change happened while paused, and does nothing otherwise. Scheduled (render) effects defer that replay through their scheduler.
+
+```js
+const runner = effect(() => { syncFrame(state); });
+runner.pause();   // freeze updates (e.g. while swapping server HTML)
+state.visible = true;
+runner.resume();  // one run: syncFrame sees state.visible === true
+```
+
+`onEffectCleanup(fn)` registers a cleanup on the current active effect (Vue 3.6 generalization of `onWatcherCleanup`): it runs right before the effect's next run and when the effect stops. Inside `watch()`/`watchEffect()` it behaves like `onWatcherCleanup()`. `getCurrentWatcher()` returns the watcher effect currently executing inside a `watch()` callback.
+
 ## Component API
 
 Alongside function components, the runtime supports object components with `setup`, `render`, `props`, `emits`, `inheritAttrs`, `beforeMount`, `mounted`, `beforeUpdate`, `updated`, `beforeUnmount`, `unmounted`, `activated`, and `deactivated`. Declared props are reactive, declared event listeners are available through `emit()`, and undeclared attributes are exposed as reactive `attrs` and fall through to a single-root native element unless `inheritAttrs` is `false`. `setup` receives reactive props plus `attrs`, `emit`, and lazy `slots` functions (`slots.default()` or `slots.header()`). Render-function children can use `h("strong", { slot: "header" }, "Title")` for named slots. Slots stay connected to the latest parent children while the component instance and its local state are preserved. `setup` can use `ref`, `computed`, `watch`, `provide`, `inject`, `onBeforeMount`, `onMounted`, `onBeforeUpdate`, `onUpdated`, `onBeforeUnmount`, `onUnmounted`, `onActivated`, and `onDeactivated` to keep local component state and coordinate with ancestor components. `watch` accepts a getter, ref, or reactive object, supports `immediate` and `deep`, and returns a stop function. `proxyRefs` automatically unwraps refs for render-oriented scopes. `effectScope()` and `onScopeDispose()` group effects and cleanup callbacks; object components create one scope per instance and stop it on unmount. Explicit `watch` flush modes are `sync`, `pre`, and `post`; queued watchers are deduplicated around component rendering.

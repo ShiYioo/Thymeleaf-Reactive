@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, readonly, shallowReadonly, isReadonly, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, customRef, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onErrorCaptured, onScopeDispose, onWatcherCleanup, refreshComponentsFromPage, render, Teleport, inject, isProxy, isRef, isShallow, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRaw, toRef, toRefs, toValue, unref, watch, watchEffect, watchPostEffect, watchSyncEffect, withMemo, startBatch, endBatch, getCurrentScope } from './dist/index.js';
+import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, readonly, shallowReadonly, isReadonly, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, customRef, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onEffectCleanup, onErrorCaptured, onScopeDispose, onWatcherCleanup, refreshComponentsFromPage, render, Teleport, inject, isProxy, isRef, isShallow, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRaw, toRef, toRefs, toValue, unref, watch, watchEffect, watchPostEffect, watchSyncEffect, withMemo, startBatch, endBatch, getCurrentScope, getCurrentWatcher } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -128,6 +128,95 @@ test('scheduled effects flush once through a batch via their scheduler', async (
   await nextTick();
   assert.deepEqual(seen, [0, 2]); // one deferred run with the final value
   assert.equal(runs, 2);
+});
+
+test('effect pause suspends runs and resume replays one dirty run', () => {
+  const state = reactive({ count: 0, label: 'a' });
+  const seen = [];
+  const runner = effect(() => { seen.push(`${state.label}:${state.count}`); });
+  assert.deepEqual(seen, ['a:0']);
+  runner.pause();
+  state.count = 1;
+  state.label = 'b';
+  assert.deepEqual(seen, ['a:0']); // paused: no runs
+  runner.resume();
+  assert.deepEqual(seen, ['a:0', 'b:1']); // one replay with final values
+  state.count = 2;
+  assert.deepEqual(seen, ['a:0', 'b:1', 'b:2']); // resumed: normal runs
+  runner.stop();
+});
+
+test('effect resume without pending changes does not rerun', () => {
+  const state = reactive({ count: 0 });
+  let runs = 0;
+  const runner = effect(() => { runs++; state.count; });
+  runner.pause();
+  runner.resume();
+  assert.equal(runs, 1); // no dirty change while paused
+  runner.stop();
+});
+
+test('paused scheduled effects defer one replay through their scheduler', async () => {
+  const state = reactive({ count: 0 });
+  const seen = [];
+  const runner = effect(() => { seen.push(state.count); }, { scheduler: () => { queueMicrotask(() => { seen.push('job'); runner(); }); } });
+  runner.pause();
+  state.count = 1;
+  state.count = 2;
+  await nextTick();
+  assert.deepEqual(seen, [0]); // paused: no scheduler job ran
+  runner.resume();
+  assert.deepEqual(seen, [0]); // resume goes through the scheduler, deferred
+  await nextTick();
+  assert.deepEqual(seen, [0, 'job', 2]); // one replay with the final value
+  runner.stop();
+});
+
+test('onEffectCleanup registers per-effect cleanup before reruns and stop', () => {
+  const state = reactive({ count: 0 });
+  const events = [];
+  const runner = effect(() => {
+    const current = state.count;
+    events.push(`run:${current}`);
+    onEffectCleanup(() => events.push(`cleanup:${current}`));
+  });
+  assert.deepEqual(events, ['run:0']);
+  state.count = 1;
+  assert.deepEqual(events, ['run:0', 'cleanup:0', 'run:1']);
+  state.count = 2;
+  assert.deepEqual(events, ['run:0', 'cleanup:0', 'run:1', 'cleanup:1', 'run:2']);
+  runner.stop();
+  assert.deepEqual(events, ['run:0', 'cleanup:0', 'run:1', 'cleanup:1', 'run:2', 'cleanup:2']);
+});
+
+test('onEffectCleanup works inside watch callbacks like onWatcherCleanup', () => {
+  const count = ref(0);
+  const events = [];
+  const stop = watch(count, () => {
+    events.push(`watch:${count.value}`);
+    onEffectCleanup(() => events.push('cleanup'));
+  });
+  count.value = 1;
+  assert.deepEqual(events, ['watch:1']);
+  count.value = 2;
+  assert.deepEqual(events, ['watch:1', 'cleanup', 'watch:2']);
+  stop();
+  assert.deepEqual(events, ['watch:1', 'cleanup', 'watch:2', 'cleanup']);
+});
+
+test('getCurrentWatcher returns the running watcher inside watch', () => {
+  const count = ref(0);
+  let seen = [];
+  const stop = watch(count, () => {
+    const watcher = getCurrentWatcher();
+    assert.notEqual(watcher, undefined);
+    assert.equal(typeof watcher.stop, 'function');
+    seen.push('watch');
+  });
+  count.value = 1;
+  stop();
+  assert.deepEqual(seen, ['watch']);
+  assert.equal(getCurrentWatcher(), undefined);
 });
 
 test('ref values participate in dependency tracking', () => {
