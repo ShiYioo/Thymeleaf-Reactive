@@ -83,6 +83,15 @@ Reactive binding expressions support safe member access plus common arithmetic, 
 
 The browser runtime also exports `computed(() => ...)` for cached derived state when authoring render-function components. `shallowRef()` tracks only replacement of its value and `triggerRef()` can explicitly notify dependents after a deliberate deep mutation, which is useful for large state objects. `watch` accepts a getter, ref, reactive object, or an array of sources such as `watch([userId, () => route.name], callback)`. It supports `immediate`, `deep`, `once`, and explicit `flush: "sync"`, `flush: "pre"`, and `flush: "post"` scheduling; queued watchers are deduplicated and run around the component render queue. `watchEffect()` accepts the same flush options, with `watchSyncEffect()` and `watchPostEffect()` as convenience APIs.
 
+Following Vue 3.6, every `watch()`/`watchEffect()` call returns a `WatchHandle`: the same callable stop function, now also exposing `pause()` and `resume()` to suspend and later resume the watcher. A paused watcher ignores source changes; `resume()` replays exactly one callback with the final value if anything changed while paused. `onWatcherCleanup(fn, failSilently?)` registers cleanup for the current watcher callback, optionally suppressing the "no active watcher" error when called outside one.
+
+```js
+const handle = watch(count, value => { syncBadge(value); });
+handle.pause();  // e.g. while the related DOM region is detached
+count.value = 2; // ignored
+handle.resume(); // fires once with the final value
+```
+
 State mutations are also coalescible through synchronous batches (Vue 3.5's `batch` design): effects triggered between `startBatch()` and `endBatch()` run once with the final values instead of once per mutation. Batches nest, and effects with a scheduler still flush through their scheduler when the outermost batch ends.
 
 ```js

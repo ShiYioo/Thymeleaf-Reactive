@@ -274,6 +274,74 @@ test('nested pauseTracking and resetTracking restore the previous state', () => 
   assert.equal(runs, 2);
 });
 
+test('watch returns a WatchHandle with pause/resume (Vue 3.6)', () => {
+  const count = ref(0);
+  const events = [];
+  const handle = watch(count, (value) => { events.push(`watch:${value}`); });
+  // handle is callable and carries pause/resume
+  assert.equal(typeof handle, 'function');
+  assert.equal(typeof handle.pause, 'function');
+  assert.equal(typeof handle.resume, 'function');
+  count.value = 1;
+  assert.deepEqual(events, ['watch:1']);
+  handle.pause();
+  count.value = 2;
+  count.value = 3;
+  assert.deepEqual(events, ['watch:1']); // paused: no callbacks
+  handle.resume();
+  assert.deepEqual(events, ['watch:1', 'watch:3']); // one replay with the final value
+  count.value = 4;
+  assert.deepEqual(events, ['watch:1', 'watch:3', 'watch:4']); // resumed: normal
+  handle(); // stop via the handle itself
+  count.value = 5;
+  assert.deepEqual(events, ['watch:1', 'watch:3', 'watch:4']);
+});
+
+test('watch pause with no pending change does not replay on resume', () => {
+  const count = ref(0);
+  let calls = 0;
+  const handle = watch(count, () => { calls++; });
+  handle.pause();
+  handle.resume();
+  assert.equal(calls, 0);
+  handle();
+});
+
+test('watchEffect returns a WatchHandle with pause/resume (Vue 3.6)', () => {
+  const count = ref(0);
+  const events = [];
+  const handle = watchEffect(() => { events.push(`effect:${count.value}`); });
+  assert.equal(typeof handle, 'function');
+  assert.equal(typeof handle.pause, 'function');
+  assert.equal(typeof handle.resume, 'function');
+  assert.deepEqual(events, ['effect:0']);
+  handle.pause();
+  count.value = 1;
+  count.value = 2;
+  assert.deepEqual(events, ['effect:0']);
+  handle.resume();
+  assert.deepEqual(events, ['effect:0', 'effect:2']);
+  handle();
+  count.value = 3;
+  assert.deepEqual(events, ['effect:0', 'effect:2']);
+});
+
+test('watchSyncEffect and watchPostEffect handles expose pause/resume', () => {
+  const sync = watchSyncEffect(() => {});
+  const post = watchPostEffect(() => {});
+  assert.equal(typeof sync.pause, 'function');
+  assert.equal(typeof sync.resume, 'function');
+  assert.equal(typeof post.pause, 'function');
+  assert.equal(typeof post.resume, 'function');
+  sync();
+  post();
+});
+
+test('onWatcherCleanup accepts failSilently outside watchers', () => {
+  assert.throws(() => onWatcherCleanup(() => {}));
+  onWatcherCleanup(() => {}, true); // no throw when failSilently
+});
+
 test('ref values participate in dependency tracking', () => {
   const count = ref(0);
   let observed = -1;

@@ -672,10 +672,15 @@ export type WatchSource<T> = (() => T) | Ref<T> | T;
 export type WatchOptions = { immediate?: boolean; deep?: boolean; once?: boolean; flush?: "sync" | "pre" | "post" };
 type WatchCallback<T> = (value: T, previous: T | undefined, onCleanup: (cleanup: () => void) => void) => void;
 export type WatchEffectOptions = { flush?: "sync" | "pre" | "post" };
+/** Vue 3.6 WatchHandle: a callable stop function that also exposes pause/resume. */
+export type WatchHandle = (() => void) & { pause: () => void; resume: () => void };
 
 /** Registers cleanup for the currently executing watch or watchEffect callback. */
-export function onWatcherCleanup(cleanup: () => void): void {
-  if (!activeWatcherCleanup) throw new Error("onWatcherCleanup() must be called synchronously inside watch() or watchEffect()");
+export function onWatcherCleanup(cleanup: () => void, failSilently = false): void {
+  if (!activeWatcherCleanup) {
+    if (failSilently) return;
+    throw new Error("onWatcherCleanup() must be called synchronously inside watch() or watchEffect()");
+  }
   activeWatcherCleanup(cleanup);
 }
 
@@ -721,22 +726,22 @@ function traverse(value: unknown, seen = new Set<object>()): unknown {
   return value;
 }
 
-/** Watches a ref, getter, or reactive object and returns a cleanup function. */
+/** Watches a ref, getter, or reactive object and returns a WatchHandle. */
 export function watch<T>(
   source: WatchSource<T>,
   callback: WatchCallback<T>,
   options?: WatchOptions
-): () => void;
+): WatchHandle;
 export function watch(
   source: WatchSource<unknown>[],
   callback: WatchCallback<unknown[]>,
   options?: WatchOptions
-): () => void;
+): WatchHandle;
 export function watch<T>(
   source: WatchSource<T> | WatchSource<unknown>[],
   callback: WatchCallback<T> | WatchCallback<unknown[]>,
   options: WatchOptions = {}
-): () => void {
+): WatchHandle {
   const sources = Array.isArray(source) ? source : undefined;
   const sourceGetter = (entry: WatchSource<unknown>): unknown => typeof entry === "function"
     ? (entry as () => unknown)()
@@ -754,7 +759,7 @@ export function watch<T>(
   let cleanup: (() => void)[] = [];
   let stopped = false;
   const ownerScope = activeEffectScope;
-  let stop!: () => void;
+  let stop!: WatchHandle;
   const runGetter = effect(() => {
     value = getter();
     if (options.deep || forceTrigger) traverse(value);
@@ -785,14 +790,16 @@ export function watch<T>(
       if (options.once) stop();
     }
   }
-  stop = (): void => {
+  stop = (() => {
     if (stopped) return;
     stopped = true;
     cleanup.forEach(run => run());
     cleanup = [];
     runGetter.stop?.();
     ownerScope?.cleanups.delete(stop);
-  };
+  }) as WatchHandle;
+  stop.pause = () => { if (!stopped) runGetter.pause?.(); };
+  stop.resume = () => { if (!stopped) runGetter.resume?.(); };
   ownerScope?.cleanups.add(stop);
   if (options.immediate) job();
   else {
@@ -803,7 +810,7 @@ export function watch<T>(
 }
 
 /** Runs immediately, tracks every reactive value it reads, and cleans up before reruns. */
-export function watchEffect(run: (onCleanup: (cleanup: () => void) => void) => void, options: WatchEffectOptions = {}): () => void {
+export function watchEffect(run: (onCleanup: (cleanup: () => void) => void) => void, options: WatchEffectOptions = {}): WatchHandle {
   let cleanup: (() => void)[] = [];
   const ownerScope = activeEffectScope;
   let runner!: Effect;
@@ -823,23 +830,25 @@ export function watchEffect(run: (onCleanup: (cleanup: () => void) => void) => v
     try { run(registerCleanup); }
     finally { activeWatcherCleanup = previousWatcherCleanup; activeWatcher = previousWatcher; }
   }, schedule ? { scheduler: schedule } : {});
-  const stop = (): void => {
+  const stop = (() => {
     runner.stop?.();
     cleanup.forEach(current => current());
     cleanup = [];
     ownerScope?.cleanups.delete(stop);
-  };
+  }) as WatchHandle;
+  stop.pause = () => runner.pause?.();
+  stop.resume = () => runner.resume?.();
   ownerScope?.cleanups.add(stop);
   return stop;
 }
 
 /** Runs a watch effect before component render jobs in the current flush. */
-export function watchSyncEffect(run: (onCleanup: (cleanup: () => void) => void) => void): () => void {
+export function watchSyncEffect(run: (onCleanup: (cleanup: () => void) => void) => void): WatchHandle {
   return watchEffect(run, { flush: "sync" });
 }
 
 /** Runs a watch effect after component render jobs in the current flush. */
-export function watchPostEffect(run: (onCleanup: (cleanup: () => void) => void) => void): () => void {
+export function watchPostEffect(run: (onCleanup: (cleanup: () => void) => void) => void): WatchHandle {
   return watchEffect(run, { flush: "post" });
 }
 
