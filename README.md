@@ -108,6 +108,17 @@ runner.resume();  // one run: syncFrame sees state.visible === true
 
 `onEffectCleanup(fn)` registers a cleanup on the current active effect (Vue 3.6 generalization of `onWatcherCleanup`): it runs right before the effect's next run and when the effect stops. Inside `watch()`/`watchEffect()` it behaves like `onWatcherCleanup()`. `getCurrentWatcher()` returns the watcher effect currently executing inside a `watch()` callback.
 
+Dependency collection can be controlled explicitly (Vue 3.6 `pauseTracking`/`enableTracking`/`resetTracking`): reads inside `pauseTracking()` are not registered as dependencies, `enableTracking()` forces collection back on, and `resetTracking()` restores the previously captured state. This is how a component render can touch internal bookkeeping state without wiring renders to it:
+
+```js
+effect(() => {
+  pauseTracking();
+  metrics.touches++; // never becomes a dependency
+  resetTracking();
+  renderFrame(state);
+});
+```
+
 ## Component API
 
 Alongside function components, the runtime supports object components with `setup`, `render`, `props`, `emits`, `inheritAttrs`, `beforeMount`, `mounted`, `beforeUpdate`, `updated`, `beforeUnmount`, `unmounted`, `activated`, and `deactivated`. Declared props are reactive, declared event listeners are available through `emit()`, and undeclared attributes are exposed as reactive `attrs` and fall through to a single-root native element unless `inheritAttrs` is `false`. `setup` receives reactive props plus `attrs`, `emit`, and lazy `slots` functions (`slots.default()` or `slots.header()`). Render-function children can use `h("strong", { slot: "header" }, "Title")` for named slots. Slots stay connected to the latest parent children while the component instance and its local state are preserved. `setup` can use `ref`, `computed`, `watch`, `provide`, `inject`, `onBeforeMount`, `onMounted`, `onBeforeUpdate`, `onUpdated`, `onBeforeUnmount`, `onUnmounted`, `onActivated`, and `onDeactivated` to keep local component state and coordinate with ancestor components. `watch` accepts a getter, ref, or reactive object, supports `immediate` and `deep`, and returns a stop function. `proxyRefs` automatically unwraps refs for render-oriented scopes. `effectScope()` and `onScopeDispose()` group effects and cleanup callbacks; object components create one scope per instance and stop it on unmount. Explicit `watch` flush modes are `sync`, `pre`, and `post`; queued watchers are deduplicated around component rendering.

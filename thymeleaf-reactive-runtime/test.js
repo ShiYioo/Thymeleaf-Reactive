@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, readonly, shallowReadonly, isReadonly, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, customRef, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onEffectCleanup, onErrorCaptured, onScopeDispose, onWatcherCleanup, refreshComponentsFromPage, render, Teleport, inject, isProxy, isRef, isShallow, onMounted, onUnmounted, onUpdated, provide, proxyRefs, toRaw, toRef, toRefs, toValue, unref, watch, watchEffect, watchPostEffect, watchSyncEffect, withMemo, startBatch, endBatch, getCurrentScope, getCurrentWatcher } from './dist/index.js';
+import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, readonly, shallowReadonly, isReadonly, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, customRef, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onEffectCleanup, onErrorCaptured, onScopeDispose, onWatcherCleanup, refreshComponentsFromPage, render, Teleport, inject, isProxy, isRef, isShallow, onMounted, onUnmounted, onUpdated, pauseTracking, enableTracking, resetTracking, provide, proxyRefs, toRaw, toRef, toRefs, toValue, unref, watch, watchEffect, watchPostEffect, watchSyncEffect, withMemo, startBatch, endBatch, getCurrentScope, getCurrentWatcher } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -217,6 +217,61 @@ test('getCurrentWatcher returns the running watcher inside watch', () => {
   stop();
   assert.deepEqual(seen, ['watch']);
   assert.equal(getCurrentWatcher(), undefined);
+});
+
+test('pauseTracking stops dependency collection until resetTracking', () => {
+  const state = reactive({ tracked: 0, untracked: 0 });
+  let runs = 0;
+  let lastTracked = -1;
+  effect(() => {
+    runs++;
+    lastTracked = state.tracked;
+    pauseTracking();
+    state.untracked;
+    resetTracking();
+  });
+  assert.equal(runs, 1);
+  state.untracked = 5; // read under pauseTracking: not a dependency
+  assert.equal(runs, 1);
+  assert.equal(lastTracked, 0);
+  state.tracked = 1; // still tracked
+  assert.equal(runs, 2);
+  assert.equal(lastTracked, 1);
+});
+
+test('enableTracking re-enables collection even when globally paused', () => {
+  const state = reactive({ a: 1, b: 2 });
+  let runs = 0;
+  let observed = '';
+  pauseTracking();
+  effect(() => {
+    runs++;
+    state.a; // should NOT be collected (globally paused)
+    enableTracking();
+    observed = String(state.b); // IS collected
+    resetTracking();
+  });
+  assert.equal(runs, 1);
+  state.a = 10;
+  assert.equal(runs, 1); // not a dependency
+  state.b = 20;
+  assert.equal(runs, 2); // collected via enableTracking
+  assert.equal(observed, '20');
+  resetTracking(); // undo the initial global pause
+});
+
+test('nested pauseTracking and resetTracking restore the previous state', () => {
+  const state = reactive({ x: 0 });
+  pauseTracking();
+  pauseTracking();
+  effect(() => { state.x; }); // runs while paused: x not collected
+  resetTracking(); // inner: still paused
+  resetTracking(); // outer: tracking restored
+  let runs = 0;
+  effect(() => { runs++; state.x; });
+  assert.equal(runs, 1);
+  state.x = 1;
+  assert.equal(runs, 2);
 });
 
 test('ref values participate in dependency tracking', () => {

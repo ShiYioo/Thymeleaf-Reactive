@@ -73,6 +73,8 @@ const effectCleanups = new WeakMap<Effect, (() => void)[]>();
 const pausedEffects = new WeakSet<Effect>();
 const dirtyEffects = new WeakSet<Effect>();
 let activeWatcher: Effect | undefined = undefined;
+let shouldTrack = true;
+const trackStack: boolean[] = [];
 let pendingFlush: Promise<void> | undefined;
 let activeEffectScope: EffectScope | undefined;
 let activeWatcherCleanup: ((cleanup: () => void) => void) | undefined;
@@ -180,12 +182,31 @@ function isReactiveValue(value: unknown): value is object {
 }
 
 function trackEffect(subscribers: Set<Effect>): void {
+  if (!shouldTrack) return;
   const active = effectStack.at(-1);
   if (!active) return;
   subscribers.add(active);
   let tracked = effectDeps.get(active);
   if (!tracked) effectDeps.set(active, tracked = new Set());
   tracked.add(subscribers);
+}
+
+/** Temporarily disables dependency collection; use with resetTracking(). */
+export function pauseTracking(): void {
+  trackStack.push(shouldTrack);
+  shouldTrack = false;
+}
+
+/** Re-enables dependency collection that was disabled by pauseTracking(). */
+export function enableTracking(): void {
+  trackStack.push(shouldTrack);
+  shouldTrack = true;
+}
+
+/** Restores the tracking state captured by the most recent pause/enable. */
+export function resetTracking(): void {
+  const last = trackStack.pop();
+  shouldTrack = last === undefined ? true : last;
 }
 
 // === Synchronous batching (Vue 3.5 "batch" design) ===
