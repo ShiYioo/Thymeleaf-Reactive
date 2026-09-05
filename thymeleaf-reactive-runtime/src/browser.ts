@@ -18,6 +18,13 @@ function parseState(value: string | undefined): object {
   }
 }
 
+/** Adapts Thymeleaf handlers, whose first argument is state, for SFC template calls. */
+export function bindSfcHandlers(state: object, handlers: Record<string, (...args: any[]) => any>): Record<string, (...args: any[]) => any> {
+  return Object.fromEntries(Object.entries(handlers).map(([name, handler]) => [name,
+    (...args: any[]) => handler(state, ...args)
+  ]));
+}
+
 async function adoptSfcComponent(
   root: HTMLElement,
   state: object,
@@ -34,7 +41,7 @@ async function adoptSfcComponent(
     throw new Error(`SFC ${source} has no component export`);
   }
   registerComponentSource(source, name);
-  Object.assign(state, handlers);
+  Object.assign(state, bindSfcHandlers(state, handlers));
   adoptComponentRoot(
     root,
     defineComponent(name, component as Component),

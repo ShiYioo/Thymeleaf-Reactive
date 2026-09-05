@@ -3653,6 +3653,19 @@ test('browser bootstrap preserves existing handlers and hydrates encoded server 
   assert.equal(typeof window.ThymeleafReactive.hydrate, 'function');
 });
 
+test('browser SFC handler bridge supplies the reactive component state first', async () => {
+  const document = installDom();
+  document.body.innerHTML = '';
+  globalThis.EventSource = undefined;
+  const { bindSfcHandlers } = await import(`./dist/browser.js?handler-bridge=${Date.now()}`);
+  const state = { count: 1 };
+  const handlers = bindSfcHandlers(state, {
+    increment(current, amount = 1) { current.count += amount; }
+  });
+  handlers.increment(2);
+  assert.equal(state.count, 3);
+});
+
 test('SFC script setup supports defineProps and defineEmits component macros', async () => {
   const document = installDom();
   const root = document.createElement('main');
