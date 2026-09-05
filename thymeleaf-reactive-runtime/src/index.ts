@@ -2201,17 +2201,27 @@ function sfcPropsWithDefaults(names: string[], expression: string): ComponentPro
     : [name, {}]));
 }
 
-function parseSfcSetup(source: string): { bindings: SfcSetupBinding[]; methods: SfcSetupMethod[]; props?: ComponentProps; emits?: string[] } {
+function parseSfcSetup(source: string): { bindings: SfcSetupBinding[]; methods: SfcSetupMethod[]; props?: ComponentProps; emits?: string[]; options?: Pick<ComponentOptions, "inheritAttrs"> } {
   const bindings: SfcSetupBinding[] = [];
   const methods: SfcSetupMethod[] = [];
   let props: ComponentProps | undefined;
   let emits: string[] | undefined;
+  let options: Pick<ComponentOptions, "inheritAttrs"> | undefined;
   const body = source
     .replace(/\/\/.*$/gm, "")
     .replace(/}\s*(?=(?:const|let|function)\b)/g, "};\n")
     .trim();
-  if (!body) return { bindings, methods, props, emits };
+  if (!body) return { bindings, methods, props, emits, options };
   splitSfcStatements(body).forEach(statement => {
+    const optionsMacro = statement.match(/^defineOptions\s*\(([\s\S]*)\)$/);
+    if (optionsMacro) {
+      const parsed = parseSfcLiteral(optionsMacro[1]);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || Object.keys(parsed).some(key => key !== "inheritAttrs") || ("inheritAttrs" in parsed && typeof (parsed as Record<string, unknown>).inheritAttrs !== "boolean")) {
+        throw new Error("defineOptions only supports the inheritAttrs boolean option");
+      }
+      options = parsed as Pick<ComponentOptions, "inheritAttrs">;
+      return;
+    }
     const defaultsMacro = statement.match(/^(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*withDefaults\s*\(\s*defineProps\s*\((\[[\s\S]*\])\)\s*,\s*([\s\S]+)\)$/);
     if (defaultsMacro) {
       props = sfcPropsWithDefaults(parseSfcMacroNames("defineProps", defaultsMacro[2]) ?? [], defaultsMacro[3]);
@@ -2271,7 +2281,7 @@ function parseSfcSetup(source: string): { bindings: SfcSetupBinding[]; methods: 
     }
     throw new Error(`Unsupported script setup statement: ${statement}`);
   });
-  return { bindings, methods, props, emits };
+  return { bindings, methods, props, emits, options };
 }
 
 function splitSfcArguments(source: string): string[] {
@@ -2397,6 +2407,7 @@ export function compileSfcComponent(source: string): Component {
     hmrSignature: script.trim(),
     props: setup.props,
     emits: setup.emits,
+    inheritAttrs: setup.options?.inheritAttrs,
     setup(props, context) {
       const local = new Proxy(Object.create(null) as Record<string, unknown>, {
         get(target, key, receiver) {

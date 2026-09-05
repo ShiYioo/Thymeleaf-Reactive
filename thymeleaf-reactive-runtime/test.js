@@ -3748,6 +3748,22 @@ test('SFC script setup withDefaults applies isolated literal prop defaults', () 
   assert.deepEqual([...root.querySelectorAll('strong')].map(element => element.textContent), ['Fallback:1', 'Actual:2']);
 });
 
+test('SFC defineOptions controls attribute fallthrough', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Badge = compileSfcComponent(`
+    <template><strong>{{ props.label }}</strong></template>
+    <script setup>
+      defineOptions({ inheritAttrs: false });
+      const props = defineProps(['label']);
+    </script>
+  `);
+  const render = compileSfcComponent('<template><Badge label="Ready" data-secret="do-not-forward" /></template>');
+  createApp(render, { components: { Badge } }).mount(root);
+  assert.equal(root.querySelector('strong').textContent, 'Ready');
+  assert.equal(root.querySelector('strong').hasAttribute('data-secret'), false);
+});
+
 test('browser bootstrap keeps Thymeleaf hydration active when an SFC module cannot load', async () => {
   const document = installDom();
   document.body.innerHTML = '<main data-tr-component="counter" data-tr-component-src="components/Missing.vue" data-tr-state="{&quot;count&quot;:2}"><p data-tr-text="count">stale</p></main>';
