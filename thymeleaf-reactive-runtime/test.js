@@ -3683,6 +3683,14 @@ test('browser SFC handler bridge supplies the reactive component state first', a
   assert.equal(state.count, 3);
 });
 
+test('browser bootstrap parses object component props metadata', async () => {
+  installDom();
+  globalThis.EventSource = undefined;
+  const { parseProps } = await import(`./dist/browser.js?props=${Date.now()}`);
+  assert.deepEqual(parseProps('{"label":"Ready","enabled":true}'), { label: 'Ready', enabled: true });
+  assert.deepEqual(parseProps('["invalid"]'), {});
+});
+
 test('SFC script setup supports defineProps and defineEmits component macros', async () => {
   const document = installDom();
   const root = document.createElement('main');

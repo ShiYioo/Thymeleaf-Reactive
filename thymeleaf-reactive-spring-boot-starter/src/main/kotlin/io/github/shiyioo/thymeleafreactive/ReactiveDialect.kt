@@ -19,6 +19,7 @@ class ReactiveDialect(private val objectMapper: ObjectMapper) : AbstractProcesso
         ReactiveKeyProcessor(),
         ReactiveEachProcessor(),
         ReactiveStateProcessor(objectMapper),
+        ReactivePropsProcessor(objectMapper),
         ReactiveTextProcessor(),
         ReactiveHtmlProcessor(),
         ReactiveAttributeProcessor("model", "data-tr-model"),
@@ -208,6 +209,34 @@ private class ReactiveStateProcessor(private val objectMapper: ObjectMapper) : A
         // entities must be supplied explicitly for valid HTML output.
         val attributeJson = json.replace("&", "&amp;").replace("\"", "&quot;")
         structureHandler.setAttribute("data-tr-state", attributeJson)
+    }
+}
+
+private class ReactivePropsProcessor(private val objectMapper: ObjectMapper) : AbstractAttributeTagProcessor(
+    TemplateMode.HTML,
+    "tr",
+    null,
+    false,
+    "props",
+    true,
+    1000,
+    true
+) {
+    override fun doProcess(
+        context: ITemplateContext,
+        tag: IProcessableElementTag,
+        attributeName: AttributeName,
+        attributeValue: String,
+        structureHandler: IElementTagStructureHandler
+    ) {
+        val expression = attributeValue.trim()
+        val isModelReference = expression.startsWith("\${") && expression.endsWith('}')
+        val props = if (isModelReference) context.getVariable(expression.substring(2, expression.length - 1).trim()) else null
+        val json = if (isModelReference) objectMapper.writeValueAsString(props) else expression
+        // Attribute processors write literal values, so quote and ampersand
+        // entities must be supplied explicitly for valid HTML output.
+        val attributeJson = json.replace("&", "&amp;").replace("\"", "&quot;")
+        structureHandler.setAttribute("data-tr-props", attributeJson)
     }
 }
 

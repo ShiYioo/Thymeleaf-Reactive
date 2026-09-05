@@ -9,13 +9,26 @@ declare global {
   }
 }
 
-function parseState(value: string | undefined): object {
+function parseJson(value: string | undefined, attribute: string): Record<string, unknown> {
   if (!value) return {};
-  try { return JSON.parse(value) as object; }
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  }
   catch (error) {
-    console.error("[thymeleaf-reactive] invalid data-tr-state JSON", error);
+    console.error(`[thymeleaf-reactive] invalid ${attribute} JSON`, error);
     return {};
   }
+}
+
+export function parseState(value: string | undefined): Record<string, unknown> {
+  return parseJson(value, "data-tr-state");
+}
+
+export function parseProps(value: string | undefined): Record<string, unknown> {
+  return parseJson(value, "data-tr-props");
 }
 
 /** Adapts Thymeleaf handlers, whose first argument is state, for SFC template calls. */
@@ -41,7 +54,7 @@ async function adoptSfcComponent(
     throw new Error(`SFC ${source} has no component export`);
   }
   registerComponentSource(source, name);
-  Object.assign(state, bindSfcHandlers(state, handlers));
+  Object.assign(state, parseProps(root.dataset.trProps), bindSfcHandlers(state, handlers));
   adoptComponentRoot(
     root,
     defineComponent(name, component as Component),

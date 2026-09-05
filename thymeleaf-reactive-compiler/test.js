@@ -74,6 +74,14 @@ test('compiles tr aliases used by the Thymeleaf starter', () => {
   });
 });
 
+test('compiles component state and props metadata', () => {
+  const result = compileElementAttributes({ 'tr:state': '${counter}', 'tr:props': '${props}' });
+  assert.deepEqual(result.runtimeAttrs, {
+    'data-tr-state': '${counter}',
+    'data-tr-props': '${props}'
+  });
+});
+
 test('compiles reactive html bindings into runtime metadata', () => {
   const result = compileElementAttributes({ 'tr:html': 'content' });
   assert.deepEqual(result.bindings, [{ kind: 'html', expression: 'content' }]);

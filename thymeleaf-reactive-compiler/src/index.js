@@ -9,6 +9,8 @@ export function compileElementAttributes(attributes) {
     const directive = name.replace(/^tr:/, 'th:');
     if (directive === 'th:component') output.component = value;
     else if (directive === 'th:component-src') { output.componentSrc = value; output.runtimeAttrs['data-tr-component-src'] = value; }
+    else if (directive === 'th:state') output.runtimeAttrs['data-tr-state'] = value;
+    else if (directive === 'th:props') output.runtimeAttrs['data-tr-props'] = value;
     else if (directive === 'th:key') { output.key = value; output.runtimeAttrs['data-tr-key'] = value; }
     else if (directive === 'th:text') { output.bindings.push({ kind: 'text', expression: value }); output.runtimeAttrs['data-tr-text'] = value; }
     else if (directive === 'th:html') { output.bindings.push({ kind: 'html', expression: value }); output.runtimeAttrs['data-tr-html'] = value; }

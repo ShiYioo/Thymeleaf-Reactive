@@ -113,6 +113,26 @@ class ReactiveDialectTest {
     }
 
     @Test
+    fun `serializes independent component props metadata`() {
+        val engine = TemplateEngine().apply {
+            setTemplateResolver(StringTemplateResolver())
+            addDialect(ReactiveDialect(ObjectMapper()))
+        }
+        val context = Context().apply {
+            setVariable("counter", mapOf("count" to 3))
+            setVariable("props", mapOf("label" to "A&B", "enabled" to true))
+        }
+
+        val output = engine.process(
+            """<section tr:component="counter" tr:state="${'$'}{counter}" tr:props="${'$'}{props}"></section>""",
+            context
+        )
+
+        assertThat(output).contains("data-tr-state=\"{&quot;count&quot;:3}\"")
+        assertThat(output).contains("data-tr-props=\"{&quot;label&quot;:&quot;A&amp;B&quot;,&quot;enabled&quot;:true}\"")
+    }
+
+    @Test
     fun `renders of syntax on the server`() {
         val engine = TemplateEngine().apply {
             setTemplateResolver(StringTemplateResolver())
