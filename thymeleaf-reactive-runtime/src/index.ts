@@ -3861,6 +3861,7 @@ type FormState = { value?: string; checked?: boolean; selected?: string[]; start
 type HydrationContext = {
   state: object;
   handlers: Record<string, (...args: any[]) => any>;
+  propKeys: Set<string>;
   cleanups: Set<() => void>;
   scope: EffectScope;
   uid: number;
@@ -3982,7 +3983,7 @@ function pairComponentRoots(current: HTMLElement[], next: HTMLElement[]): {
   };
 }
 
-function parseComponentMetadata(root: HTMLElement): Record<string, unknown> {
+function parseComponentMetadata(root: Element): Record<string, unknown> {
   const parse = (source: string | undefined, attribute: string): Record<string, unknown> => {
     if (!source) return {};
     try {
@@ -3995,11 +3996,11 @@ function parseComponentMetadata(root: HTMLElement): Record<string, unknown> {
       return {};
     }
   };
-  return { ...parse(root.dataset.trState, "data-tr-state"), ...parse(root.dataset.trProps, "data-tr-props") };
+  return { ...parse(root.getAttribute("data-tr-state") ?? undefined, "data-tr-state"), ...parse(root.getAttribute("data-tr-props") ?? undefined, "data-tr-props") };
 }
 
-function parseComponentProps(root: HTMLElement): Record<string, unknown> {
-  const source = root.dataset.trProps;
+function parseComponentProps(root: Element): Record<string, unknown> {
+  const source = root.getAttribute("data-tr-props");
   if (!source) return {};
   try {
     const parsed = JSON.parse(source);
@@ -4010,6 +4011,19 @@ function parseComponentProps(root: HTMLElement): Record<string, unknown> {
     console.error("[thymeleaf-reactive] invalid data-tr-props JSON during HMR", error);
     return {};
   }
+}
+
+function syncComponentMetadata(context: HydrationContext, root: HTMLElement): void {
+  const state = parseComponentMetadata(root);
+  const props = parseComponentProps(root);
+  const nextKeys = new Set(Object.keys(props));
+  context.propKeys.forEach(key => {
+    if (nextKeys.has(key)) return;
+    if (Object.prototype.hasOwnProperty.call(state, key)) (context.state as Record<string, unknown>)[key] = state[key];
+    else delete (context.state as Record<string, unknown>)[key];
+  });
+  Object.assign(context.state, props);
+  context.propKeys = nextKeys;
 }
 
 function parseComponentState(root: HTMLElement): object {
@@ -4190,7 +4204,7 @@ export async function refreshComponentsFromPage(component: string): Promise<void
       const liveRoot = patched.el as HTMLElement;
       liveRoots.set(nextRoot, liveRoot);
       if (context) {
-        Object.assign(context.state, parseComponentProps(nextRoot));
+        syncComponentMetadata(context, nextRoot);
         hydrateComponentRoot(liveRoot, context);
       }
     }
@@ -4398,7 +4412,7 @@ function cloneEachTemplate(template: HTMLElement): HTMLElement {
 export function hydrate(root: Element, state: object, handlers: Record<string, (...args: any[]) => any> = {}): object {
   disposeHydration(root);
   const reactiveState = reactive(state);
-  const context: HydrationContext = { state: reactiveState, handlers, cleanups: new Set(), scope: effectScope(), uid: nextComponentUid++ };
+  const context: HydrationContext = { state: reactiveState, handlers, propKeys: new Set(Object.keys(parseComponentProps(root))), cleanups: new Set(), scope: effectScope(), uid: nextComponentUid++ };
   hydrationContexts.set(root, context);
   const cleanup = (dispose: () => void): void => { context.cleanups.add(dispose); };
   const componentRoot = root.matches("[data-tr-component]") ? root : undefined;

@@ -1548,6 +1548,22 @@ test('VNode refs follow native and component mount, patch, and unmount lifecycle
   assert.equal(elementRef.value, null);
 });
 
+test('component HMR updates and removes server component props', async () => {
+  const document = installDom();
+  document.body.innerHTML = '<section data-tr-component="profile" data-tr-state="{&quot;count&quot;:1}" data-tr-props="{&quot;label&quot;:&quot;Before&quot;}"><strong data-tr-text="label">Before</strong></section>';
+  const root = document.querySelector('section');
+  const state = hydrate(root, { count: 1, label: 'Before' });
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    text: async () => '<html><body><section data-tr-component="profile" data-tr-state="{&quot;count&quot;:2,&quot;label&quot;:&quot;Fallback&quot;}" data-tr-props="{}"><strong data-tr-text="label">stale</strong></section></body></html>'
+  });
+  await refreshComponentsFromPage('profile');
+  assert.equal(state.count, 1);
+  assert.equal(state.label, 'Fallback');
+  assert.equal(root.querySelector('strong').textContent, 'Fallback');
+});
+
 test('withDirectives runs native VNode directive hooks through patch and unmount', async () => {
   const document = installDom();
   const root = document.createElement('main');
