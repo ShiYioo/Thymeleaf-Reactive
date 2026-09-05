@@ -3659,7 +3659,7 @@ test('SFC script setup supports defineProps and defineEmits component macros', a
   const Child = compileSfcComponent(`
     <template><button @click="save">{{ props.label }}</button></template>
     <script setup>
-      const props = defineProps();
+      const props = defineProps(['label']);
       const emit = defineEmits(['save']);
       const save = () => emit('save', props.label);
     </script>

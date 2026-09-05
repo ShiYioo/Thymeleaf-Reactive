@@ -2055,23 +2055,37 @@ function splitSfcStatements(source: string): string[] {
   return statements;
 }
 
-function parseSfcSetup(source: string): { bindings: SfcSetupBinding[]; methods: SfcSetupMethod[] } {
+function parseSfcMacroNames(macro: string, source: string): string[] | undefined {
+  const normalized = source.trim();
+  if (!normalized) return undefined;
+  if (!/^\[[\s\S]*\]$/.test(normalized)) throw new Error(`${macro} only supports a literal string array`);
+  const names = Array.from(normalized.matchAll(/(['"])([A-Za-z_$][\w$-]*)\1/g), match => match[2]);
+  const remainder = normalized.replace(/(['"])([A-Za-z_$][\w$-]*)\1/g, "").replace(/[\[\],\s]/g, "");
+  if (remainder || names.length !== new Set(names).size) throw new Error(`${macro} only supports unique literal string names`);
+  return names;
+}
+
+function parseSfcSetup(source: string): { bindings: SfcSetupBinding[]; methods: SfcSetupMethod[]; props?: string[]; emits?: string[] } {
   const bindings: SfcSetupBinding[] = [];
   const methods: SfcSetupMethod[] = [];
+  let props: string[] | undefined;
+  let emits: string[] | undefined;
   const body = source
     .replace(/\/\/.*$/gm, "")
     .replace(/}\s*(?=(?:const|let|function)\b)/g, "};\n")
     .trim();
-  if (!body) return { bindings, methods };
+  if (!body) return { bindings, methods, props, emits };
   splitSfcStatements(body).forEach(statement => {
-    const props = statement.match(/^(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*defineProps\s*\(\s*\)$/);
-    if (props) {
-      bindings.push({ name: props[1], kind: "props", expression: "" });
+    const propsMacro = statement.match(/^(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*defineProps\s*\(([\s\S]*)\)$/);
+    if (propsMacro) {
+      props = parseSfcMacroNames("defineProps", propsMacro[2]);
+      bindings.push({ name: propsMacro[1], kind: "props", expression: "" });
       return;
     }
-    const emit = statement.match(/^(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*defineEmits\s*\(\s*(?:\[[\s\S]*\])?\s*\)$/);
-    if (emit) {
-      bindings.push({ name: emit[1], kind: "emit", expression: "" });
+    const emitsMacro = statement.match(/^(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*defineEmits\s*\(([\s\S]*)\)$/);
+    if (emitsMacro) {
+      emits = parseSfcMacroNames("defineEmits", emitsMacro[2]);
+      bindings.push({ name: emitsMacro[1], kind: "emit", expression: "" });
       return;
     }
     const binding = statement.match(/^(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*(ref|reactive|computed)\(([\s\S]*)\)$/);
@@ -2096,7 +2110,7 @@ function parseSfcSetup(source: string): { bindings: SfcSetupBinding[]; methods: 
     }
     throw new Error(`Unsupported script setup statement: ${statement}`);
   });
-  return { bindings, methods };
+  return { bindings, methods, props, emits };
 }
 
 function splitSfcArguments(source: string): string[] {
@@ -2217,6 +2231,8 @@ export function compileSfcComponent(source: string): Component {
   return {
     hmrRender,
     hmrSignature: script.trim(),
+    props: setup.props,
+    emits: setup.emits,
     setup(props, context) {
       const local = new Proxy(Object.create(null) as Record<string, unknown>, {
         get(target, key, receiver) {
