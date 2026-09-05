@@ -982,6 +982,22 @@ test('async components render loading, resolved, and error states', async () => 
   assert.equal(root.textContent, 'Error:offline');
 });
 
+test('async components unwrap default exports from dynamic ES module imports', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Async = defineAsyncComponent(() => Promise.resolve({
+    default: () => h('strong', { class: 'panel' }, 'Loaded module')
+  }));
+  const app = createApp(() => h(Suspense, { fallback: h('p', {}, 'Loading') }, [h(Async)]));
+  app.mount(root);
+  assert.equal(root.textContent, 'Loading');
+  await Promise.resolve();
+  await nextTick();
+  assert.equal(root.querySelector('strong').className, 'panel');
+  assert.equal(root.textContent, 'Loaded module');
+  app.unmount();
+});
+
 test('async components can retry or fail through the Vue-compatible error hook', async () => {
   const document = installDom();
   const root = document.createElement('main');

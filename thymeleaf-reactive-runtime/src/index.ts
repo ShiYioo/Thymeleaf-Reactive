@@ -42,8 +42,9 @@ export type ComponentOptions = {
 };
 export type Component = ComponentRender | ComponentOptions;
 export type RenderFunction = (state: any) => VNode;
+export type AsyncComponentModule = { default: Component };
 export type AsyncComponentOptions = {
-  loader: () => Promise<Component>;
+  loader: () => Promise<Component | AsyncComponentModule>;
   loadingComponent?: Component;
   errorComponent?: Component;
   delay?: number;
@@ -961,7 +962,7 @@ type AsyncComponentState = { component?: Component; error?: unknown; loading: bo
 const asyncComponentStates = new WeakMap<ComponentRender, AsyncComponentState>();
 
 /** Creates a component that resolves its implementation on demand. */
-export function defineAsyncComponent(source: AsyncComponentOptions | (() => Promise<Component>)): ComponentRender {
+export function defineAsyncComponent(source: AsyncComponentOptions | (() => Promise<Component | AsyncComponentModule>)): ComponentRender {
   const options = typeof source === "function" ? { loader: source } : source;
   const state = reactive<AsyncComponentState>({
     loading: !options.delay,
@@ -1011,16 +1012,16 @@ export function defineAsyncComponent(source: AsyncComponentOptions | (() => Prom
     if (options.timeout && options.timeout > 0) {
       setTimeout(() => recover(new Error(`Async component timed out after ${options.timeout}ms`)), options.timeout);
     }
-    let loader: Promise<Component>;
+    let loader: Promise<Component | AsyncComponentModule>;
     try { loader = options.loader(); }
     catch (error) {
       recover(error);
       return;
     }
-    void loader.then(component => {
+    void loader.then(loaded => {
       if (settled || !isCurrent()) return;
       settled = true;
-      state.component = component;
+      state.component = isAsyncComponentModule(loaded) ? loaded.default : loaded;
       state.loading = false;
       state.pending = false;
     }).catch(recover);
@@ -2103,6 +2104,11 @@ function hasPendingAsync(vnode: VNode): boolean {
   // traverse through it would replace already-renderable outer content with
   // the parent's fallback instead of rendering the nested fallback in place.
   return Boolean(state?.pending || vnode.children.some(child => child.type !== Suspense && hasPendingAsync(child)));
+}
+
+function isAsyncComponentModule(value: Component | AsyncComponentModule): value is AsyncComponentModule {
+  return typeof value === "object" && value !== null && "default" in value &&
+    (typeof value.default === "function" || (typeof value.default === "object" && value.default !== null));
 }
 
 function suspenseFallback(vnode: VNode): VNode {
