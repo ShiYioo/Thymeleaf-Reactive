@@ -5,7 +5,7 @@ type VNodeChild = VNode | Primitive | VNodeChild[];
 export type Effect = (() => void) & { stop?: () => void; pause?: () => void; resume?: () => void };
 type EffectOptions = { lazy?: boolean; scheduler?: () => void };
 export type ComponentRender = (props: Record<string, unknown>, children: VNode[]) => VNode;
-export type ComponentSlots = Record<string, () => VNode[]>;
+export type ComponentSlots = Record<string, (props?: Record<string, unknown>) => VNode[]>;
 export type ComponentContext = {
   children: VNode[];
   slots: ComponentSlots;
@@ -1132,6 +1132,8 @@ export type VNode = {
   instance?: ComponentInstance;
   owner?: ComponentInstance;
   slot?: string;
+  /** Lazily renders an SFC slot against props supplied by its receiving component. */
+  slotRender?: (props: Record<string, unknown>) => VNode[];
   cache?: Map<unknown, VNode>;
   activeKey?: unknown;
   text?: string;
@@ -1398,7 +1400,8 @@ function mergeFallthroughProps(tree: VNode, attrs: Record<string, unknown>): VNo
 function componentSlots(instance: ComponentInstance): ComponentSlots {
   return new Proxy({}, {
     get: (_target, name: string | symbol) => typeof name === "string"
-      ? () => (instance.children ?? []).filter(child => (child.slot ?? "default") === name)
+      ? (props: Record<string, unknown> = {}) => (instance.children ?? []).flatMap(child =>
+        (child.slot ?? "default") !== name ? [] : child.slotRender ? child.slotRender(props) : [child])
       : undefined
   }) as ComponentSlots;
 }
@@ -1407,7 +1410,7 @@ function areVNodeChildrenEqual(previous: VNode[], next: VNode[]): boolean {
   if (previous.length !== next.length) return false;
   return previous.every((child, index) => {
     const candidate = next[index];
-    if (child.type !== candidate.type || child.key !== candidate.key || child.text !== candidate.text || child.slot !== candidate.slot) return false;
+    if (child.type !== candidate.type || child.key !== candidate.key || child.text !== candidate.text || child.slot !== candidate.slot || child.slotRender !== candidate.slotRender) return false;
     const previousProps = child.props;
     const nextProps = candidate.props;
     const propKeys = new Set([...Object.keys(previousProps), ...Object.keys(nextProps)]);
@@ -1718,9 +1721,9 @@ function renderSfcSlots(nodes: Node[], scope: Record<string, unknown>, slots: VN
     }
     const element = node as Element;
     const shorthand = Array.from(element.attributes).find(attribute => attribute.name.startsWith("#"));
-    const explicit = shorthand?.name.slice(1) || element.getAttribute("v-slot") ||
-      Array.from(element.attributes).find(attribute => attribute.name.startsWith("v-slot:"))?.name.slice(7) ||
-      element.getAttribute("slot");
+    const named = Array.from(element.attributes).find(attribute => attribute.name.startsWith("v-slot:"));
+    const defaultSlot = element.getAttributeNode("v-slot");
+    const explicit = shorthand?.name.slice(1) || named?.name.slice(7) || (defaultSlot ? "default" : undefined) || element.getAttribute("slot");
     if (!explicit) {
       const rendered = renderSfcNode(node, scope, slots, onceCache, memoCache);
       if (rendered) output.push(...(Array.isArray(rendered) ? rendered : [rendered]));
@@ -1733,9 +1736,47 @@ function renderSfcSlots(nodes: Node[], scope: Record<string, unknown>, slots: VN
           clone.removeAttribute("slot");
           return clone;
         })()];
-    output.push(...renderSfcChildren(source, scope, slots, onceCache, memoCache).map(vnode => ({ ...vnode, slot: explicit })));
+    const slotBinding = shorthand?.value || named?.value || defaultSlot?.value;
+    const carrier = h(Fragment, {}, []);
+    carrier.slot = explicit;
+    carrier.slotRender = slotProps => {
+      const slotScope = Object.create(scope) as Record<string, unknown>;
+      bindSfcSlotProps(slotScope, slotBinding, slotProps);
+      return renderSfcChildren(source, slotScope, slots, onceCache, memoCache);
+    };
+    output.push(carrier);
   });
   return output;
+}
+
+function bindSfcSlotProps(scope: Record<string, unknown>, binding: string | undefined, props: Record<string, unknown>): void {
+  if (!binding) return;
+  const normalized = binding.trim();
+  if (/^[A-Za-z_$][\w$]*$/.test(normalized)) {
+    scope[normalized] = props;
+    return;
+  }
+  const match = normalized.match(/^\{\s*([\s\S]*?)\s*\}$/);
+  if (!match) return;
+  match[1].split(",").forEach(entry => {
+    const [source, target = source] = entry.split(":").map(part => part.trim());
+    if (/^[A-Za-z_$][\w$]*$/.test(source) && /^[A-Za-z_$][\w$]*$/.test(target)) scope[target] = props[source];
+  });
+}
+
+function sfcSlotProps(element: Element, scope: Record<string, unknown>): Record<string, unknown> {
+  const props: Record<string, unknown> = {};
+  Array.from(element.attributes).forEach(attribute => {
+    const { name, value } = attribute;
+    if (name === "name") return;
+    if (name === "v-bind") {
+      const bound = readPath(scope, value);
+      if (bound && typeof bound === "object") Object.assign(props, bound);
+    } else if (name.startsWith(":")) props[resolveSfcDynamicName(name.slice(1), scope)] = readPath(scope, value);
+    else if (name.startsWith("v-bind:")) props[resolveSfcDynamicName(name.slice(7), scope)] = readPath(scope, value);
+    else if (!name.startsWith("v-")) props[name] = value;
+  });
+  return props;
 }
 
 function normalizeSfcModelValue(value: unknown, modifiers: string[]): unknown {
@@ -1771,7 +1812,8 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
   }
   if (element.tagName.toLowerCase() === "slot") {
     const name = element.getAttribute("name") ?? "default";
-    const assigned = slots.filter(child => (child.slot ?? "default") === name);
+    const slotProps = sfcSlotProps(element, scope);
+    const assigned = slots.flatMap(child => (child.slot ?? "default") !== name ? [] : child.slotRender ? child.slotRender(slotProps) : [child]);
     return h(Fragment, {}, assigned.length ? assigned : renderSfcChildren(Array.from(element.childNodes), scope, slots, onceCache, memoCache));
   }
   const loop = element.getAttribute("v-for");
@@ -2107,7 +2149,10 @@ export function compileSfcComponent(source: string): Component {
   const templateSource = extractSfcBlock(source, "template");
   if (!templateSource) throw new Error("Vue component is missing a <template> block");
   const template = document.createElement("template");
-  template.innerHTML = normalizeSfcSelfClosingTags(templateSource);
+  // HTML parsers discard '#' from attribute names, so normalize Vue's slot shorthand first.
+  const normalizedSlots = templateSource.replace(/<[^>]+>/g, tag =>
+    tag.replace(/(^|\s)#([A-Za-z_$][\w$-]*)(?=\s|=|\/?\s*>)/g, "$1v-slot:$2"));
+  template.innerHTML = normalizeSfcSelfClosingTags(normalizedSlots);
   const roots = Array.from(template.content.childNodes);
   const script = source.match(/<script\s+setup(?:\s[^>]*)?>([\s\S]*?)<\/script>/i)?.[1];
   if (!script) return (props, children) => {

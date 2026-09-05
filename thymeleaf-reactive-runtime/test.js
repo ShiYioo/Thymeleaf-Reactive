@@ -3077,6 +3077,34 @@ test('SFC renders named slots, direct slot content, and slot fallbacks', async (
   assert.equal(fallbackRoot.querySelector('small').textContent, 'Fallback footer');
 });
 
+test('SFC scoped slots receive child props and retain the parent render scope', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Card = compileSfcComponent(`
+    <template><article><slot name="item" :label="label"><em>Fallback</em></slot></article></template>
+  `);
+  const render = compileSfcComponent(`
+    <template>
+      <Card :label="label">
+        <template #item="slotProps"><strong>{{ slotProps.label }}:{{ suffix }}</strong></template>
+      </Card>
+    </template>
+  `);
+  const state = createApp(render, {
+    label: 'First', suffix: 'one', components: { Card }
+  }).mount(root);
+  const content = root.querySelector('strong');
+  assert.equal(content.textContent, 'First:one');
+  state.label = 'Second';
+  await nextTick();
+  assert.equal(root.querySelector('strong'), content);
+  assert.equal(content.textContent, 'Second:one');
+  state.suffix = 'two';
+  await nextTick();
+  assert.equal(root.querySelector('strong'), content);
+  assert.equal(content.textContent, 'Second:two');
+});
+
 test('SFC resolves dynamic native and registered component targets', async () => {
   const document = installDom();
   const root = document.createElement('main');
