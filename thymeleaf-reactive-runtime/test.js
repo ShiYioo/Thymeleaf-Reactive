@@ -3118,6 +3118,20 @@ test('SFC component-level v-slot provides default scoped slot props', async () =
   assert.equal(content.textContent, 'Changed');
 });
 
+test('SFC dynamic slot names preserve expressions and update their receiving outlet', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Card = compileSfcComponent('<template><article><slot :name="activeSlot"><em>Fallback</em></slot></article></template>');
+  const render = compileSfcComponent('<template><Card :activeSlot="activeSlot"><template v-slot:[activeSlot]><strong>{{ message }}</strong></template></Card></template>');
+  const state = createApp(render, { activeSlot: 'first', message: 'One', components: { Card } }).mount(root);
+  assert.equal(root.querySelector('strong').textContent, 'One');
+  state.activeSlot = 'second';
+  state.message = 'Two';
+  await nextTick();
+  assert.equal(root.querySelector('strong').textContent, 'Two');
+  assert.equal(root.querySelector('em'), null);
+});
+
 test('SFC resolves dynamic native and registered component targets', async () => {
   const document = installDom();
   const root = document.createElement('main');

@@ -1720,11 +1720,8 @@ function renderSfcSlots(nodes: Node[], scope: Record<string, unknown>, slots: VN
       return;
     }
     const element = node as Element;
-    const shorthand = Array.from(element.attributes).find(attribute => attribute.name.startsWith("#"));
-    const named = Array.from(element.attributes).find(attribute => attribute.name.startsWith("v-slot:"));
-    const defaultSlot = element.getAttributeNode("v-slot");
-    const explicit = shorthand?.name.slice(1) || named?.name.slice(7) || (defaultSlot ? "default" : undefined) || element.getAttribute("slot");
-    if (!explicit) {
+    const declaration = sfcSlotDeclaration(element, scope);
+    if (!declaration) {
       const rendered = renderSfcNode(node, scope, slots, onceCache, memoCache);
       if (rendered) output.push(...(Array.isArray(rendered) ? rendered : [rendered]));
       return;
@@ -1736,9 +1733,24 @@ function renderSfcSlots(nodes: Node[], scope: Record<string, unknown>, slots: VN
           clone.removeAttribute("slot");
           return clone;
         })()];
-    output.push(createSfcSlotCarrier(source, scope, slots, explicit, shorthand?.value || named?.value || defaultSlot?.value, onceCache, memoCache));
+    output.push(createSfcSlotCarrier(source, scope, slots, declaration.name, declaration.binding, onceCache, memoCache));
   });
   return output;
+}
+
+type SfcSlotDeclaration = { name: string; binding?: string };
+
+function sfcSlotDeclaration(element: Element, scope: Record<string, unknown>): SfcSlotDeclaration | undefined {
+  const dynamicName = element.getAttribute("data-tr-sfc-slot-name");
+  if (dynamicName != null) return { name: String(readPath(scope, dynamicName) ?? "default"), binding: element.getAttribute("data-tr-sfc-slot-binding") ?? undefined };
+  const shorthand = Array.from(element.attributes).find(attribute => attribute.name.startsWith("#"));
+  if (shorthand) return { name: shorthand.name.slice(1), binding: shorthand.value || undefined };
+  const named = Array.from(element.attributes).find(attribute => attribute.name.startsWith("v-slot:"));
+  if (named) return { name: named.name.slice(7), binding: named.value || undefined };
+  const defaultSlot = element.getAttributeNode("v-slot");
+  if (defaultSlot) return { name: "default", binding: defaultSlot.value || undefined };
+  const legacy = element.getAttribute("slot");
+  return legacy ? { name: legacy } : undefined;
 }
 
 function createSfcSlotCarrier(source: Node[], scope: Record<string, unknown>, slots: VNode[], name: string, binding?: string, onceCache?: SfcOnceCache, memoCache?: SfcMemoCache): VNode {
@@ -1771,7 +1783,7 @@ function sfcSlotProps(element: Element, scope: Record<string, unknown>): Record<
   const props: Record<string, unknown> = {};
   Array.from(element.attributes).forEach(attribute => {
     const { name, value } = attribute;
-    if (name === "name") return;
+    if (name === "name" || name === ":name" || name === "v-bind:name") return;
     if (name === "v-bind") {
       const bound = readPath(scope, value);
       if (bound && typeof bound === "object") Object.assign(props, bound);
@@ -1780,6 +1792,17 @@ function sfcSlotProps(element: Element, scope: Record<string, unknown>): Record<
     else if (!name.startsWith("v-")) props[name] = value;
   });
   return props;
+}
+
+function sfcReceivingSlotName(element: Element, scope: Record<string, unknown>): string {
+  const expression = element.getAttribute(":name") ?? element.getAttribute("v-bind:name");
+  return expression == null ? element.getAttribute("name") ?? "default" : String(readPath(scope, expression) ?? "default");
+}
+
+function sfcScopeProperty(scope: Record<string, unknown>, key: PropertyKey): unknown {
+  if (typeof key !== "string" || key in scope) return scope[key as keyof typeof scope];
+  const matched = Object.keys(scope).find(candidate => candidate.toLowerCase() === key.toLowerCase());
+  return matched === undefined ? undefined : scope[matched];
 }
 
 function normalizeSfcModelValue(value: unknown, modifiers: string[]): unknown {
@@ -1814,7 +1837,7 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
     }
   }
   if (element.tagName.toLowerCase() === "slot") {
-    const name = element.getAttribute("name") ?? "default";
+    const name = sfcReceivingSlotName(element, scope);
     const slotProps = sfcSlotProps(element, scope);
     const assigned = slots.flatMap(child => (child.slot ?? "default") !== name ? [] : child.slotRender ? child.slotRender(slotProps) : [child]);
     return h(Fragment, {}, assigned.length ? assigned : renderSfcChildren(Array.from(element.childNodes), scope, slots, onceCache, memoCache));
@@ -1865,7 +1888,7 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
   const directives: VNodeDirective[] = [];
   Array.from(element.attributes).forEach(attribute => {
     const { name, value } = attribute;
-    if (name === "v-if" || name === "v-else" || name === "v-else-if" || name === "v-show" || name === "v-text" || name === "v-html" || name === "v-memo" || name === "v-slot" || name.startsWith("v-slot:") || name.startsWith("#") || (dynamic && (name === "is" || name === ":is" || name === "v-bind:is"))) return;
+    if (name === "v-if" || name === "v-else" || name === "v-else-if" || name === "v-show" || name === "v-text" || name === "v-html" || name === "v-memo" || name === "v-slot" || name.startsWith("v-slot:") || name.startsWith("#") || name === "data-tr-sfc-slot-name" || name === "data-tr-sfc-slot-binding" || (dynamic && (name === "is" || name === ":is" || name === "v-bind:is"))) return;
     if (name === "v-bind") {
       const bound = readPath(scope, value);
       if (bound && typeof bound === "object") Object.assign(props, bound);
@@ -1975,10 +1998,10 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
   const textExpression = element.getAttribute("v-text");
   const htmlExpression = element.getAttribute("v-html");
   if (htmlExpression) props.innerHTML = readPath(scope, htmlExpression) ?? "";
-  const componentSlot = component && (element.getAttributeNode("v-slot") || Array.from(element.attributes).find(attribute => attribute.name.startsWith("v-slot:")) || Array.from(element.attributes).find(attribute => attribute.name.startsWith("#")));
+  const componentSlot = component ? sfcSlotDeclaration(element, scope) : undefined;
   const children = component
     ? componentSlot
-      ? [createSfcSlotCarrier(Array.from(element.childNodes), scope, slots, componentSlot.name === "v-slot" ? "default" : componentSlot.name.slice(7) || componentSlot.name.slice(1), componentSlot.value, onceCache, memoCache)]
+      ? [createSfcSlotCarrier(Array.from(element.childNodes), scope, slots, componentSlot.name, componentSlot.binding, onceCache, memoCache)]
       : renderSfcSlots(Array.from(element.childNodes), scope, slots, onceCache, memoCache)
     : htmlExpression
       ? []
@@ -2157,12 +2180,18 @@ export function compileSfcComponent(source: string): Component {
   const template = document.createElement("template");
   // HTML parsers discard '#' from attribute names, so normalize Vue's slot shorthand first.
   const normalizedSlots = templateSource.replace(/<[^>]+>/g, tag =>
-    tag.replace(/(^|\s)#([A-Za-z_$][\w$-]*)(?=\s|=|\/?\s*>)/g, "$1v-slot:$2"));
+    tag
+      .replace(/(\s)(?:v-slot:|#)\[([^\]]+)\](?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s/>]+)))?/g, (_match, prefix, name, quoted, singleQuoted, bare) =>
+        `${prefix}data-tr-sfc-slot-name="${name}" data-tr-sfc-slot-binding="${quoted ?? singleQuoted ?? bare ?? ""}"`)
+      .replace(/(^|\s)#([A-Za-z_$][\w$-]*)(?=\s|=|\/?\s*>)/g, "$1v-slot:$2"));
   template.innerHTML = normalizeSfcSelfClosingTags(normalizedSlots);
   const roots = Array.from(template.content.childNodes);
   const script = source.match(/<script\s+setup(?:\s[^>]*)?>([\s\S]*?)<\/script>/i)?.[1];
   if (!script) return (props, children) => {
-    const scope = props as Record<string, unknown>;
+    const scope = new Proxy(props as Record<string, unknown>, {
+      get(target, key) { return sfcScopeProperty(target, key); },
+      has(target, key) { return typeof key === "string" ? key in target || Object.keys(target).some(candidate => candidate.toLowerCase() === key.toLowerCase()) : key in target; }
+    });
     const nodes = renderSfcChildren(roots, scope, children);
     return nodes.length === 1 ? nodes[0] : h(Fragment, {}, nodes);
   };
@@ -2177,9 +2206,9 @@ export function compileSfcComponent(source: string): Component {
     setup(props, context) {
       const local = new Proxy(Object.create(null) as Record<string, unknown>, {
         get(target, key, receiver) {
-          return key in target ? Reflect.get(target, key, receiver) : props[key as string];
+          return key in target ? Reflect.get(target, key, receiver) : sfcScopeProperty(props, key);
         },
-        has(target, key) { return key in target || key in props; }
+        has(target, key) { return key in target || (typeof key === "string" && (key in props || Object.keys(props).some(candidate => candidate.toLowerCase() === key.toLowerCase()))); }
       });
       setup.bindings.forEach(binding => {
         if (binding.kind === "ref") local[binding.name] = ref(readPath(local, binding.expression));
