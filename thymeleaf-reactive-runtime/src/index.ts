@@ -1547,11 +1547,22 @@ function addSfcEventHandler(props: Record<string, unknown>, eventName: string, h
   if (!handler) return;
   const key = sfcEventPropName(eventName);
   const previous = props[key];
-  if (typeof previous === "function") {
-    const combined = ((event: Event) => { (previous as (event: Event) => void)(event); handler(event); }) as SfcEventHandler;
-    combined.eventOptions = handler.eventOptions ?? (previous as SfcEventHandler).eventOptions;
-    props[key] = combined;
-  } else props[key] = handler;
+  if (previous) props[key] = [...(Array.isArray(previous) ? previous : [previous]), handler];
+  else props[key] = handler;
+}
+
+function addSfcObjectEventHandlers(props: Record<string, unknown>, value: unknown, scope: Record<string, unknown>): void {
+  if (!value || typeof value !== "object") return;
+  Object.entries(value as Record<string, unknown>).forEach(([eventName, listener]) => {
+    const handlers = (Array.isArray(listener) ? listener : [listener]).filter((candidate): candidate is (...args: unknown[]) => unknown =>
+      typeof candidate === "function"
+    );
+    if (!handlers.length) return;
+    const key = /^on[A-Z]/.test(eventName) ? eventName : sfcEventPropName(eventName);
+    const handler = ((event: Event) => handlers.forEach(listener => listener.call(scope, event))) as SfcEventHandler;
+    const previous = props[key];
+    props[key] = previous ? [...(Array.isArray(previous) ? previous : [previous]), handler] : handler;
+  });
 }
 
 function resolveSfcComponent(tagName: string, scope: Record<string, unknown>): Component | undefined {
@@ -1772,6 +1783,8 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
     if (name === "v-bind") {
       const bound = readPath(scope, value);
       if (bound && typeof bound === "object") Object.assign(props, bound);
+    } else if (name === "v-on") {
+      addSfcObjectEventHandlers(props, readPath(scope, value), scope);
     } else if (name.startsWith(":")) props[resolveSfcDynamicName(name.slice(1), scope)] = readPath(scope, value);
     else if (name.startsWith("v-bind:")) props[resolveSfcDynamicName(name.slice(7), scope)] = readPath(scope, value);
      else if (name.startsWith("@")) {

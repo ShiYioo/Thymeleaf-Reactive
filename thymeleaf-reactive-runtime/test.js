@@ -3111,6 +3111,39 @@ test('SFC supports object spread bindings for native and child component props',
   assert.equal(root.querySelector('strong').textContent, 'Done:false');
 });
 
+test('SFC v-on object bindings update native and component event listeners', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Child = defineComponent('sfc-v-on-object-child', {
+    emits: ['save'],
+    setup(_props, { emit }) {
+      return () => h('button', { class: 'child', onClick: () => emit('save', 3) }, 'Save');
+    }
+  });
+  const render = compileSfcComponent(`
+    <template><section><button class="native" v-on="nativeListeners">Native</button><Child v-on="componentListeners" /></section></template>
+  `);
+  const state = createApp(render, {
+    components: { Child },
+    nativeCount: 0,
+    saved: 0,
+    nativeListeners: { click() { this.nativeCount++; } },
+    componentListeners: { save(value) { this.saved += value; } }
+  }).mount(root);
+  root.querySelector('.native').dispatchEvent(new Event('click', { bubbles: true }));
+  root.querySelector('.child').dispatchEvent(new Event('click', { bubbles: true }));
+  assert.equal(state.nativeCount, 1);
+  assert.equal(state.saved, 3);
+
+  state.nativeListeners = { click() { this.nativeCount += 2; } };
+  state.componentListeners = { save(value) { this.saved += value * 2; } };
+  await nextTick();
+  root.querySelector('.native').dispatchEvent(new Event('click', { bubbles: true }));
+  root.querySelector('.child').dispatchEvent(new Event('click', { bubbles: true }));
+  assert.equal(state.nativeCount, 3);
+  assert.equal(state.saved, 9);
+});
+
 test('SFC v-model uses the Vue component modelValue update contract', async () => {
   const document = installDom();
   const root = document.createElement('main');
