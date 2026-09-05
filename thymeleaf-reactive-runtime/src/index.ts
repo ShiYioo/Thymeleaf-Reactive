@@ -3982,14 +3982,38 @@ function pairComponentRoots(current: HTMLElement[], next: HTMLElement[]): {
   };
 }
 
-function parseComponentState(root: HTMLElement): object {
-  const source = root.dataset.trState;
+function parseComponentMetadata(root: HTMLElement): Record<string, unknown> {
+  const parse = (source: string | undefined, attribute: string): Record<string, unknown> => {
+    if (!source) return {};
+    try {
+      const parsed = JSON.parse(source);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? parsed as Record<string, unknown>
+        : {};
+    } catch (error) {
+      console.error(`[thymeleaf-reactive] invalid ${attribute} JSON during HMR`, error);
+      return {};
+    }
+  };
+  return { ...parse(root.dataset.trState, "data-tr-state"), ...parse(root.dataset.trProps, "data-tr-props") };
+}
+
+function parseComponentProps(root: HTMLElement): Record<string, unknown> {
+  const source = root.dataset.trProps;
   if (!source) return {};
-  try { return JSON.parse(source) as object; }
-  catch {
-    console.error("[thymeleaf-reactive] invalid data-tr-state JSON during HMR");
+  try {
+    const parsed = JSON.parse(source);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch (error) {
+    console.error("[thymeleaf-reactive] invalid data-tr-props JSON during HMR", error);
     return {};
   }
+}
+
+function parseComponentState(root: HTMLElement): object {
+  return parseComponentMetadata(root);
 }
 
 function patchKeyedChildren(
@@ -4165,7 +4189,10 @@ export async function refreshComponentsFromPage(component: string): Promise<void
       restoreFormState(patched.el, formState);
       const liveRoot = patched.el as HTMLElement;
       liveRoots.set(nextRoot, liveRoot);
-      if (context) hydrateComponentRoot(liveRoot, context);
+      if (context) {
+        Object.assign(context.state, parseComponentProps(nextRoot));
+        hydrateComponentRoot(liveRoot, context);
+      }
     }
   });
   removed.forEach(root => {
