@@ -2027,7 +2027,7 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
 }
 
 type SfcSetupBinding = { name: string; kind: "ref" | "reactive" | "computed" | "props" | "emit" | "model"; expression: string };
-type SfcSetupMethod = { name: string; body: string };
+type SfcSetupMethod = { name: string; params: string[]; body: string };
 
 function splitSfcStatements(source: string): string[] {
   const statements: string[] = [];
@@ -2208,14 +2208,14 @@ function parseSfcSetup(source: string): { bindings: SfcSetupBinding[]; methods: 
       bindings.push({ name: binding[1], kind: binding[2] as SfcSetupBinding["kind"], expression: computedMatch?.[1].trim() ?? expression });
       return;
     }
-    const arrow = statement.match(/^(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*\(\s*\)\s*=>\s*(?:\{([\s\S]*)\}|([\s\S]+))$/);
+    const arrow = statement.match(/^(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*\(\s*([A-Za-z_$][\w$]*(?:\s*,\s*[A-Za-z_$][\w$]*)*)?\s*\)\s*=>\s*(?:\{([\s\S]*)\}|([\s\S]+))$/);
     if (arrow) {
-      methods.push({ name: arrow[1], body: (arrow[2] ?? arrow[3]).trim() });
+      methods.push({ name: arrow[1], params: arrow[2]?.split(",").map(param => param.trim()).filter(Boolean) ?? [], body: (arrow[3] ?? arrow[4]).trim() });
       return;
     }
-    const method = statement.match(/^function\s+([A-Za-z_$][\w$]*)\s*\(\s*\)\s*\{([\s\S]*)\}$/);
+    const method = statement.match(/^function\s+([A-Za-z_$][\w$]*)\s*\(\s*([A-Za-z_$][\w$]*(?:\s*,\s*[A-Za-z_$][\w$]*)*)?\s*\)\s*\{([\s\S]*)\}$/);
     if (method) {
-      methods.push({ name: method[1], body: method[2].trim() });
+      methods.push({ name: method[1], params: method[2]?.split(",").map(param => param.trim()).filter(Boolean) ?? [], body: method[3].trim() });
       return;
     }
     throw new Error(`Unsupported script setup statement: ${statement}`);
@@ -2228,23 +2228,26 @@ function splitSfcArguments(source: string): string[] {
   return statements.length ? statements : source.trim() ? [source.trim()] : [];
 }
 
-function runSfcSetupMethod(body: string, scope: Record<string, unknown>, context: ComponentContext): void {
+function runSfcSetupMethod(body: string, scope: Record<string, unknown>, context: ComponentContext, params: string[] = [], args: unknown[] = []): void {
+  const methodScope = Object.create(scope) as Record<string, unknown>;
+  params.forEach((name, index) => { methodScope[name] = args[index]; });
+  if (args.length) methodScope.$event = args[0];
   splitSfcStatements(body).forEach(statement => {
     const increment = statement.match(/^(.+?)(\+\+|--)$/);
     if (increment) {
-      const current = readPath(scope, increment[1]);
-      writePath(scope, increment[1], Number(current ?? 0) + (increment[2] === "++" ? 1 : -1));
+      const current = readPath(methodScope, increment[1]);
+      writePath(methodScope, increment[1], Number(current ?? 0) + (increment[2] === "++" ? 1 : -1));
       return;
     }
     const assignment = statement.match(/^([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*=\s*([\s\S]+)$/);
     if (assignment) {
-      writePath(scope, assignment[1], readPath(scope, assignment[2]));
+      writePath(methodScope, assignment[1], readPath(methodScope, assignment[2]));
       return;
     }
     const emit = statement.match(/^([A-Za-z_$][\w$]*)\(\s*(['"])([^'"]+)\2(?:\s*,\s*([\s\S]+))?\s*\)$/);
     if (emit) {
       const emitter = emit[1] === "emit" ? context.emit : readPath(scope, emit[1]);
-      const arguments_ = splitSfcArguments(emit[4] ?? "").map(argument => readPath(scope, argument));
+      const arguments_ = splitSfcArguments(emit[4] ?? "").map(argument => readPath(methodScope, argument));
       if (typeof emitter === "function") emitter(emit[3], ...arguments_);
       else throw new Error(`Unknown script setup emitter: ${emit[1]}`);
       return;
@@ -2365,7 +2368,7 @@ export function compileSfcComponent(source: string): Component {
         };
       });
       setup.methods.forEach(method => {
-        local[method.name] = () => runSfcSetupMethod(method.body, local, context);
+        local[method.name] = (...args: unknown[]) => runSfcSetupMethod(method.body, local, context, method.params, args);
       });
       const scope = proxyRefs(local);
       sfcRefContexts.set(scope, { owner: local, arrays: new Map(), collect: false });

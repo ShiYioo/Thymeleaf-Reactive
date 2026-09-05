@@ -3799,6 +3799,26 @@ test('Suspense renders fallback until an async component resolves', async () => 
   app.unmount();
 });
 
+test('SFC script setup methods receive event and explicit arguments', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const component = compileSfcComponent(`
+    <template>
+      <section><button @click="save($event)">Save</button><strong>{{ value }}</strong></section>
+    </template>
+    <script setup>
+      const value = ref('none');
+      const save = (event) => value.value = event.detail;
+    </script>
+  `);
+  const app = createApp(() => h(component));
+  app.mount(root);
+  root.querySelector('button').dispatchEvent(new CustomEvent('click', { detail: 'saved', bubbles: true }));
+  await nextTick();
+  assert.equal(root.querySelector('strong').textContent, 'saved');
+  app.unmount();
+});
+
 test('nested Suspense boundaries isolate their pending async descendants', async () => {
   const document = installDom();
   const root = document.createElement('main');
