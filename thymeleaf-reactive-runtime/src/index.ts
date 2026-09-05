@@ -1736,17 +1736,20 @@ function renderSfcSlots(nodes: Node[], scope: Record<string, unknown>, slots: VN
           clone.removeAttribute("slot");
           return clone;
         })()];
-    const slotBinding = shorthand?.value || named?.value || defaultSlot?.value;
-    const carrier = h(Fragment, {}, []);
-    carrier.slot = explicit;
-    carrier.slotRender = slotProps => {
-      const slotScope = Object.create(scope) as Record<string, unknown>;
-      bindSfcSlotProps(slotScope, slotBinding, slotProps);
-      return renderSfcChildren(source, slotScope, slots, onceCache, memoCache);
-    };
-    output.push(carrier);
+    output.push(createSfcSlotCarrier(source, scope, slots, explicit, shorthand?.value || named?.value || defaultSlot?.value, onceCache, memoCache));
   });
   return output;
+}
+
+function createSfcSlotCarrier(source: Node[], scope: Record<string, unknown>, slots: VNode[], name: string, binding?: string, onceCache?: SfcOnceCache, memoCache?: SfcMemoCache): VNode {
+  const carrier = h(Fragment, {}, []);
+  carrier.slot = name;
+  carrier.slotRender = slotProps => {
+    const slotScope = Object.create(scope) as Record<string, unknown>;
+    bindSfcSlotProps(slotScope, binding, slotProps);
+    return renderSfcChildren(source, slotScope, slots, onceCache, memoCache);
+  };
+  return carrier;
 }
 
 function bindSfcSlotProps(scope: Record<string, unknown>, binding: string | undefined, props: Record<string, unknown>): void {
@@ -1862,7 +1865,7 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
   const directives: VNodeDirective[] = [];
   Array.from(element.attributes).forEach(attribute => {
     const { name, value } = attribute;
-    if (name === "v-if" || name === "v-else" || name === "v-else-if" || name === "v-show" || name === "v-text" || name === "v-html" || name === "v-memo" || (dynamic && (name === "is" || name === ":is" || name === "v-bind:is"))) return;
+    if (name === "v-if" || name === "v-else" || name === "v-else-if" || name === "v-show" || name === "v-text" || name === "v-html" || name === "v-memo" || name === "v-slot" || name.startsWith("v-slot:") || name.startsWith("#") || (dynamic && (name === "is" || name === ":is" || name === "v-bind:is"))) return;
     if (name === "v-bind") {
       const bound = readPath(scope, value);
       if (bound && typeof bound === "object") Object.assign(props, bound);
@@ -1972,8 +1975,11 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
   const textExpression = element.getAttribute("v-text");
   const htmlExpression = element.getAttribute("v-html");
   if (htmlExpression) props.innerHTML = readPath(scope, htmlExpression) ?? "";
+  const componentSlot = component && (element.getAttributeNode("v-slot") || Array.from(element.attributes).find(attribute => attribute.name.startsWith("v-slot:")) || Array.from(element.attributes).find(attribute => attribute.name.startsWith("#")));
   const children = component
-    ? renderSfcSlots(Array.from(element.childNodes), scope, slots, onceCache, memoCache)
+    ? componentSlot
+      ? [createSfcSlotCarrier(Array.from(element.childNodes), scope, slots, componentSlot.name === "v-slot" ? "default" : componentSlot.name.slice(7) || componentSlot.name.slice(1), componentSlot.value, onceCache, memoCache)]
+      : renderSfcSlots(Array.from(element.childNodes), scope, slots, onceCache, memoCache)
     : htmlExpression
       ? []
       : textExpression

@@ -3105,6 +3105,19 @@ test('SFC scoped slots receive child props and retain the parent render scope', 
   assert.equal(content.textContent, 'Second:two');
 });
 
+test('SFC component-level v-slot provides default scoped slot props', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Card = compileSfcComponent('<template><article><slot :label="label" /></article></template>');
+  const render = compileSfcComponent('<template><Card :label="label" v-slot="slotProps"><strong>{{ slotProps.label }}</strong></Card></template>');
+  const state = createApp(render, { label: 'Initial', components: { Card } }).mount(root);
+  const content = root.querySelector('strong');
+  assert.equal(content.textContent, 'Initial');
+  state.label = 'Changed';
+  await nextTick();
+  assert.equal(content.textContent, 'Changed');
+});
+
 test('SFC resolves dynamic native and registered component targets', async () => {
   const document = installDom();
   const root = document.createElement('main');
