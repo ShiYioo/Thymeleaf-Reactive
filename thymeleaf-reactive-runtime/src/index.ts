@@ -1163,6 +1163,45 @@ export function h(type: VNode["type"], props?: Record<string, unknown> | VNodeCh
   };
 }
 
+/** Returns true for VNodes created by this runtime. */
+export function isVNode(value: unknown): value is VNode {
+  return Boolean(value && typeof value === "object" && "type" in value && "props" in value && "children" in value);
+}
+
+/** Merges render-function props using Vue's class/style and listener rules. */
+export function mergeProps(...sources: Array<Record<string, unknown> | null | undefined>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  sources.forEach(source => {
+    if (!source) return;
+    Object.entries(source).forEach(([key, value]) => {
+      if (key === "class" || key === "style") {
+        if (result[key] === undefined) result[key] = value;
+        else result[key] = [result[key], value];
+      } else if (key.startsWith("on") && typeof value === "function") {
+        const previous = result[key];
+        result[key] = previous === undefined ? value : [...(Array.isArray(previous) ? previous : [previous]), value];
+      } else result[key] = value;
+    });
+  });
+  return result;
+}
+
+/** Clones a VNode for safe reuse with optional merged props. */
+export function cloneVNode<T extends VNode>(vnode: T, extraProps?: Record<string, unknown>): T {
+  const props = extraProps ? mergeProps(vnode.props, extraProps) : { ...vnode.props };
+  return {
+    ...vnode,
+    props,
+    children: vnode.children,
+    el: null,
+    anchor: null,
+    component: undefined,
+    instance: undefined,
+    key: props.key as string | number | undefined,
+    slot: props.slot as string | undefined
+  } as T;
+}
+
 export function isMemoSame(vnode: VNode, dependencies: unknown[]): boolean {
   return Boolean(vnode.memo && vnode.memo.length === dependencies.length && vnode.memo.every((value, index) => Object.is(value, dependencies[index])));
 }

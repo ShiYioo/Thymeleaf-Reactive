@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, readonly, shallowReadonly, isReadonly, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, customRef, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onEffectCleanup, onErrorCaptured, onScopeDispose, onWatcherCleanup, refreshComponentsFromPage, render, Teleport, inject, isProxy, isRef, isShallow, onMounted, onUnmounted, onUpdated, pauseTracking, enableTracking, resetTracking, provide, proxyRefs, queueJob, queuePostFlushCb, flushOnAppMount, stop, toRaw, toReactive, toReadonly, toRef, toRefs, toValue, traverse, unref, watch, watchEffect, watchPostEffect, watchSyncEffect, withDirectives, withMemo, startBatch, endBatch, getCurrentScope, getCurrentWatcher, SchedulerJobFlags } from './dist/index.js';
+import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, readonly, shallowReadonly, isReadonly, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, customRef, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onEffectCleanup, onErrorCaptured, onScopeDispose, onWatcherCleanup, refreshComponentsFromPage, render, Teleport, inject, isProxy, isRef, isShallow, onMounted, onUnmounted, onUpdated, pauseTracking, enableTracking, resetTracking, provide, proxyRefs, queueJob, queuePostFlushCb, flushOnAppMount, stop, toRaw, toReactive, toReadonly, toRef, toRefs, toValue, traverse, unref, watch, watchEffect, watchPostEffect, watchSyncEffect, withDirectives, withMemo, mergeProps, cloneVNode, isVNode, startBatch, endBatch, getCurrentScope, getCurrentWatcher, SchedulerJobFlags } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -1761,6 +1761,21 @@ test('h accepts multiple children arguments without confusing props', () => {
   const section = root.querySelector('section');
   assert.equal(section.textContent, 'onetwothree');
   assert.equal(section.childNodes.length, 3);
+});
+
+test('VNode helpers identify, clone, and merge render-function nodes', () => {
+  const vnode = h('button', { class: 'base', onClick: () => undefined, title: 'old' }, 'Save');
+  const merged = mergeProps(vnode.props, { class: ['active'], onClick: () => undefined, title: 'new' });
+  assert.equal(isVNode(vnode), true);
+  assert.equal(isVNode({}), false);
+  assert.deepEqual(merged.class, ['base', ['active']]);
+  assert.equal(Array.isArray(merged.onClick), true);
+  assert.equal(merged.title, 'new');
+  const clone = cloneVNode(vnode, { id: 'save' });
+  assert.notEqual(clone, vnode);
+  assert.equal(clone.el, null);
+  assert.equal(clone.props.id, 'save');
+  assert.equal(clone.children, vnode.children);
 });
 
 test('Teleport patches and moves its child range without recreating keyed fields', async () => {
