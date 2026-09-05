@@ -1177,9 +1177,10 @@ export function mergeProps(...sources: Array<Record<string, unknown> | null | un
       if (key === "class" || key === "style") {
         if (result[key] === undefined) result[key] = value;
         else result[key] = [result[key], value];
-      } else if (key.startsWith("on") && typeof value === "function") {
+      } else if (key.startsWith("on") && (typeof value === "function" || Array.isArray(value))) {
         const previous = result[key];
-        result[key] = previous === undefined ? value : [...(Array.isArray(previous) ? previous : [previous]), value];
+        const nextHandlers = Array.isArray(value) ? value : [value];
+        result[key] = previous === undefined ? value : [...(Array.isArray(previous) ? previous : [previous]), ...nextHandlers];
       } else result[key] = value;
     });
   });

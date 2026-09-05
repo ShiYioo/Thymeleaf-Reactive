@@ -1770,6 +1770,8 @@ test('VNode helpers identify, clone, and merge render-function nodes', () => {
   assert.equal(isVNode({}), false);
   assert.deepEqual(merged.class, ['base', ['active']]);
   assert.equal(Array.isArray(merged.onClick), true);
+  const extra = () => undefined;
+  assert.equal(mergeProps({ onClick: vnode.props.onClick }, { onClick: [extra] }).onClick.length, 2);
   assert.equal(merged.title, 'new');
   const clone = cloneVNode(vnode, { id: 'save' });
   assert.notEqual(clone, vnode);
