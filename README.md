@@ -51,7 +51,7 @@ The development status endpoint retains the latest `hmr-history-size` template c
 
 ## Resource Vue Components
 
-In development mode, a template component can opt into a resource-backed Vue SFC with `tr:component-src`. The file is resolved relative to `thymeleaf.reactive.template-path`; saving it emits an HMR event, the browser fetches a cache-busted ES module, and only matching component roots are patched.
+In development mode, a template component can opt into a resource-backed Vue SFC with `tr:component-src`. The file is resolved relative to `thymeleaf.reactive.template-path`; saving it emits an HMR event, the browser fetches a cache-busted ES module, and only matching component roots are patched. The server-rendered `tr:*` metadata is hydrated first, so the component remains interactive if the SFC module is temporarily unavailable; successful SFC adoption then takes exclusive VDOM ownership.
 
 ```html
 <section tr:component="counter" tr:component-src="components/Counter.vue" tr:state="${counter}">

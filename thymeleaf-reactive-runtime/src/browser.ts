@@ -53,9 +53,9 @@ async function boot(): Promise<void> {
   roots.forEach(root => {
     if (root.dataset.trHydrated === "true") return;
     const state = parseState(root.dataset.trState);
-    states.set(root, root.dataset.trComponentSrc
-      ? state
-      : api.hydrate(root, state, api.handlers));
+    // Metadata hydration provides an interactive server-rendered fallback
+    // while an optional resource SFC loads, and remains active if it fails.
+    states.set(root, api.hydrate(root, state, api.handlers));
     root.dataset.trHydrated = "true";
   });
   await Promise.all(roots.map(root => adoptSfcComponent(root, states.get(root) ?? {}, api.handlers).catch(error =>

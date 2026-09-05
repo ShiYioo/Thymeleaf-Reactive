@@ -3294,6 +3294,9 @@ export function registerComponentSource(source: string, name: string): void {
 export function adoptComponentRoot(root: Element, component: Component, props: Record<string, unknown> = {}): void {
   const container = root.parentNode;
   if (!container) return;
+  // Bootstrap first hydrates Thymeleaf metadata as a resilient fallback. Once
+  // an SFC takes ownership, stop those effects so only its VDOM writes DOM.
+  disposeHydration(root);
   const tree = vnodeFromDom(root);
   const name = componentNames.get(component);
   const entry = name ? hotComponents.get(name) : undefined;

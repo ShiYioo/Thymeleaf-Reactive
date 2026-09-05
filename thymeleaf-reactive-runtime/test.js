@@ -3573,6 +3573,23 @@ test('browser bootstrap preserves existing handlers and hydrates encoded server 
   assert.equal(typeof window.ThymeleafReactive.hydrate, 'function');
 });
 
+test('browser bootstrap keeps Thymeleaf hydration active when an SFC module cannot load', async () => {
+  const document = installDom();
+  document.body.innerHTML = '<main data-tr-component="counter" data-tr-component-src="components/Missing.vue" data-tr-state="{&quot;count&quot;:2}"><p data-tr-text="count">stale</p></main>';
+  globalThis.EventSource = undefined;
+  const previousError = console.error;
+  console.error = () => undefined;
+  try {
+    await import(`./dist/browser.js?fallback=${Date.now()}`);
+    await Promise.resolve();
+    const root = document.querySelector('main');
+    assert.equal(root.querySelector('p').textContent, '2');
+    assert.equal(root.dataset.trHydrated, 'true');
+  } finally {
+    console.error = previousError;
+  }
+});
+
 test('hydrates tr:on handlers with event arguments and modifiers', () => {
   const document = installDom();
   const root = document.createElement('main');
