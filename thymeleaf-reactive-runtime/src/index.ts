@@ -2099,7 +2099,10 @@ function normalizeVNode(value: VNodeChild): VNode {
 
 function hasPendingAsync(vnode: VNode): boolean {
   const state = typeof vnode.type === "function" ? asyncComponentStates.get(vnode.type) : undefined;
-  return Boolean(state?.pending || vnode.children.some(hasPendingAsync));
+  // A nested boundary owns its own pending descendants. Letting the parent
+  // traverse through it would replace already-renderable outer content with
+  // the parent's fallback instead of rendering the nested fallback in place.
+  return Boolean(state?.pending || vnode.children.some(child => child.type !== Suspense && hasPendingAsync(child)));
 }
 
 function suspenseFallback(vnode: VNode): VNode {

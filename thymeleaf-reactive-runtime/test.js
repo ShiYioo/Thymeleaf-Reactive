@@ -3560,6 +3560,29 @@ test('Suspense renders fallback until an async component resolves', async () => 
   app.unmount();
 });
 
+test('nested Suspense boundaries isolate their pending async descendants', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  let resolve;
+  const Async = defineAsyncComponent(() => new Promise(done => { resolve = done; }));
+  const app = createApp(() => h(Suspense, { fallback: h('p', {}, 'Outer loading') }, [
+    h('section', {}, [
+      h('h1', {}, 'Outer content'),
+      h(Suspense, { fallback: h('p', {}, 'Inner loading') }, [h(Async)])
+    ])
+  ]));
+  app.mount(root);
+  assert.equal(root.querySelector('h1').textContent, 'Outer content');
+  assert.equal(root.textContent, 'Outer contentInner loading');
+  assert.equal(root.textContent.includes('Outer loading'), false);
+
+  resolve(() => h('strong', {}, 'Inner ready'));
+  await Promise.resolve();
+  await nextTick();
+  assert.equal(root.textContent, 'Outer contentInner ready');
+  app.unmount();
+});
+
 test('Transition runs enter and leave lifecycle hooks around keyed replacement', async () => {
   const document = installDom();
   const root = document.createElement('main');
