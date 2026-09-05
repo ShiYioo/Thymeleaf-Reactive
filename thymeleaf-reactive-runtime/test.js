@@ -3653,6 +3653,30 @@ test('browser bootstrap preserves existing handlers and hydrates encoded server 
   assert.equal(typeof window.ThymeleafReactive.hydrate, 'function');
 });
 
+test('SFC script setup supports defineProps and defineEmits component macros', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Child = compileSfcComponent(`
+    <template><button @click="save">{{ props.label }}</button></template>
+    <script setup>
+      const props = defineProps();
+      const emit = defineEmits(['save']);
+      const save = () => emit('save', props.label);
+    </script>
+  `);
+  const render = compileSfcComponent('<template><section><Child :label="label" @save="record" /><strong>{{ saved }}</strong></section></template>');
+  const state = createApp(render, {
+    label: 'First', saved: '', components: { Child }, record(value) { this.saved = value; }
+  }).mount(root);
+  assert.equal(root.querySelector('button').textContent, 'First');
+  root.querySelector('button').dispatchEvent(new Event('click'));
+  await nextTick();
+  assert.equal(root.querySelector('strong').textContent, 'First');
+  state.label = 'Second';
+  await nextTick();
+  assert.equal(root.querySelector('button').textContent, 'Second');
+});
+
 test('browser bootstrap keeps Thymeleaf hydration active when an SFC module cannot load', async () => {
   const document = installDom();
   document.body.innerHTML = '<main data-tr-component="counter" data-tr-component-src="components/Missing.vue" data-tr-state="{&quot;count&quot;:2}"><p data-tr-text="count">stale</p></main>';

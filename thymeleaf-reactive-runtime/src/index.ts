@@ -2026,7 +2026,7 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
   return vnode;
 }
 
-type SfcSetupBinding = { name: string; kind: "ref" | "reactive" | "computed"; expression: string };
+type SfcSetupBinding = { name: string; kind: "ref" | "reactive" | "computed" | "props" | "emit"; expression: string };
 type SfcSetupMethod = { name: string; body: string };
 
 function splitSfcStatements(source: string): string[] {
@@ -2064,6 +2064,16 @@ function parseSfcSetup(source: string): { bindings: SfcSetupBinding[]; methods: 
     .trim();
   if (!body) return { bindings, methods };
   splitSfcStatements(body).forEach(statement => {
+    const props = statement.match(/^(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*defineProps\s*\(\s*\)$/);
+    if (props) {
+      bindings.push({ name: props[1], kind: "props", expression: "" });
+      return;
+    }
+    const emit = statement.match(/^(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*defineEmits\s*\(\s*(?:\[[\s\S]*\])?\s*\)$/);
+    if (emit) {
+      bindings.push({ name: emit[1], kind: "emit", expression: "" });
+      return;
+    }
     const binding = statement.match(/^(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*(ref|reactive|computed)\(([\s\S]*)\)$/);
     if (binding) {
       const expression = binding[3].trim();
@@ -2107,9 +2117,12 @@ function runSfcSetupMethod(body: string, scope: Record<string, unknown>, context
       writePath(scope, assignment[1], readPath(scope, assignment[2]));
       return;
     }
-    const emit = statement.match(/^emit\(\s*(['"])([^'"]+)\1(?:\s*,\s*([\s\S]+))?\s*\)$/);
+    const emit = statement.match(/^([A-Za-z_$][\w$]*)\(\s*(['"])([^'"]+)\2(?:\s*,\s*([\s\S]+))?\s*\)$/);
     if (emit) {
-      context.emit(emit[2], ...splitSfcArguments(emit[3] ?? "").map(argument => readPath(scope, argument)));
+      const emitter = emit[1] === "emit" ? context.emit : readPath(scope, emit[1]);
+      const arguments_ = splitSfcArguments(emit[4] ?? "").map(argument => readPath(scope, argument));
+      if (typeof emitter === "function") emitter(emit[3], ...arguments_);
+      else throw new Error(`Unknown script setup emitter: ${emit[1]}`);
       return;
     }
     throw new Error(`Unsupported script setup method statement: ${statement}`);
@@ -2171,7 +2184,8 @@ function normalizeSfcSelfClosingTags(source: string): string {
 /**
  * Compiles a resource-backed Vue SFC template plus a CSP-safe script-setup subset.
  * Supported setup declarations are ref(), reactive(), computed(() => expression),
- * and zero-argument methods containing assignments, increments, decrements, or emit().
+ * defineProps(), defineEmits(), and zero-argument methods containing assignments,
+ * increments, decrements, or emit().
  */
 export function compileSfcComponent(source: string): Component {
   if (typeof document === "undefined") throw new Error("SFC components require a browser document");
@@ -2213,7 +2227,12 @@ export function compileSfcComponent(source: string): Component {
       setup.bindings.forEach(binding => {
         if (binding.kind === "ref") local[binding.name] = ref(readPath(local, binding.expression));
         else if (binding.kind === "reactive") local[binding.name] = reactive(readPath(local, binding.expression) ?? {});
-        else local[binding.name] = computed(() => readPath(proxyRefs(local), binding.expression));
+        else if (binding.kind === "computed") local[binding.name] = computed(() => readPath(proxyRefs(local), binding.expression));
+        else if (binding.kind === "props") local[binding.name] = props;
+        else local[binding.name] = (event: unknown, ...args: unknown[]) => {
+          if (typeof event !== "string") throw new Error("defineEmits event name must be a string");
+          context.emit(event, ...args);
+        };
       });
       setup.methods.forEach(method => {
         local[method.name] = () => runSfcSetupMethod(method.body, local, context);
