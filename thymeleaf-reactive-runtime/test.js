@@ -3677,6 +3677,24 @@ test('SFC script setup supports defineProps and defineEmits component macros', a
   assert.equal(root.querySelector('button').textContent, 'Second');
 });
 
+test('SFC script setup defineModel follows the component v-model contract', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Editor = compileSfcComponent(`
+    <template><input v-model="model" aria-label="editor" /></template>
+    <script setup>const model = defineModel();</script>
+  `);
+  const render = compileSfcComponent('<template><section><Editor v-model="message" /><strong>{{ message }}</strong></section></template>');
+  const state = createApp(render, { message: 'Before', components: { Editor } }).mount(root);
+  const input = root.querySelector('input');
+  assert.equal(input.value, 'Before');
+  input.value = 'After';
+  input.dispatchEvent(new Event('input'));
+  await nextTick();
+  assert.equal(state.message, 'After');
+  assert.equal(root.querySelector('strong').textContent, 'After');
+});
+
 test('browser bootstrap keeps Thymeleaf hydration active when an SFC module cannot load', async () => {
   const document = installDom();
   document.body.innerHTML = '<main data-tr-component="counter" data-tr-component-src="components/Missing.vue" data-tr-state="{&quot;count&quot;:2}"><p data-tr-text="count">stale</p></main>';

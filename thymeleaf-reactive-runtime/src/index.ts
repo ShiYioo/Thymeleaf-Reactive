@@ -2026,7 +2026,7 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
   return vnode;
 }
 
-type SfcSetupBinding = { name: string; kind: "ref" | "reactive" | "computed" | "props" | "emit"; expression: string };
+type SfcSetupBinding = { name: string; kind: "ref" | "reactive" | "computed" | "props" | "emit" | "model"; expression: string };
 type SfcSetupMethod = { name: string; body: string };
 
 function splitSfcStatements(source: string): string[] {
@@ -2065,6 +2065,10 @@ function parseSfcMacroNames(macro: string, source: string): string[] | undefined
   return names;
 }
 
+function appendSfcContractName(names: string[] | undefined, name: string): string[] {
+  return names?.includes(name) ? names : [...(names ?? []), name];
+}
+
 function parseSfcSetup(source: string): { bindings: SfcSetupBinding[]; methods: SfcSetupMethod[]; props?: string[]; emits?: string[] } {
   const bindings: SfcSetupBinding[] = [];
   const methods: SfcSetupMethod[] = [];
@@ -2086,6 +2090,14 @@ function parseSfcSetup(source: string): { bindings: SfcSetupBinding[]; methods: 
     if (emitsMacro) {
       emits = parseSfcMacroNames("defineEmits", emitsMacro[2]);
       bindings.push({ name: emitsMacro[1], kind: "emit", expression: "" });
+      return;
+    }
+    const model = statement.match(/^(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*defineModel\s*\(\s*(?:(['"])([A-Za-z_$][\w$-]*)\2\s*)?\)$/);
+    if (model) {
+      const modelName = model[3] ?? "modelValue";
+      props = appendSfcContractName(props, modelName);
+      emits = appendSfcContractName(emits, `update:${modelName}`);
+      bindings.push({ name: model[1], kind: "model", expression: modelName });
       return;
     }
     const binding = statement.match(/^(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*(ref|reactive|computed)\(([\s\S]*)\)$/);
@@ -2245,6 +2257,10 @@ export function compileSfcComponent(source: string): Component {
         else if (binding.kind === "reactive") local[binding.name] = reactive(readPath(local, binding.expression) ?? {});
         else if (binding.kind === "computed") local[binding.name] = computed(() => readPath(proxyRefs(local), binding.expression));
         else if (binding.kind === "props") local[binding.name] = props;
+        else if (binding.kind === "model") local[binding.name] = customRef((track, trigger) => ({
+          get: () => { track(); return props[binding.expression]; },
+          set: value => { context.emit(`update:${binding.expression}`, value); trigger(); }
+        }));
         else local[binding.name] = (event: unknown, ...args: unknown[]) => {
           if (typeof event !== "string") throw new Error("defineEmits event name must be a string");
           context.emit(event, ...args);
