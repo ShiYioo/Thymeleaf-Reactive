@@ -2190,10 +2190,21 @@ function parseSfcSetup(source: string): { bindings: SfcSetupBinding[]; methods: 
       bindings.push({ name: emitsMacro[1], kind: "emit", expression: "" });
       return;
     }
-    const model = statement.match(/^(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*defineModel\s*\(\s*(?:(['"])([A-Za-z_$][\w$-]*)\2\s*)?\)$/);
+    const model = statement.match(/^(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*defineModel\s*\(\s*(?:(['"])([A-Za-z_$][\w$-]*)\2\s*(?:,\s*([\s\S]+))?)?\)$/);
     if (model) {
       const modelName = model[3] ?? "modelValue";
-      props = appendSfcPropContract(props, modelName);
+      const modelOptions = model[4] ? parseSfcLiteral(model[4]) : undefined;
+      if (modelOptions !== undefined && (!modelOptions || typeof modelOptions !== "object" || Array.isArray(modelOptions))) {
+        throw new Error("defineModel options must be a literal object");
+      }
+      if (modelOptions && Object.keys(modelOptions as object).some(key => key !== "default")) {
+        throw new Error("defineModel only supports the default option");
+      }
+      if (modelOptions && Object.hasOwn(modelOptions as object, "default")) {
+        if (props && !Array.isArray(props)) props = { ...props, [modelName]: { default: () => cloneSfcDefault((modelOptions as Record<string, unknown>).default) } };
+        else props = Object.fromEntries((appendSfcContractName(props, modelName) as string[]).map(name =>
+          name === modelName ? [name, { default: () => cloneSfcDefault((modelOptions as Record<string, unknown>).default) }] : [name, {}]));
+      } else props = appendSfcPropContract(props, modelName);
       emits = appendSfcContractName(emits, `update:${modelName}`);
       bindings.push({ name: model[1], kind: "model", expression: modelName });
       return;

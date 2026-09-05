@@ -3708,6 +3708,17 @@ test('SFC script setup defineModel follows the component v-model contract', asyn
   assert.equal(root.querySelector('strong').textContent, 'After');
 });
 
+test('SFC defineModel supports a literal default for named models', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Editor = compileSfcComponent(`
+    <template><strong>{{ title }}</strong></template>
+    <script setup>const title = defineModel('title', { default: 'Untitled' });</script>
+  `);
+  createApp(() => h(Editor)).mount(root);
+  assert.equal(root.querySelector('strong').textContent, 'Untitled');
+});
+
 test('SFC script setup withDefaults applies isolated literal prop defaults', () => {
   const document = installDom();
   const root = document.createElement('main');
