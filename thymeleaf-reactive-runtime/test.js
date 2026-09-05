@@ -3695,6 +3695,18 @@ test('SFC script setup defineModel follows the component v-model contract', asyn
   assert.equal(root.querySelector('strong').textContent, 'After');
 });
 
+test('SFC script setup withDefaults applies isolated literal prop defaults', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Badge = compileSfcComponent(`
+    <template><strong>{{ props.label }}:{{ props.options.level }}</strong></template>
+    <script setup>const props = withDefaults(defineProps(['label', 'options']), { label: 'Fallback', options: { level: 1 } });</script>
+  `);
+  const render = compileSfcComponent('<template><section><Badge /><Badge label="Actual" :options="customOptions" /></section></template>');
+  createApp(render, { customOptions: { level: 2 }, components: { Badge } }).mount(root);
+  assert.deepEqual([...root.querySelectorAll('strong')].map(element => element.textContent), ['Fallback:1', 'Actual:2']);
+});
+
 test('browser bootstrap keeps Thymeleaf hydration active when an SFC module cannot load', async () => {
   const document = installDom();
   document.body.innerHTML = '<main data-tr-component="counter" data-tr-component-src="components/Missing.vue" data-tr-state="{&quot;count&quot;:2}"><p data-tr-text="count">stale</p></main>';

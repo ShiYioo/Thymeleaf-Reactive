@@ -2069,10 +2069,102 @@ function appendSfcContractName(names: string[] | undefined, name: string): strin
   return names?.includes(name) ? names : [...(names ?? []), name];
 }
 
-function parseSfcSetup(source: string): { bindings: SfcSetupBinding[]; methods: SfcSetupMethod[]; props?: string[]; emits?: string[] } {
+function appendSfcPropContract(props: ComponentProps | undefined, name: string): ComponentProps {
+  if (!props || Array.isArray(props)) return appendSfcContractName(props, name);
+  return name in props ? props : { ...props, [name]: {} };
+}
+
+function cloneSfcDefault(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(cloneSfcDefault);
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, cloneSfcDefault(item)]));
+  return value;
+}
+
+function parseSfcLiteral(source: string): unknown {
+  let index = 0;
+  const skipWhitespace = () => { while (/\s/.test(source[index] ?? "")) index++; };
+  const unexpected = (): never => { throw new Error("withDefaults requires a literal defaults object"); };
+  const parseString = (): string => {
+    const quote = source[index++];
+    let value = "";
+    while (index < source.length && source[index] !== quote) {
+      if (source[index] === "\\") {
+        index++;
+        const escaped = source[index++];
+        const escapes: Record<string, string> = { n: "\n", r: "\r", t: "\t", b: "\b", f: "\f" };
+        value += escapes[escaped] ?? escaped;
+      } else value += source[index++];
+    }
+    if (source[index++] !== quote) unexpected();
+    return value;
+  };
+  const parseIdentifier = (): string => {
+    const match = source.slice(index).match(/^[A-Za-z_$][\w$-]*/);
+    if (!match) return unexpected();
+    index += match[0].length;
+    return match[0];
+  };
+  const parseValue = (): unknown => {
+    skipWhitespace();
+    const character = source[index];
+    if (character === "\"" || character === "'") return parseString();
+    if (character === "[") {
+      index++;
+      const values: unknown[] = [];
+      skipWhitespace();
+      while (source[index] !== "]") {
+        values.push(parseValue());
+        skipWhitespace();
+        if (source[index] === ",") { index++; skipWhitespace(); }
+        else if (source[index] !== "]") unexpected();
+      }
+      index++;
+      return values;
+    }
+    if (character === "{") {
+      index++;
+      const result: Record<string, unknown> = Object.create(null);
+      skipWhitespace();
+      while (source[index] !== "}") {
+        const key = source[index] === "\"" || source[index] === "'" ? parseString() : parseIdentifier();
+        if (unsafePropertyNames.has(key)) unexpected();
+        skipWhitespace();
+        if (source[index++] !== ":") unexpected();
+        result[key] = parseValue();
+        skipWhitespace();
+        if (source[index] === ",") { index++; skipWhitespace(); }
+        else if (source[index] !== "}") unexpected();
+      }
+      index++;
+      return result;
+    }
+    const number = source.slice(index).match(/^-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?/);
+    if (number) { index += number[0].length; return Number(number[0]); }
+    const identifier = parseIdentifier();
+    if (identifier === "true") return true;
+    if (identifier === "false") return false;
+    if (identifier === "null") return null;
+    if (identifier === "undefined") return undefined;
+    unexpected();
+  };
+  const value = parseValue();
+  skipWhitespace();
+  if (index !== source.length) unexpected();
+  return value;
+}
+
+function sfcPropsWithDefaults(names: string[], expression: string): ComponentProps {
+  const defaults = parseSfcLiteral(expression);
+  if (!defaults || typeof defaults !== "object" || Array.isArray(defaults)) throw new Error("withDefaults requires a literal defaults object");
+  return Object.fromEntries(names.map(name => Object.hasOwn(defaults, name)
+    ? [name, { default: () => cloneSfcDefault((defaults as Record<string, unknown>)[name]) }]
+    : [name, {}]));
+}
+
+function parseSfcSetup(source: string): { bindings: SfcSetupBinding[]; methods: SfcSetupMethod[]; props?: ComponentProps; emits?: string[] } {
   const bindings: SfcSetupBinding[] = [];
   const methods: SfcSetupMethod[] = [];
-  let props: string[] | undefined;
+  let props: ComponentProps | undefined;
   let emits: string[] | undefined;
   const body = source
     .replace(/\/\/.*$/gm, "")
@@ -2080,6 +2172,12 @@ function parseSfcSetup(source: string): { bindings: SfcSetupBinding[]; methods: 
     .trim();
   if (!body) return { bindings, methods, props, emits };
   splitSfcStatements(body).forEach(statement => {
+    const defaultsMacro = statement.match(/^(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*withDefaults\s*\(\s*defineProps\s*\((\[[\s\S]*\])\)\s*,\s*([\s\S]+)\)$/);
+    if (defaultsMacro) {
+      props = sfcPropsWithDefaults(parseSfcMacroNames("defineProps", defaultsMacro[2]) ?? [], defaultsMacro[3]);
+      bindings.push({ name: defaultsMacro[1], kind: "props", expression: "" });
+      return;
+    }
     const propsMacro = statement.match(/^(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*defineProps\s*\(([\s\S]*)\)$/);
     if (propsMacro) {
       props = parseSfcMacroNames("defineProps", propsMacro[2]);
@@ -2095,7 +2193,7 @@ function parseSfcSetup(source: string): { bindings: SfcSetupBinding[]; methods: 
     const model = statement.match(/^(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*defineModel\s*\(\s*(?:(['"])([A-Za-z_$][\w$-]*)\2\s*)?\)$/);
     if (model) {
       const modelName = model[3] ?? "modelValue";
-      props = appendSfcContractName(props, modelName);
+      props = appendSfcPropContract(props, modelName);
       emits = appendSfcContractName(emits, `update:${modelName}`);
       bindings.push({ name: model[1], kind: "model", expression: modelName });
       return;
