@@ -162,6 +162,8 @@ The VDOM creates `<svg>` roots and descendants in the SVG namespace and patches 
 
 Render-function event props follow Vue's option suffixes: `onClickCapture`, `onClickPassive`, and `onClickOnce` map to native `addEventListener` options and can coexist with other handlers for the same event.
 
+Render functions can attach native VNode directive hooks with `withDirectives(vnode, [[directive, value, arg, modifiers]])`. Object directives support `created`, `beforeMount`, `mounted`, `beforeUpdate`, `updated`, `beforeUnmount`, and `unmounted`; a directive function is a shorthand for `mounted` and `updated`.
+
 For render-function applications, `hydrateRender(vnode, container)` adopts compatible server-rendered native DOM nodes and object/function component roots, patches their props and descendants, adopts multi-root `Fragment` ranges, hydrates `Teleport` content between its `<!--teleport-->` placeholder and target `<!--/teleport-->` anchor, and adopts a `Suspense` fallback while its async content is pending. It removes stale server nodes and locally replaces structural mismatches. Hydrated component instances retain their scope, lifecycle hooks, and local state for later scheduled updates, including named component HMR replacements. The adopted tree remains registered for later `render()` patches.
 
 ## Virtual DOM Suspense

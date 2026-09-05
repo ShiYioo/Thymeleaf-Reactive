@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, readonly, shallowReadonly, isReadonly, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, customRef, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onEffectCleanup, onErrorCaptured, onScopeDispose, onWatcherCleanup, refreshComponentsFromPage, render, Teleport, inject, isProxy, isRef, isShallow, onMounted, onUnmounted, onUpdated, pauseTracking, enableTracking, resetTracking, provide, proxyRefs, queueJob, queuePostFlushCb, flushOnAppMount, stop, toRaw, toReactive, toReadonly, toRef, toRefs, toValue, traverse, unref, watch, watchEffect, watchPostEffect, watchSyncEffect, withMemo, startBatch, endBatch, getCurrentScope, getCurrentWatcher, SchedulerJobFlags } from './dist/index.js';
+import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, readonly, shallowReadonly, isReadonly, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, customRef, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onEffectCleanup, onErrorCaptured, onScopeDispose, onWatcherCleanup, refreshComponentsFromPage, render, Teleport, inject, isProxy, isRef, isShallow, onMounted, onUnmounted, onUpdated, pauseTracking, enableTracking, resetTracking, provide, proxyRefs, queueJob, queuePostFlushCb, flushOnAppMount, stop, toRaw, toReactive, toReadonly, toRef, toRefs, toValue, traverse, unref, watch, watchEffect, watchPostEffect, watchSyncEffect, withDirectives, withMemo, startBatch, endBatch, getCurrentScope, getCurrentWatcher, SchedulerJobFlags } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -1546,6 +1546,32 @@ test('VNode refs follow native and component mount, patch, and unmount lifecycle
   assert.equal(componentRef.value, null);
   app.unmount();
   assert.equal(elementRef.value, null);
+});
+
+test('withDirectives runs native VNode directive hooks through patch and unmount', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const state = reactive({ count: 0 });
+  const events = [];
+  const directive = {
+    created(_el, binding) { events.push(`created:${binding.value}:${binding.arg}:${binding.modifiers.trim}`); },
+    beforeMount(_el, binding) { events.push(`before-mount:${binding.value}`); },
+    mounted(_el, binding) { events.push(`mounted:${binding.value}`); },
+    beforeUpdate(_el, binding) { events.push(`before-update:${binding.oldValue}->${binding.value}`); },
+    updated(_el, binding) { events.push(`updated:${binding.oldValue}->${binding.value}`); },
+    beforeUnmount(_el, binding) { events.push(`before-unmount:${binding.value}`); },
+    unmounted(_el, binding) { events.push(`unmounted:${binding.value}`); }
+  };
+  const app = createApp(() => h('section', {}, [
+    withDirectives(h('input', { value: state.count }), [[directive, state.count, 'field', { trim: true }]])
+  ]));
+  app.mount(root);
+  assert.deepEqual(events, ['created:0:field:true', 'before-mount:0', 'mounted:0']);
+  state.count = 1;
+  await nextTick();
+  assert.deepEqual(events.slice(3), ['before-update:0->1', 'updated:0->1']);
+  app.unmount();
+  assert.deepEqual(events.slice(5), ['before-unmount:1', 'unmounted:1']);
 });
 
 test('render retains the previous tree and supports explicit unmounting', () => {

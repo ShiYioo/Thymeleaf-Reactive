@@ -42,6 +42,25 @@ export type ComponentOptions = {
 };
 export type Component = ComponentRender | ComponentOptions;
 export type RenderFunction = (state: any) => VNode;
+export type DirectiveBinding = {
+  instance?: ComponentInstance;
+  value: unknown;
+  oldValue: unknown;
+  arg?: string;
+  modifiers: Record<string, boolean>;
+  dir: Directive;
+};
+export type DirectiveHook = (el: Element, binding: DirectiveBinding, vnode: VNode, previous?: VNode) => void;
+export type Directive = DirectiveHook | {
+  created?: DirectiveHook;
+  beforeMount?: DirectiveHook;
+  mounted?: DirectiveHook;
+  beforeUpdate?: DirectiveHook;
+  updated?: DirectiveHook;
+  beforeUnmount?: DirectiveHook;
+  unmounted?: DirectiveHook;
+};
+type VNodeDirective = [Directive, unknown?, string?, Record<string, boolean>?];
 export type AsyncComponentModule = { default: Component };
 export type AsyncComponentOptions = {
   loader: () => Promise<Component | AsyncComponentModule>;
@@ -1117,6 +1136,7 @@ export type VNode = {
   activeKey?: unknown;
   text?: string;
   memo?: unknown[];
+  dirs?: VNodeDirective[];
 };
 
 export function h(type: VNode["type"], props?: Record<string, unknown> | VNodeChild | null, children?: VNodeChild, ...additionalChildren: VNodeChild[]): VNode {
@@ -1151,6 +1171,12 @@ export function withMemo<T extends VNode>(dependencies: unknown[], render: () =>
   const vnode = render();
   vnode.memo = dependencies;
   cache[index] = vnode;
+  return vnode;
+}
+
+/** Attaches Vue-compatible directive bindings to a native render-function VNode. */
+export function withDirectives<T extends VNode>(vnode: T, directives: VNodeDirective[]): T {
+  vnode.dirs = directives;
   return vnode;
 }
 
@@ -2446,9 +2472,34 @@ function vnodeRefValue(vnode: VNode): unknown {
   return vnode.instance ?? vnode.component ?? vnode.el;
 }
 
+function invokeDirectiveHooks(
+  vnode: VNode,
+  previous: VNode | undefined,
+  name: "created" | "beforeMount" | "mounted" | "beforeUpdate" | "updated" | "beforeUnmount" | "unmounted"
+): void {
+  if (!(vnode.el instanceof Element)) return;
+  vnode.dirs?.forEach(([dir, value, arg, modifiers], index) => {
+    const previousValue = previous?.dirs?.[index]?.[1];
+    const hook = typeof dir === "function"
+      ? (name === "mounted" || name === "updated" ? dir : undefined)
+      : dir[name];
+    hook?.(vnode.el as Element, {
+      instance: vnode.owner,
+      value,
+      oldValue: previousValue,
+      arg,
+      modifiers: modifiers ?? {},
+      dir
+    }, vnode, previous);
+  });
+}
+
 function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode {
+  if (typeof vnode.type !== "string") invokeDirectiveHooks(vnode, undefined, "created");
   const mounted = mountVNode(vnode, container, anchor);
+  invokeDirectiveHooks(vnode, undefined, "beforeMount");
   setVNodeRef(vnode, vnodeRefValue(vnode));
+  invokeDirectiveHooks(vnode, undefined, "mounted");
   return mounted;
 }
 
@@ -2620,6 +2671,7 @@ function mountVNode(vnode: VNode, container: Node, anchor: Node | null = null): 
   const el = vnode.el = isSvg
     ? document.createElementNS(svgNamespace, vnode.type)
     : document.createElement(vnode.type);
+  invokeDirectiveHooks(vnode, undefined, "created");
   const deferredValue = vnode.type === "select" && !vnode.props.multiple ? vnode.props.value : undefined;
   Object.entries(vnode.props).forEach(([key, value]) => {
     if (vnode.type === "select" && key === "value") return;
@@ -2633,8 +2685,10 @@ function mountVNode(vnode: VNode, container: Node, anchor: Node | null = null): 
 }
 
 function unmount(vnode: VNode, container: Node): void {
+  invokeDirectiveHooks(vnode, undefined, "beforeUnmount");
   setVNodeRef(vnode, null);
   unmountVNode(vnode, container);
+  invokeDirectiveHooks(vnode, undefined, "unmounted");
 }
 
 function unmountVNode(vnode: VNode, container: Node): void {
@@ -2789,7 +2843,10 @@ function patchVNode(oldVNode: VNode | undefined, newVNode: VNode | undefined, co
   if (oldVNode === newVNode) return newVNode;
   if (oldVNode.type !== newVNode.type || oldVNode.key !== newVNode.key) {
     const next = mount(newVNode, container, oldVNode.el);
-    unmountVNode(oldVNode, container);
+    unmount(oldVNode, container);
+    // A replacement can reuse the same ref. The old VNode clears it during
+    // unmount, so confirm the newly mounted target after teardown completes.
+    setVNodeRef(next, vnodeRefValue(next));
     return next;
   }
   newVNode.el = oldVNode.el;
@@ -2965,6 +3022,7 @@ function patchVNode(oldVNode: VNode | undefined, newVNode: VNode | undefined, co
     return newVNode;
   }
   const element = newVNode.el as Element;
+  invokeDirectiveHooks(newVNode, oldVNode, "beforeUpdate");
   const oldProps = oldVNode.props;
   Object.keys({ ...oldProps, ...newVNode.props }).forEach(key => {
     if (element.tagName.toLowerCase() === "select" && key === "value") return;
@@ -2975,6 +3033,7 @@ function patchVNode(oldVNode: VNode | undefined, newVNode: VNode | undefined, co
     setProp(element, "value", newVNode.props.value, oldProps.value);
   }
   if (element.tagName.toLowerCase() === "select") syncMultipleSelect(element, newVNode.props.value);
+  invokeDirectiveHooks(newVNode, oldVNode, "updated");
   return newVNode;
 }
 
