@@ -3170,6 +3170,31 @@ test('SFC v-on object bindings update native and component event listeners', asy
   assert.equal(state.saved, 9);
 });
 
+test('SFC custom directives use the VNode directive lifecycle and modifiers', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const events = [];
+  const focus = {
+    mounted(element, binding) {
+      events.push(`mounted:${binding.value}:${binding.arg}:${binding.modifiers.trim}`);
+      element.setAttribute('data-focus', String(binding.value));
+    },
+    updated(element, binding) {
+      events.push(`updated:${binding.oldValue}->${binding.value}`);
+      element.setAttribute('data-focus', String(binding.value));
+    }
+  };
+  const render = compileSfcComponent('<template><input v-focus:field.trim="message"></template>');
+  const state = createApp(render, { message: 'Ready', directives: { focus } }).mount(root);
+  const input = root.querySelector('input');
+  assert.equal(input.getAttribute('data-focus'), 'Ready');
+  assert.deepEqual(events, ['mounted:Ready:field:true']);
+  state.message = 'Updated';
+  await nextTick();
+  assert.equal(input.getAttribute('data-focus'), 'Updated');
+  assert.deepEqual(events, ['mounted:Ready:field:true', 'updated:Ready->Updated']);
+});
+
 test('SFC v-model uses the Vue component modelValue update contract', async () => {
   const document = installDom();
   const root = document.createElement('main');

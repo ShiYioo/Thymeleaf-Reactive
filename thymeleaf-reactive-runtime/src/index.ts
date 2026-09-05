@@ -1609,6 +1609,20 @@ function resolveSfcComponent(tagName: string, scope: Record<string, unknown>): C
     : undefined;
 }
 
+function resolveSfcDirective(name: string, scope: Record<string, unknown>): Directive | undefined {
+  const normalized = camelize(name);
+  const registry = scope.directives;
+  const candidate = registry && typeof registry === "object"
+    ? (registry as Record<string, unknown>)[name]
+      ?? (registry as Record<string, unknown>)[normalized]
+      ?? (registry as Record<string, unknown>)[`v${normalized.slice(0, 1).toUpperCase()}${normalized.slice(1)}`]
+      ?? Object.entries(registry as Record<string, unknown>).find(([key]) => key.toLowerCase() === name.toLowerCase())?.[1]
+    : scope[`v${normalized.slice(0, 1).toUpperCase()}${normalized.slice(1)}`];
+  return typeof candidate === "function" || (typeof candidate === "object" && candidate !== null)
+    ? candidate as Directive
+    : undefined;
+}
+
 export function resolveDynamicComponent(value: unknown): string | Component | typeof Comment {
   if (typeof value === "string" || typeof value === "function" || (typeof value === "object" && value !== null)) {
     return value as string | Component;
@@ -1803,6 +1817,7 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
   const dynamicSource = element.getAttribute(":is") ?? element.getAttribute("v-bind:is") ?? element.getAttribute("is");
 
   const props: Record<string, unknown> = {};
+  const directives: VNodeDirective[] = [];
   Array.from(element.attributes).forEach(attribute => {
     const { name, value } = attribute;
     if (name === "v-if" || name === "v-else" || name === "v-else-if" || name === "v-show" || name === "v-text" || name === "v-html" || name === "v-memo" || (dynamic && (name === "is" || name === ":is" || name === "v-bind:is"))) return;
@@ -1892,6 +1907,18 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
         current = value;
       };
     }
+    else if (name.startsWith("v-")) {
+      const match = name.match(/^v-([A-Za-z][\w-]*)(?::([^\.]+))?(?:\.(.+))?$/);
+      const directive = match && resolveSfcDirective(match[1], scope);
+      if (directive) {
+        directives.push([
+          directive,
+          value ? readPath(scope, value) : undefined,
+          match![2],
+          Object.fromEntries((match![3]?.split(".").filter(Boolean) ?? []).map(modifier => [modifier, true]))
+        ]);
+      }
+    }
     else props[name] = value;
   });
   if (show) props.hidden = !Boolean(readPath(scope, show));
@@ -1919,6 +1946,7 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
     });
   }
   const vnode = h(resolvedType, props, children);
+  if (directives.length) withDirectives(vnode, directives);
   if (onceCache && (element.hasAttribute("v-once") || isSfcStaticNode(node, scope))) onceCache.set(node, vnode);
   if (memoExpression && memoCache) {
     vnode.memo = normalizedMemoDependencies;
