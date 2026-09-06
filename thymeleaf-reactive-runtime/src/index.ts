@@ -2790,7 +2790,33 @@ function pruneKeepAliveCache(vnode: VNode, cache: Map<unknown, VNode>, activeKey
 
 function detachVNode(vnode: VNode): void {
   const tree = vnode.instance?.tree ?? vnode.component ?? vnode;
-  moveVNode(tree, document.createDocumentFragment(), null);
+  const detached = document.createDocumentFragment();
+  prepareTeleportDetach(tree, detached);
+  if (tree.type === Teleport) {
+    if (tree.el) detached.appendChild(tree.el);
+  } else {
+    moveVNode(tree, detached, null);
+  }
+}
+
+function prepareTeleportDetach(vnode: VNode, detached: DocumentFragment): void {
+  if (vnode.instance?.tree) {
+    prepareTeleportDetach(vnode.instance.tree, detached);
+    return;
+  }
+  if (vnode.component && (vnode.type === Transition || vnode.type === TransitionGroup || vnode.type === Suspense)) {
+    prepareTeleportDetach(vnode.component, detached);
+    return;
+  }
+  if (vnode.type === Teleport) {
+    vnode.children.forEach(child => {
+      prepareTeleportDetach(child, detached);
+      moveVNode(child, detached, null);
+    });
+    if (vnode.anchor?.parentNode) detached.appendChild(vnode.anchor);
+    return;
+  }
+  vnode.children.forEach(child => prepareTeleportDetach(child, detached));
 }
 
 function setVNodeRef(vnode: VNode, value: unknown): void {
@@ -3097,6 +3123,14 @@ function unmountVNode(vnode: VNode, container: Node): void {
 }
 
 function moveVNode(vnode: VNode, container: Node, anchor: Node | null): void {
+  if (vnode.instance?.tree && vnode.instance.tree !== vnode) {
+    moveVNode(vnode.instance.tree, container, anchor);
+    return;
+  }
+  if (vnode.component && typeof vnode.type === "function") {
+    moveVNode(vnode.component, container, anchor);
+    return;
+  }
   if (vnode.type === Transition) {
     if (vnode.component) moveVNode(vnode.component, container, anchor);
     return;
@@ -3110,6 +3144,12 @@ function moveVNode(vnode: VNode, container: Node, anchor: Node | null): void {
     return;
   }
   if (vnode.type === Teleport) {
+    if (vnode.anchor && vnode.anchor.parentNode !== vnode.target) vnode.target?.appendChild(vnode.anchor);
+    if (vnode.target && vnode.anchor) {
+      vnode.children.forEach(child => {
+        if (child.el?.parentNode !== vnode.target) moveVNode(child, vnode.target!, vnode.anchor!);
+      });
+    }
     if (vnode.el) container.insertBefore(vnode.el, anchor);
     return;
   }

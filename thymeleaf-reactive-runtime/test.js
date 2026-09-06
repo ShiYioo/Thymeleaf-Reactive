@@ -1965,6 +1965,38 @@ test('KeepAlive removes and restores fragment-root component ranges cleanly', as
   app.unmount();
 });
 
+test('KeepAlive detaches and restores teleported component content with state', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const target = document.createElement('aside');
+  target.id = 'keepalive-teleport-target';
+  document.body.append(target);
+  const Panel = {
+    setup(props) {
+      return () => h(Teleport, { to: '#keepalive-teleport-target' }, [
+        h('input', { key: 'draft', value: props.name })
+      ]);
+    }
+  };
+  const app = createApp(state => h(KeepAlive, {}, [
+    h(Panel, { key: state.name, name: state.name })
+  ]), { name: 'A' });
+  const state = app.mount(root);
+  const input = target.querySelector('input');
+  input.value = 'typing';
+  state.name = 'B';
+  await nextTick();
+  const inputB = target.querySelector('input');
+  assert.notEqual(inputB, input);
+  assert.equal(target.querySelectorAll('input').length, 1);
+  state.name = 'A';
+  await nextTick();
+  assert.equal(target.querySelector('input'), input);
+  assert.equal(input.value, 'typing');
+  assert.equal(target.querySelectorAll('input').length, 1);
+  app.unmount();
+});
+
 test('KeepAlive max evicts the least recently activated instance', async () => {
   const document = installDom();
   const root = document.createElement('main');
