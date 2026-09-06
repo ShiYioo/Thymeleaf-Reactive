@@ -1250,6 +1250,36 @@ test('component HMR accepts object component replacements without refreshing the
   app.unmount();
 });
 
+test('object component HMR preserves the mounted instance for render-only updates', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const setup = () => undefined;
+  const hooks = [];
+  const Panel = defineComponent('object-render-only-hmr-test', {
+    setup,
+    mounted: () => hooks.push('mounted'),
+    unmounted: () => hooks.push('unmounted'),
+    render: props => h('button', { class: 'before' }, `Before ${props.label}`)
+  });
+  const app = createApp(() => h(Panel, { label: 'A' }));
+  app.mount(root);
+  const button = root.querySelector('button');
+
+  assert.equal(hotUpdate('object-render-only-hmr-test', {
+    setup,
+    mounted: () => hooks.push('mounted-next'),
+    unmounted: () => hooks.push('unmounted-next'),
+    render: props => h('button', { class: 'after' }, `After ${props.label}`)
+  }), true);
+
+  assert.equal(root.querySelector('button'), button);
+  assert.equal(button.textContent, 'After A');
+  assert.equal(button.className, 'after');
+  assert.deepEqual(hooks, ['mounted']);
+  app.unmount();
+  assert.deepEqual(hooks, ['mounted', 'unmounted']);
+});
+
 test('component HMR preserves script setup local refs while replacing its template', async () => {
   const document = installDom();
   const root = document.createElement('main');

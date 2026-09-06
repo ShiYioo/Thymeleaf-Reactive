@@ -1103,6 +1103,7 @@ type ComponentInstance = {
   listeners?: Record<string, unknown>;
   children?: VNode[];
   render?: HotReloadableRender;
+  setupRender?: boolean;
   parent?: ComponentInstance;
   provides?: Record<PropertyKey, unknown>;
   mountedHooks?: (() => void)[];
@@ -1471,12 +1472,14 @@ function renderObjectComponent(instance: ComponentInstance): VNode {
     const publicAttrs = readonly(instance.attrs!);
     if (!instance.render) {
       const definition = instance.vnode.type as ComponentOptions;
-      instance.render = definition.setup?.(publicProps, {
+      const setupRender = definition.setup?.(publicProps, {
         children: instance.children!,
         slots: componentSlots(instance),
         attrs: publicAttrs,
         emit: (event, ...args) => emitComponentEvent(instance.listeners!, event, args, definition.emits)
-      }) ?? definition.render;
+      });
+      instance.setupRender = typeof setupRender === "function";
+      instance.render = setupRender ?? definition.render;
       if (!instance.render) throw new Error("Component requires setup() or render()");
     }
     const rendered = instance.render(publicProps, instance.children!);
@@ -1493,10 +1496,27 @@ function renderObjectComponent(instance: ComponentInstance): VNode {
 }
 
 function hotUpdateObjectComponent(vnode: VNode, definition: ComponentOptions): boolean {
-  if (!isObjectComponent(vnode.type) || !vnode.instance?.render?.hmrUpdate?.(definition)) return false;
+  if (!isObjectComponent(vnode.type) || !vnode.instance) return false;
+  const instance = vnode.instance;
+  if (!instance.render) return false;
+  const activeRender = instance.render;
+  if (activeRender.hmrUpdate?.(definition)) {
+    vnode.type = definition;
+    instance.vnode.type = definition;
+    instance.update();
+    return true;
+  }
+  const previous = vnode.type as ComponentOptions;
+  if (previous.setup !== definition.setup || instance.setupRender || !definition.render) return false;
   vnode.type = definition;
-  vnode.instance.vnode.type = definition;
-  vnode.instance.update();
+  instance.vnode.type = definition;
+  instance.render = definition.render;
+  if (previous.props !== definition.props) instance.defaultProps = {};
+  const inputs = splitComponentProps(definition, instance.vnode.props, instance.defaultProps);
+  syncComponentProps(instance.props!, inputs.props);
+  syncComponentProps(instance.attrs!, inputs.attrs);
+  instance.listeners = inputs.listeners;
+  instance.update();
   return true;
 }
 
