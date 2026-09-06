@@ -2789,17 +2789,8 @@ function pruneKeepAliveCache(vnode: VNode, cache: Map<unknown, VNode>, activeKey
 }
 
 function detachVNode(vnode: VNode): void {
-  if (vnode.type === Fragment) {
-    let node = vnode.el;
-    while (node) {
-      const next = node === vnode.anchor ? null : node.nextSibling;
-      node.parentNode?.removeChild(node);
-      if (!next) break;
-      node = next;
-    }
-    return;
-  }
-  if (vnode.el?.parentNode) vnode.el.parentNode.removeChild(vnode.el);
+  const tree = vnode.instance?.tree ?? vnode.component ?? vnode;
+  moveVNode(tree, document.createDocumentFragment(), null);
 }
 
 function setVNodeRef(vnode: VNode, value: unknown): void {
@@ -3134,6 +3125,11 @@ function moveVNode(vnode: VNode, container: Node, anchor: Node | null): void {
   }
 }
 
+function nextSiblingAfterVNode(vnode: VNode | undefined): Node | null {
+  if (!vnode) return null;
+  return vnode.anchor ? vnode.anchor.nextSibling : vnode.el?.nextSibling ?? null;
+}
+
 function patchChildren(
   container: Node,
   oldChildren: VNode[],
@@ -3283,24 +3279,23 @@ function patchVNode(oldVNode: VNode | undefined, newVNode: VNode | undefined, co
       return newVNode;
     }
     const nextKey = keepAliveKey(nextChild);
-    const insertionAnchor = oldChild?.anchor?.nextSibling ?? oldChild?.el?.nextSibling ?? null;
+    const insertionAnchor = nextSiblingAfterVNode(oldChild);
     if (oldChild && oldVNode.activeKey !== nextKey) {
       cache.set(oldVNode.activeKey, oldChild);
       invokeComponentHook(oldChild, "deactivatedHooks");
       detachVNode(oldChild);
     }
     const cached = cache.get(nextKey);
-    const active = cached
-      ? patch(cached, nextChild, container) ?? cached
-      : nextChild;
-    if (!cached) {
-      mount(active, container, insertionAnchor);
+    let active = cached ?? nextChild;
+    if (cached) {
+      moveVNode(cached, container, insertionAnchor);
+      active = patch(cached, nextChild, container) ?? cached;
+      cache.delete(nextKey);
       cache.set(nextKey, active);
       invokeComponentHook(active, "activatedHooks");
     } else {
-      cache.delete(nextKey);
+      mount(active, container, insertionAnchor);
       cache.set(nextKey, active);
-      moveVNode(active, container, insertionAnchor);
       invokeComponentHook(active, "activatedHooks");
     }
     pruneKeepAliveCache(newVNode, cache, nextKey, container);

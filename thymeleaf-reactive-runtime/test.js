@@ -1934,6 +1934,37 @@ test('KeepAlive caches keyed component instances across switches', async () => {
   assert.equal(hooks.includes('unmounted:B'), true);
 });
 
+test('KeepAlive removes and restores fragment-root component ranges cleanly', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Counter = {
+    setup(props) {
+      const count = ref(0);
+      return () => h(Fragment, {}, [
+        h('button', { key: 'primary', onClick: () => count.value++ }, `${props.name}:${count.value}`),
+        h('strong', { key: 'secondary' }, `#${props.name}`)
+      ]);
+    }
+  };
+  const app = createApp(state => h(KeepAlive, {}, [
+    h(Counter, { key: state.name, name: state.name })
+  ]), { name: 'A' });
+  const state = app.mount(root);
+  const firstButton = root.querySelector('button');
+  firstButton.dispatchEvent(new Event('click'));
+  await nextTick();
+  assert.deepEqual([...root.querySelectorAll('button')].map(node => node.textContent), ['A:1']);
+  state.name = 'B';
+  await nextTick();
+  assert.deepEqual([...root.querySelectorAll('button')].map(node => node.textContent), ['B:0']);
+  assert.equal(root.querySelectorAll('strong').length, 1);
+  state.name = 'A';
+  await nextTick();
+  assert.equal(root.querySelector('button'), firstButton);
+  assert.deepEqual([...root.querySelectorAll('button')].map(node => node.textContent), ['A:1']);
+  app.unmount();
+});
+
 test('KeepAlive max evicts the least recently activated instance', async () => {
   const document = installDom();
   const root = document.createElement('main');
