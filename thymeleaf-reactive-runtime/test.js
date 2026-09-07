@@ -4321,6 +4321,83 @@ test('Transition in-out mode delays the leave until enter completes', async () =
   app.unmount();
 });
 
+test('SFC injects style blocks and keeps recompiles idempotent', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const source = `
+    <template><p class="sfc-style-target">{{ label }}</p></template>
+    <style>p.sfc-style-target { color: red; }</style>
+  `;
+  const Component = compileSfcComponent(source);
+  createApp(() => h(Component, { label: 'styled' })).mount(root);
+  const injected = document.head.querySelectorAll('style[data-tr-sfc]');
+  assert.equal(injected.length, 1);
+  assert.match(injected[0].textContent, /p\.sfc-style-target \{ color: red; \}/);
+  compileSfcComponent(source);
+  assert.equal(document.head.querySelectorAll('style[data-tr-sfc]').length, 1);
+});
+
+test('SFC scoped styles rewrite selectors and stamp the scope attribute', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Scoped = compileSfcComponent(`
+    <template>
+      <section>
+        <p class="label">Scoped</p>
+        <span class="deep-host"><i>Deep</i></span>
+      </section>
+    </template>
+    <style scoped>
+      .label { color: red; }
+      .label:hover { color: blue; }
+      p::before { content: '> '; }
+      .deep-host :deep(i) { font-weight: bold; }
+      @media (min-width: 100px) { section { padding: 4px; } }
+    </style>
+  `);
+  createApp(() => h('main', {}, [h(Scoped), h('p', { class: 'label' }, 'Outside')])).mount(root);
+  const styleElement = document.head.querySelector('style[data-tr-sfc]');
+  assert.ok(styleElement);
+  const css = styleElement.textContent;
+  assert.match(css, /\.label\[data-v-[^\]]+\] ?\{ color: red; \}/);
+  assert.match(css, /\.label\[data-v-[^\]]+\]:hover ?\{ color: blue; \}/);
+  assert.match(css, /p\[data-v-[^\]]+\]::before/);
+  assert.match(css, /\[data-v-[^\]]+\] i ?\{ font-weight: bold; \}/);
+  assert.match(css, /@media \(min-width: 100px\) \{ ?section\[data-v-[^\]]+\] ?\{ padding: 4px; \} \}/);
+  const scopedLabel = root.querySelector('section p.label');
+  const scopeAttribute = Array.from(scopedLabel.attributes)
+    .map(attribute => attribute.name)
+    .find(name => name.startsWith('data-v-'));
+  assert.ok(scopeAttribute, 'scoped element carries the scope attribute');
+  assert.ok(root.querySelector('section .deep-host i').hasAttribute(scopeAttribute));
+  const outside = [...root.querySelectorAll('p.label')].find(node => node.textContent === 'Outside');
+  assert.ok(outside);
+  assert.equal(outside.hasAttribute(scopeAttribute), false);
+});
+
+test('SFC style adoption removes stale styles when HMR swaps the definition', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const first = compileSfcComponent(`
+    <template><p class="stale-style">{{ label }}</p></template>
+    <style>p.stale-style { color: red; }</style>
+  `);
+  const render = compileSfcComponent('<template><StaleStyle :label="message" /></template>');
+  defineComponent('sfc-styled-test', first);
+  createApp(render, { message: 'Before', components: { StaleStyle: first } }).mount(root);
+  assert.equal(root.querySelector('p').textContent, 'Before');
+  const staleStyle = document.head.querySelector('style[data-tr-sfc]');
+  assert.ok(staleStyle);
+  const second = compileSfcComponent(`
+    <template><p class="fresh-style">{{ label }}</p></template>
+    <style>p.fresh-style { color: blue; }</style>
+  `);
+  assert.equal(hotUpdate('sfc-styled-test', second), true);
+  assert.equal(staleStyle.isConnected, false);
+  assert.equal(document.head.querySelector('style[data-tr-sfc]').textContent.includes('fresh-style'), true);
+  assert.equal(root.querySelector('p').textContent, 'Before');
+});
+
 test('TransitionGroup preserves keyed nodes and transitions list additions and removals', async () => {
   const document = installDom();
   const root = document.createElement('main');

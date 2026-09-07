@@ -28,6 +28,8 @@ export type ComponentOptions = {
   props?: ComponentProps;
   emits?: ComponentEmits;
   inheritAttrs?: boolean;
+  /** Style elements injected for this SFC; replaced when HMR swaps the definition. */
+  __sfcStyles?: HTMLStyleElement[];
   setup?: (props: Record<string, unknown>, context: ComponentContext) => ComponentRender | void;
   render?: ComponentRender;
   hmrRender?: (scope: Record<string, unknown>, children: VNode[]) => VNode;
@@ -1575,6 +1577,7 @@ function hotUpdateObjectComponent(vnode: VNode, definition: ComponentOptions): b
   if (!instance.render) return false;
   const activeRender = instance.render;
   if (activeRender.hmrUpdate?.(definition)) {
+    adoptSfcStyles(vnode.type as ComponentOptions, definition);
     vnode.type = definition;
     instance.vnode.type = definition;
     instance.update();
@@ -1582,6 +1585,7 @@ function hotUpdateObjectComponent(vnode: VNode, definition: ComponentOptions): b
   }
   const previous = vnode.type as ComponentOptions;
   if (previous.setup !== definition.setup || instance.setupRender || !definition.render) return false;
+  adoptSfcStyles(previous, definition);
   vnode.type = definition;
   instance.vnode.type = definition;
   instance.render = definition.render;
@@ -2504,6 +2508,94 @@ function normalizeSfcSelfClosingTags(source: string): string {
   return output;
 }
 
+type SfcStyleBlock = { css: string; scoped: boolean };
+
+/** Collects every `<style>` block with its attributes; multiple blocks are allowed. */
+function extractSfcStyles(source: string): SfcStyleBlock[] {
+  const styles: SfcStyleBlock[] = [];
+  const pattern = /<(\/?)style([^>]*)>/ig;
+  let match: RegExpExecArray | null;
+  let open: { attrs: string; start: number } | undefined;
+  while ((match = pattern.exec(source))) {
+    if (!match[1]) {
+      if (!open) open = { attrs: match[2] ?? "", start: pattern.lastIndex };
+    } else if (open) {
+      const css = source.slice(open.start, match.index).trim();
+      if (css) styles.push({ css, scoped: /\bscoped\b/i.test(open.attrs) });
+      open = undefined;
+    }
+  }
+  return styles;
+}
+
+/** Stable Vue-style `data-v-*` scope id derived from the SFC source. */
+function sfcScopeId(source: string): string {
+  let hash = 5381;
+  for (let index = 0; index < source.length; index++) hash = ((hash << 5) + hash + source.charCodeAt(index)) >>> 0;
+  return `data-v-${hash.toString(36)}`;
+}
+
+/** Appends the scope attribute to the last compound of each simple selector. */
+function scopeSfcSelector(part: string, attribute: string): string {
+  if (!part) return part;
+  const deep = part.match(/^(.*?)\s*:deep\(\s*([^)]*?)\s*\)/);
+  if (deep) {
+    const base = deep[1].trim();
+    return `${base ? base + attribute : attribute}${deep[2] ? " " + deep[2] : ""}`;
+  }
+  const pseudo = part.search(/:{1,2}[A-Za-z]/);
+  const base = pseudo >= 0 ? part.slice(0, pseudo) : part;
+  const rest = pseudo >= 0 ? part.slice(pseudo) : "";
+  return `${base}${attribute}${rest}`;
+}
+
+/** Vue scoped-CSS subset: flat rules plus @media/@supports bodies; @keyframes pass through. */
+function scopeSfcCss(css: string, attribute: string): string {
+  return css.replace(/([^{}]+)\{([^{}]*)\}/g, (_match, selectorList: string, body: string) => {
+    const selector = selectorList.trim();
+    if (selector.startsWith("@")) {
+      if (/^@(?:media|supports)\b/.test(selector)) return `${selector}{${scopeSfcCss(body, attribute)}}`;
+      return _match;
+    }
+    return `${selector.split(",").map(part => scopeSfcSelector(part.trim(), attribute)).join(", ")}{${body}}`;
+  });
+}
+
+const sfcStyleElements = new Map<string, HTMLStyleElement>();
+
+/** Injects (or refreshes) one style element per scope id so recompiles never duplicate. */
+function injectSfcStyle(key: string, css: string): HTMLStyleElement {
+  let element = sfcStyleElements.get(key);
+  if (element && !element.isConnected) element = undefined;
+  if (!element) {
+    element = document.createElement("style");
+    element.setAttribute("data-tr-sfc", key);
+    (document.head ?? document.documentElement).appendChild(element);
+    sfcStyleElements.set(key, element);
+  }
+  if (element.textContent !== css) element.textContent = css;
+  return element;
+}
+
+function applyScopeAttribute(nodes: Node[], attribute: string): void {
+  nodes.forEach(node => {
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      (node as Element).setAttribute(attribute, "");
+      applyScopeAttribute(Array.from(node.childNodes), attribute);
+    }
+  });
+}
+
+type SfcStyleCarrier = { __sfcStyles?: HTMLStyleElement[] };
+
+/** HMR contract: a swapped-out definition takes its injected styles with it. */
+function adoptSfcStyles(previous: SfcStyleCarrier | undefined, next: SfcStyleCarrier | undefined): void {
+  if (!previous || previous === next) return;
+  if (previous.__sfcStyles?.some(element => next?.__sfcStyles?.includes(element))) return;
+  previous.__sfcStyles?.forEach(element => element.remove());
+  previous.__sfcStyles = undefined;
+}
+
 /**
  * Compiles a resource-backed Vue SFC template plus a CSP-safe script-setup subset.
  * Supported setup declarations are ref(), reactive(), computed(() => expression),
@@ -2523,15 +2615,28 @@ export function compileSfcComponent(source: string): Component {
       .replace(/(^|\s)#([A-Za-z_$][\w$-]*)(?=\s|=|\/?\s*>)/g, "$1v-slot:$2"));
   template.innerHTML = normalizeSfcSelfClosingTags(normalizedSlots);
   const roots = Array.from(template.content.childNodes);
+  const styles = extractSfcStyles(source);
+  let scopedAttribute: string | undefined;
+  let styleElements: HTMLStyleElement[] | undefined;
+  if (styles.length) {
+    if (styles.some(block => block.scoped)) scopedAttribute = sfcScopeId(source);
+    const css = styles.map(block => block.scoped ? scopeSfcCss(block.css, `[${scopedAttribute}]`) : block.css).join("\n");
+    styleElements = [injectSfcStyle(scopedAttribute ?? `${sfcScopeId(source)}-global`, css)];
+    if (scopedAttribute) applyScopeAttribute(roots, scopedAttribute);
+  }
   const script = source.match(/<script\s+setup(?:\s[^>]*)?>([\s\S]*?)<\/script>/i)?.[1];
-  if (!script) return (props, children) => {
-    const scope = new Proxy(props as Record<string, unknown>, {
-      get(target, key) { return sfcScopeProperty(target, key); },
-      has(target, key) { return typeof key === "string" ? key in target || Object.keys(target).some(candidate => candidate.toLowerCase() === key.toLowerCase()) : key in target; }
-    });
-    const nodes = renderSfcChildren(roots, scope, children);
-    return nodes.length === 1 ? nodes[0] : h(Fragment, {}, nodes);
-  };
+  if (!script) {
+    const render = (props: Record<string, unknown>, children: VNode[]) => {
+      const scope = new Proxy(props as Record<string, unknown>, {
+        get(target, key) { return sfcScopeProperty(target, key); },
+        has(target, key) { return typeof key === "string" ? key in target || Object.keys(target).some(candidate => candidate.toLowerCase() === key.toLowerCase()) : key in target; }
+      });
+      const nodes = renderSfcChildren(roots, scope, children);
+      return nodes.length === 1 ? nodes[0] : h(Fragment, {}, nodes);
+    };
+    (render as ComponentRender & SfcStyleCarrier).__sfcStyles = styleElements;
+    return render;
+  }
   const setup = parseSfcSetup(script);
   const hmrRender = (scope: Record<string, unknown>, children: VNode[], onceCache?: SfcOnceCache, memoCache?: SfcMemoCache) => {
     const nodes = renderSfcChildren(roots, scope, children, onceCache, memoCache);
@@ -2543,6 +2648,7 @@ export function compileSfcComponent(source: string): Component {
     props: setup.props,
     emits: setup.emits,
     inheritAttrs: setup.options?.inheritAttrs,
+    __sfcStyles: styleElements,
     setup(props, context) {
       const local = new Proxy(Object.create(null) as Record<string, unknown>, {
         get(target, key, receiver) {
@@ -3972,6 +4078,7 @@ export function adoptComponentRoot(root: Element, component: Component, props: R
 export function hotUpdate(name: string, render: Component): boolean {
   const entry = hotComponents.get(name);
   if (!entry) return false;
+  adoptSfcStyles(entry.render as SfcStyleCarrier, render as SfcStyleCarrier);
   entry.render = render;
   entry.instances.forEach(update => update());
   return true;
