@@ -4251,6 +4251,76 @@ test('Transition runs enter and leave lifecycle hooks around keyed replacement',
   app.unmount();
 });
 
+test('Transition out-in mode defers the incoming child until leave completes', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const state = reactive({ showFirst: true });
+  const events = [];
+  const app = createApp(() => h(Transition, {
+    mode: 'out-in',
+    name: 'fade',
+    onBeforeEnter: () => events.push('before-enter'),
+    onAfterEnter: () => events.push('after-enter'),
+    onBeforeLeave: () => events.push('before-leave'),
+    onAfterLeave: () => events.push('after-leave')
+  }, [h('p', { key: state.showFirst ? 'first' : 'second' }, state.showFirst ? 'First' : 'Second')]));
+  app.mount(root);
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.deepEqual(events, ['before-enter', 'after-enter']);
+  state.showFirst = false;
+  await nextTick();
+  assert.equal(root.textContent, 'First');
+  assert.deepEqual(events.slice(-1), ['before-leave']);
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(root.textContent, 'Second');
+  assert.deepEqual(events.slice(-4), ['before-leave', 'after-leave', 'before-enter', 'after-enter']);
+  app.unmount();
+});
+
+test('Transition out-in mode flushes a pending swap when the branch changes again', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const state = reactive({ showFirst: true });
+  const app = createApp(() => h(Transition, { mode: 'out-in', name: 'fade' },
+    [h('p', { key: state.showFirst ? 'first' : 'second' }, state.showFirst ? 'First' : 'Second')]));
+  app.mount(root);
+  await new Promise(resolve => setTimeout(resolve, 30));
+  state.showFirst = false;
+  await nextTick();
+  assert.equal(root.textContent, 'First');
+  state.showFirst = true;
+  await new Promise(resolve => setTimeout(resolve, 40));
+  assert.equal(root.textContent, 'First');
+  assert.equal(root.querySelectorAll('p').length, 1);
+  app.unmount();
+});
+
+test('Transition in-out mode delays the leave until enter completes', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const state = reactive({ showFirst: true });
+  const events = [];
+  const app = createApp(() => h(Transition, {
+    mode: 'in-out',
+    name: 'fade',
+    onBeforeEnter: () => events.push('before-enter'),
+    onAfterEnter: () => events.push('after-enter'),
+    onBeforeLeave: () => events.push('before-leave'),
+    onAfterLeave: () => events.push('after-leave')
+  }, [h('p', { key: state.showFirst ? 'first' : 'second' }, state.showFirst ? 'First' : 'Second')]));
+  app.mount(root);
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.deepEqual(events, ['before-enter', 'after-enter']);
+  state.showFirst = false;
+  await nextTick();
+  assert.equal(root.textContent, 'SecondFirst');
+  assert.deepEqual(events.slice(-1), ['before-enter']);
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(root.textContent, 'Second');
+  assert.deepEqual(events.slice(-3), ['after-enter', 'before-leave', 'after-leave']);
+  app.unmount();
+});
+
 test('TransitionGroup preserves keyed nodes and transitions list additions and removals', async () => {
   const document = installDom();
   const root = document.createElement('main');

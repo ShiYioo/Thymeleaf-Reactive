@@ -2622,7 +2622,8 @@ function transitionElement(vnode: VNode): Element | null {
 }
 
 function childWithTransitionProps(child: VNode, props: Record<string, unknown>): VNode {
-  return { ...child, props: { ...child.props, ...props } };
+  const { mode: _mode, ...rest } = props;
+  return { ...child, props: { ...child.props, ...rest } };
 }
 
 function transitionClassName(vnode: VNode): string {
@@ -2642,9 +2643,12 @@ function transitionHook(vnode: VNode, name: string, element: Element, done: () =
   }
 }
 
-function transitionEnter(vnode: VNode): void {
+function transitionEnter(vnode: VNode, done?: () => void): void {
   const element = transitionElement(vnode);
-  if (!element) return;
+  if (!element) {
+    done?.();
+    return;
+  }
   const name = transitionClassName(vnode);
   const from = `${name}-enter-from`;
   const active = `${name}-enter-active`;
@@ -2653,6 +2657,7 @@ function transitionEnter(vnode: VNode): void {
     element.classList.remove(from, active, to);
     const hook = vnode.props.onAfterEnter;
     if (typeof hook === "function") hook(element);
+    done?.();
   };
   const before = vnode.props.onBeforeEnter;
   if (typeof before === "function") before(element);
@@ -2691,8 +2696,11 @@ function transitionLeave(vnode: VNode, done: () => void): void {
 }
 
 function isTransitionProp(key: string): boolean {
-  return key === "tag" || key === "name" || key.startsWith("onBefore") || key.startsWith("onAfter") || key === "onEnter" || key === "onLeave";
+  return key === "tag" || key === "name" || key === "mode" || key.startsWith("onBefore") || key.startsWith("onAfter") || key === "onEnter" || key === "onLeave";
 }
+
+/** Out-in swaps waiting on a leave; keyed by the transition vnode so a newer patch flushes them first. */
+const pendingTransitionSwaps = new WeakMap<VNode, () => void>();
 
 function transitionGroupElementProps(props: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(props).filter(([key]) => !isTransitionProp(key)));
@@ -3385,17 +3393,43 @@ function patchVNode(oldVNode: VNode | undefined, newVNode: VNode | undefined, co
     return newVNode;
   }
   if (newVNode.type === Transition) {
+    if (oldVNode.type === Transition) pendingTransitionSwaps.get(oldVNode)?.();
     const oldChild = oldVNode.component;
     const nextChild = newVNode.children[0] ?? normalizeVNode("");
     if (oldChild && oldChild.type === nextChild.type && oldChild.key === nextChild.key) {
       newVNode.component = patch(oldChild, nextChild, container) ?? nextChild;
     } else {
-      if (nextChild) {
-        mount(nextChild, container, oldChild?.el ?? null);
-        transitionEnter(childWithTransitionProps(nextChild, newVNode.props));
+      const mode = newVNode.props.mode;
+      const entering = nextChild.type !== Comment;
+      if (oldChild && entering && mode === "out-in") {
+        // Vue out-in: the incoming child waits until the leave transition finished.
+        const swap = () => {
+          if (pendingTransitionSwaps.get(newVNode) !== swap) return;
+          pendingTransitionSwaps.delete(newVNode);
+          unmount(oldChild, container);
+          mount(nextChild, container, null);
+          newVNode.el = nextChild.el;
+          newVNode.anchor = nextChild.anchor;
+          transitionEnter(childWithTransitionProps(nextChild, newVNode.props));
+        };
+        pendingTransitionSwaps.set(newVNode, swap);
+        newVNode.component = nextChild;
+        transitionLeave(childWithTransitionProps(oldChild, oldVNode.props), swap);
+      } else if (oldChild && entering && mode === "in-out") {
+        // Vue in-out: the outgoing child waits until the enter transition finished.
+        mount(nextChild, container, oldChild.el ?? null);
+        newVNode.component = nextChild;
+        transitionEnter(childWithTransitionProps(nextChild, newVNode.props), () => {
+          transitionLeave(childWithTransitionProps(oldChild, oldVNode.props), () => unmount(oldChild, container));
+        });
+      } else {
+        if (nextChild) {
+          mount(nextChild, container, oldChild?.el ?? null);
+          transitionEnter(childWithTransitionProps(nextChild, newVNode.props));
+        }
+        if (oldChild) transitionLeave(childWithTransitionProps(oldChild, oldVNode.props), () => unmount(oldChild, container));
+        newVNode.component = nextChild;
       }
-      if (oldChild) transitionLeave(childWithTransitionProps(oldChild, oldVNode.props), () => unmount(oldChild, container));
-      newVNode.component = nextChild;
     }
     newVNode.el = newVNode.component.el;
     newVNode.anchor = newVNode.component.anchor;

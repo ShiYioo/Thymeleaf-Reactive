@@ -184,7 +184,7 @@ h(Suspense, { fallback: h("p", {}, "Loading") }, [
 
 ## Virtual DOM Transition
 
-The runtime exports `Transition` for single-child enter and leave transitions. It applies the `v-enter-*` and `v-leave-*` class phases and supports `onBeforeEnter`, `onEnter`, `onAfterEnter`, `onBeforeLeave`, `onLeave`, and `onAfterLeave` hooks. Hooks accepting a second argument can complete asynchronously by calling `done`.
+The runtime exports `Transition` for single-child enter and leave transitions. It applies the `v-enter-*` and `v-leave-*` class phases and supports `onBeforeEnter`, `onEnter`, `onAfterEnter`, `onBeforeLeave`, `onLeave`, and `onAfterLeave` hooks. Hooks accepting a second argument can complete asynchronously by calling `done`. The Vue-compatible `mode` prop orders the switch: the default runs the leaving and entering children concurrently, `mode: "out-in"` mounts the incoming child only after the leave transition finished (an intervening branch change flushes the pending swap), and `mode: "in-out"` delays the leave until the enter transition finished.
 
 ```js
 h(Transition, { name: "fade" }, [h("p", {}, "Content")]);
