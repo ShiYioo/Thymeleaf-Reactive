@@ -1094,6 +1094,13 @@ export const KeepAlive = Symbol("keep-alive");
 export const Suspense = Symbol("suspense");
 export const Transition = Symbol("transition");
 export const TransitionGroup = Symbol("transition-group");
+type AppContext = {
+  components: Record<string, Component>;
+  directives: Record<string, Directive>;
+  provides: Record<PropertyKey, unknown>;
+};
+let currentAppContext: AppContext | undefined;
+
 type ComponentInstance = {
   vnode: VNode;
   tree: VNode;
@@ -1122,6 +1129,7 @@ type ComponentInstance = {
   scope?: EffectScope;
   exposed?: Record<string, unknown> | null;
   exposeProxy?: Record<string, unknown> | null;
+  appContext?: AppContext | null;
 };
 type HotReloadableRender = ComponentRender & { hmrUpdate?: (next: ComponentOptions) => boolean };
 const componentInstanceStack: ComponentInstance[] = [];
@@ -1502,6 +1510,8 @@ function invokeComponentHook(vnode: VNode, name: "activatedHooks" | "deactivated
 
 function renderObjectComponent(instance: ComponentInstance): VNode {
   componentInstanceStack.push(instance);
+  const previousAppContext = currentAppContext;
+  if (instance.appContext) currentAppContext = instance.appContext;
   try {
     const publicProps = readonly(instance.props!);
     const publicAttrs = readonly(instance.attrs!);
@@ -1528,6 +1538,7 @@ function renderObjectComponent(instance: ComponentInstance): VNode {
     return instance.tree ?? normalizeVNode("");
   } finally {
     componentInstanceStack.pop();
+    currentAppContext = previousAppContext;
   }
 }
 
@@ -1701,8 +1712,19 @@ function resolveSfcComponent(tagName: string, scope: Record<string, unknown>): C
       ?? Object.entries(registry as Record<string, unknown>).find(([key]) => key.toLowerCase() === name)?.[1]
     : undefined;
   const candidate = registryCandidate
+    ?? lookupAppComponent(tagName, pascal)
     ?? scope[tagName]
     ?? scope[pascal];
+  return typeof candidate === "function" || (typeof candidate === "object" && candidate !== null)
+    ? candidate as Component
+    : undefined;
+}
+
+function lookupAppComponent(name: string, pascal: string): Component | undefined {
+  const registry = currentAppContext?.components;
+  if (!registry) return undefined;
+  const candidate = registry[name] ?? registry[pascal]
+    ?? Object.entries(registry).find(([key]) => key.toLowerCase() === name.toLowerCase())?.[1];
   return typeof candidate === "function" || (typeof candidate === "object" && candidate !== null)
     ? candidate as Component
     : undefined;
@@ -1711,12 +1733,16 @@ function resolveSfcComponent(tagName: string, scope: Record<string, unknown>): C
 function resolveSfcDirective(name: string, scope: Record<string, unknown>): Directive | undefined {
   const normalized = camelize(name);
   const registry = scope.directives;
+  const appRegistry = currentAppContext?.directives;
   const candidate = registry && typeof registry === "object"
     ? (registry as Record<string, unknown>)[name]
       ?? (registry as Record<string, unknown>)[normalized]
       ?? (registry as Record<string, unknown>)[`v${normalized.slice(0, 1).toUpperCase()}${normalized.slice(1)}`]
       ?? Object.entries(registry as Record<string, unknown>).find(([key]) => key.toLowerCase() === name.toLowerCase())?.[1]
-    : scope[`v${normalized.slice(0, 1).toUpperCase()}${normalized.slice(1)}`];
+    : scope[`v${normalized.slice(0, 1).toUpperCase()}${normalized.slice(1)}`]
+      ?? appRegistry?.[name]
+      ?? appRegistry?.[normalized]
+      ?? Object.entries(appRegistry ?? {}).find(([key]) => key.toLowerCase() === name.toLowerCase())?.[1];
   return typeof candidate === "function" || (typeof candidate === "object" && candidate !== null)
     ? candidate as Directive
     : undefined;
@@ -3008,7 +3034,8 @@ function mountVNode(vnode: VNode, container: Node, anchor: Node | null = null): 
     instance.attrs = reactive({ ...inputs.attrs });
     instance.listeners = inputs.listeners;
     instance.children = vnode.children;
-    instance.provides = Object.create(instance.parent?.provides ?? null);
+    instance.provides = Object.create(instance.parent?.provides ?? currentAppContext?.provides ?? null);
+    instance.appContext = currentAppContext ?? null;
     instance.beforeMountHooks = definition.beforeMount ? [definition.beforeMount] : [];
     instance.mountedHooks = definition.mounted ? [definition.mounted] : [];
     instance.beforeUpdateHooks = definition.beforeUpdate ? [definition.beforeUpdate] : [];
@@ -3497,7 +3524,8 @@ function hydrateObjectComponent(vnode: VNode, node: Node | null, container: Node
   instance.attrs = reactive({ ...inputs.attrs });
   instance.listeners = inputs.listeners;
   instance.children = vnode.children;
-  instance.provides = Object.create(instance.parent?.provides ?? null);
+  instance.provides = Object.create(instance.parent?.provides ?? currentAppContext?.provides ?? null);
+  instance.appContext = currentAppContext ?? null;
   instance.beforeMountHooks = definition.beforeMount ? [definition.beforeMount] : [];
   instance.mountedHooks = definition.mounted ? [definition.mounted] : [];
   instance.beforeUpdateHooks = definition.beforeUpdate ? [definition.beforeUpdate] : [];
@@ -3673,17 +3701,62 @@ export function render(vnode: VNode | null, container: Node): VNode | null {
 
 export function createApp(render: (state: any) => VNode, state: object = {}) {
   const reactiveState = reactive(state);
+  const context: AppContext = { components: {}, directives: {}, provides: {} };
+  const installedPlugins = new Set<unknown>();
   let currentRender = render;
   let rerender: Effect | undefined;
   let mountedRoot: Element | undefined;
   let tree: VNode | undefined;
-  return {
+  const app = {
+    context,
+    /** Vue-compatible global component registry; SFC templates resolve it after local scope. */
+    component(name: string, component?: Component): unknown {
+      if (!component) return context.components[name];
+      if (context.components[name]) console.warn(`[thymeleaf-reactive] component "${name}" has already been registered in target app`);
+      context.components[name] = component;
+      return app;
+    },
+    /** Vue-compatible global directive registry for SFC `v-name` resolution. */
+    directive(name: string, directive?: Directive): unknown {
+      const key = camelize(name);
+      if (!directive) return context.directives[key];
+      if (context.directives[key]) console.warn(`[thymeleaf-reactive] directive "${name}" has already been registered in target app`);
+      context.directives[key] = directive;
+      return app;
+    },
+    /** App-level provides; every root-level instance inherits them through its provides chain. */
+    provide(key: PropertyKey, value: unknown): unknown {
+      if (key in context.provides) console.warn(`[thymeleaf-reactive] app already provides "${String(key)}"; it will be overwritten`);
+      context.provides[key] = value;
+      return app;
+    },
+    /** Vue-compatible plugin installation: `{ install(app, ...options) }` or a function, applied once. */
+    use(plugin: unknown, ...options: unknown[]): unknown {
+      if (installedPlugins.has(plugin)) return app;
+      installedPlugins.add(plugin);
+      if (plugin && typeof (plugin as { install?: unknown }).install === "function") {
+        (plugin as { install: (app: unknown, ...options: unknown[]) => void }).install(app, ...options);
+      } else if (typeof plugin === "function") {
+        (plugin as (app: unknown, ...options: unknown[]) => void)(app, ...options);
+      } else {
+        throw new Error("A plugin must either be a function or an object with an install function");
+      }
+      return app;
+    },
     mount(root: Element): object {
       if (rerender) this.unmount();
       mountedRoot = root;
       const uid = nextComponentUid++;
       let rootUpdate!: Effect;
-      rootUpdate = effect(() => { tree = patch(tree, currentRender(reactiveState), root) ?? undefined; }, {
+      rootUpdate = effect(() => {
+        const previousAppContext = currentAppContext;
+        currentAppContext = context;
+        try {
+          tree = patch(tree, currentRender(reactiveState), root) ?? undefined;
+        } finally {
+          currentAppContext = previousAppContext;
+        }
+      }, {
         scheduler: () => queueJob(rootUpdate, uid, true)
       });
       rerender = rootUpdate;
@@ -3704,6 +3777,7 @@ export function createApp(render: (state: any) => VNode, state: object = {}) {
       tree = undefined;
     }
   };
+  return app;
 }
 
 type HotComponent = { render: Component; instances: Set<() => void> };
@@ -3752,7 +3826,8 @@ export function adoptComponentRoot(root: Element, component: Component, props: R
     instance.attrs = reactive({ ...inputs.attrs });
     instance.listeners = inputs.listeners;
     instance.children = vnode.children;
-    instance.provides = Object.create(null);
+    instance.provides = Object.create(instance.parent?.provides ?? currentAppContext?.provides ?? null);
+    instance.appContext = currentAppContext ?? null;
     instance.beforeMountHooks = definition.beforeMount ? [definition.beforeMount] : [];
     instance.mountedHooks = definition.mounted ? [definition.mounted] : [];
     instance.beforeUpdateHooks = definition.beforeUpdate ? [definition.beforeUpdate] : [];

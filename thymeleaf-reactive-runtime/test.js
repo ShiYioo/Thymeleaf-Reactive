@@ -3963,6 +3963,88 @@ test('defineExpose rejects calls outside setup and non-object payloads', () => {
   assert.equal(root.querySelector('i').textContent, 'ok');
 });
 
+test('app.component registers global components resolved by SFC templates', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Badge = compileSfcComponent('<template><strong>{{ label }}</strong></template>');
+  const render = compileSfcComponent('<template><badge-message label="Global" /><badge-message label="Second" /></template>');
+  const app = createApp(render, {});
+  assert.equal(app.component('badge-message'), undefined);
+  assert.equal(app.component('badge-message', Badge), app);
+  assert.equal(app.component('badge-message'), Badge);
+  app.mount(root);
+  assert.deepEqual(Array.from(root.querySelectorAll('strong')).map(node => node.textContent), ['Global', 'Second']);
+});
+
+test('app.directive registers global directives for SFC v-* resolution', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const seen = [];
+  const highlight = {
+    mounted(el, binding) { seen.push(`mounted:${binding.value}`); el.dataset.highlight = String(binding.value); },
+    updated(el, binding) { seen.push(`updated:${binding.value}`); el.dataset.highlight = String(binding.value); }
+  };
+  const render = compileSfcComponent('<template><p v-highlight="message">{{ message }}</p></template>');
+  const app = createApp(render, { message: 'first' });
+  assert.equal(app.directive('highlight'), undefined);
+  app.directive('highlight', highlight);
+  assert.equal(app.directive('highlight'), highlight);
+  const state = app.mount(root);
+  assert.deepEqual(seen, ['mounted:first']);
+  assert.equal(root.querySelector('p').dataset.highlight, 'first');
+  state.message = 'second';
+  await nextTick();
+  assert.deepEqual(seen, ['mounted:first', 'updated:second']);
+  assert.equal(root.querySelector('p').dataset.highlight, 'second');
+});
+
+test('app.provide flows through instance chains and yields to component provides', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Leaf = {
+    setup() {
+      return () => h('span', {}, `${inject('theme')}:${inject('locale')}`);
+    }
+  };
+  const Parent = {
+    setup() {
+      provide('locale', 'zh-CN');
+      return () => h(Leaf);
+    }
+  };
+  const app = createApp(() => h(Parent), {});
+  assert.equal(app.provide('theme', 'dark').provide('locale', 'en-US'), app);
+  app.mount(root);
+  assert.equal(root.querySelector('span').textContent, 'dark:zh-CN');
+});
+
+test('app.use installs plugins once and lets them extend the app', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Badge = { render: () => h('b', {}, 'plugin-badge') };
+  const installed = [];
+  const plugin = {
+    install(target) {
+      installed.push(target);
+      target.component('plugin-badge', Badge);
+      target.provide('plugin-value', 'from-plugin');
+    }
+  };
+  const Consumer = {
+    setup() {
+      return () => h('em', {}, inject('plugin-value'));
+    }
+  };
+  const app = createApp(() => h(Consumer), {});
+  assert.equal(app.use(plugin).use(plugin), app);
+  assert.deepEqual(installed, [app]);
+  assert.equal(app.component('plugin-badge'), Badge);
+  assert.equal(app.context.components['plugin-badge'], Badge);
+  app.mount(root);
+  assert.equal(root.querySelector('em').textContent, 'from-plugin');
+  assert.throws(() => createApp(() => h('main')).use(42), /plugin must either be a function or an object/);
+});
+
 test('browser bootstrap keeps Thymeleaf hydration active when an SFC module cannot load', async () => {
   const document = installDom();
   document.body.innerHTML = '<main data-tr-component="counter" data-tr-component-src="components/Missing.vue" data-tr-state="{&quot;count&quot;:2}"><p data-tr-text="count">stale</p></main>';

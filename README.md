@@ -146,6 +146,8 @@ const Counter = {
 
 Object component `props` also accepts Vue-style option objects with `type`, `required`, and `default`. Default factories run once per component instance, Boolean props default to `false`, and undeclared values remain available through `attrs`. `emits` accepts an event-name array or an object of event validators; kebab-case events map to camel-case listeners such as `onSaveItem`. `setup` can also register `onErrorCaptured`, which receives descendant render and lifecycle errors and can return `true` to stop propagation while retaining the last successful tree. Watch and `watchEffect` callbacks may use `onWatcherCleanup()` synchronously to register invalidation cleanup without threading the callback argument through a composable.
 
+`createApp(render, state)` returns a Vue-compatible application context alongside the documented `mount`/`replaceRender`/`unmount` API: `app.component(name, component)` registers global components that SFC templates resolve after their local scope, `app.directive(name, directive)` registers global directives for SFC `v-name` attributes, `app.provide(key, value)` seeds provides that every root-level instance inherits (component `provide` overrides per subtree), and `app.use(plugin, ...options)` installs `{ install(app, ...options) }` objects or functions exactly once. All four return the app for chaining, `app.component`/`app.directive` with one argument read the registry back, and `app.context` exposes the underlying component, directive, and provides tables.
+
 ## Virtual DOM Teleport
 
 The render-function runtime exports `Teleport` for rendering a VNode subtree into a different DOM target while retaining keyed updates and component state. Its `to` property accepts a CSS selector or an `Element`.
