@@ -16,6 +16,10 @@ class CounterController {
         model.addAttribute("counter", mapOf("count" to 0, "visible" to true))
         return "index"
     }
+
+    @GetMapping("/tabs")
+    fun tabs(): String = "tabs"
+
 }
 
 fun main(args: Array<String>) {

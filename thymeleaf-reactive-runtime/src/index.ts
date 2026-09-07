@@ -1584,7 +1584,35 @@ function hotUpdateObjectComponent(vnode: VNode, definition: ComponentOptions): b
     return true;
   }
   const previous = vnode.type as ComponentOptions;
-  if (previous.setup !== definition.setup || instance.setupRender || !definition.render) return false;
+  if (previous.setup !== definition.setup) {
+    // Script HMR: re-run setup in place so the new logic and fresh state take
+    // effect while the instance (and its hot-update registration) survives.
+    if (!definition.setup) return false;
+    adoptSfcStyles(previous, definition);
+    vnode.type = definition;
+    instance.vnode.type = definition;
+    instance.render = undefined;
+    instance.setupRender = false;
+    instance.exposed = null;
+    instance.exposeProxy = null;
+    instance.beforeMountHooks = definition.beforeMount ? [definition.beforeMount] : [];
+    instance.mountedHooks = definition.mounted ? [definition.mounted] : [];
+    instance.beforeUpdateHooks = definition.beforeUpdate ? [definition.beforeUpdate] : [];
+    instance.updatedHooks = definition.updated ? [definition.updated] : [];
+    instance.beforeUnmountHooks = definition.beforeUnmount ? [definition.beforeUnmount] : [];
+    instance.unmountedHooks = definition.unmounted ? [definition.unmounted] : [];
+    instance.activatedHooks = definition.activated ? [definition.activated] : [];
+    instance.deactivatedHooks = definition.deactivated ? [definition.deactivated] : [];
+    instance.errorCapturedHooks = definition.errorCaptured ? [definition.errorCaptured] : [];
+    instance.defaultProps = {};
+    const inputs = splitComponentProps(definition, instance.vnode.props, instance.defaultProps);
+    syncComponentProps(instance.props!, inputs.props);
+    syncComponentProps(instance.attrs!, inputs.attrs);
+    instance.listeners = inputs.listeners;
+    instance.update();
+    return true;
+  }
+  if (instance.setupRender || !definition.render) return false;
   adoptSfcStyles(previous, definition);
   vnode.type = definition;
   instance.vnode.type = definition;
@@ -1732,6 +1760,15 @@ function addSfcObjectEventHandlers(props: Record<string, unknown>, value: unknow
   });
 }
 
+/** Vue templates resolve these builtin component names intrinsically. */
+const sfcBuiltinComponents: Record<string, VNode["type"]> = {
+  "transition": Transition,
+  "transition-group": TransitionGroup,
+  "keep-alive": KeepAlive,
+  "teleport": Teleport,
+  "suspense": Suspense
+};
+
 function resolveSfcComponent(tagName: string, scope: Record<string, unknown>): Component | undefined {
   const name = tagName.toLowerCase();
   if (["html", "head", "body", "div", "span", "p", "section", "main", "header", "footer", "nav", "ul", "ol", "li", "button", "input", "textarea", "select", "option", "form", "label", "a", "img", "table", "thead", "tbody", "tr", "th", "td", "strong", "em", "code", "small", "h1", "h2", "h3", "h4", "h5", "h6"].includes(name)) return undefined;
@@ -1745,8 +1782,9 @@ function resolveSfcComponent(tagName: string, scope: Record<string, unknown>): C
   const candidate = registryCandidate
     ?? lookupAppComponent(tagName, pascal)
     ?? scope[tagName]
-    ?? scope[pascal];
-  return typeof candidate === "function" || (typeof candidate === "object" && candidate !== null)
+    ?? scope[pascal]
+    ?? sfcBuiltinComponents[name];
+  return typeof candidate === "function" || (typeof candidate === "object" && candidate !== null) || typeof candidate === "symbol"
     ? candidate as Component
     : undefined;
 }
@@ -2508,7 +2546,7 @@ function normalizeSfcSelfClosingTags(source: string): string {
   return output;
 }
 
-type SfcStyleBlock = { css: string; scoped: boolean };
+type SfcStyleBlock = { css: string; scoped: boolean; module?: string };
 
 /** Collects every `<style>` block with its attributes; multiple blocks are allowed. */
 function extractSfcStyles(source: string): SfcStyleBlock[] {
@@ -2521,7 +2559,12 @@ function extractSfcStyles(source: string): SfcStyleBlock[] {
       if (!open) open = { attrs: match[2] ?? "", start: pattern.lastIndex };
     } else if (open) {
       const css = source.slice(open.start, match.index).trim();
-      if (css) styles.push({ css, scoped: /\bscoped\b/i.test(open.attrs) });
+      if (css) {
+        const moduleMatch = open.attrs.match(/\bmodule(?:\s*=\s*(?:"([^"]*)"|'([^']*)'))?/i);
+        const scoped = /\bscoped\b/i.test(open.attrs);
+        const module = moduleMatch ? (moduleMatch[1] ?? moduleMatch[2] ?? "$style") : undefined;
+        styles.push({ css, scoped, module });
+      }
       open = undefined;
     }
   }
@@ -2538,6 +2581,12 @@ function sfcScopeId(source: string): string {
 /** Appends the scope attribute to the last compound of each simple selector. */
 function scopeSfcSelector(part: string, attribute: string): string {
   if (!part) return part;
+  const global = part.match(/^(.*?)\s*:global\(\s*([^)]*?)\s*\)/);
+  if (global) {
+    const before = global[1].trim();
+    const inner = global[2].trim();
+    return `${before ? before + " " : ""}${inner}`;
+  }
   const deep = part.match(/^(.*?)\s*:deep\(\s*([^)]*?)\s*\)/);
   if (deep) {
     const base = deep[1].trim();
@@ -2547,6 +2596,29 @@ function scopeSfcSelector(part: string, attribute: string): string {
   const base = pseudo >= 0 ? part.slice(0, pseudo) : part;
   const rest = pseudo >= 0 ? part.slice(pseudo) : "";
   return `${base}${attribute}${rest}`;
+}
+
+/** Renames every class in a module stylesheet and records the mapping for `$style`. */
+function moduleSfcCss(css: string, id: string): { css: string; classes: Record<string, string> } {
+  const classes: Record<string, string> = {};
+  const rewrite = (selectorList: string): string => selectorList.replace(/\.([A-Za-z_$][\w$-]*)/g, (_match, name: string) => {
+    const scopedName = `${name}_${id}`;
+    classes[name] = scopedName;
+    return `.${scopedName}`;
+  });
+  const rewritten = css.replace(/([^{}]+)\{([^{}]*)\}/g, (_match, selectorList: string, body: string) => {
+    const selector = selectorList.trim();
+    if (selector.startsWith("@")) {
+      if (/^@(?:media|supports)\b/.test(selector)) {
+        const inner = moduleSfcCss(body, id);
+        Object.assign(classes, inner.classes);
+        return `${selector}{${inner.css}}`;
+      }
+      return _match;
+    }
+    return `${rewrite(selectorList)}{${body}}`;
+  });
+  return { css: rewritten, classes };
 }
 
 /** Vue scoped-CSS subset: flat rules plus @media/@supports bodies; @keyframes pass through. */
@@ -2618,18 +2690,32 @@ export function compileSfcComponent(source: string): Component {
   const styles = extractSfcStyles(source);
   let scopedAttribute: string | undefined;
   let styleElements: HTMLStyleElement[] | undefined;
+  let moduleMap: Record<string, Record<string, string>> | undefined;
   if (styles.length) {
+    const id = sfcScopeId(source).replace(/^data-v-/, "");
     if (styles.some(block => block.scoped)) scopedAttribute = sfcScopeId(source);
-    const css = styles.map(block => block.scoped ? scopeSfcCss(block.css, `[${scopedAttribute}]`) : block.css).join("\n");
-    styleElements = [injectSfcStyle(scopedAttribute ?? `${sfcScopeId(source)}-global`, css)];
+    const cssParts: string[] = [];
+    for (const block of styles) {
+      if (block.module !== undefined) {
+        const result = moduleSfcCss(block.css, id);
+        cssParts.push(result.css);
+        moduleMap = { ...(moduleMap ?? {}), [block.module]: { ...(moduleMap?.[block.module] ?? {}), ...result.classes } };
+      } else if (block.scoped) cssParts.push(scopeSfcCss(block.css, `[${scopedAttribute}]`));
+      else cssParts.push(block.css);
+    }
+    const styleKey = scopedAttribute || styles.some(block => block.module !== undefined) ? sfcScopeId(source) : `${sfcScopeId(source)}-global`;
+    styleElements = [injectSfcStyle(styleKey, cssParts.join("\n"))];
     if (scopedAttribute) applyScopeAttribute(roots, scopedAttribute);
   }
   const script = source.match(/<script\s+setup(?:\s[^>]*)?>([\s\S]*?)<\/script>/i)?.[1];
   if (!script) {
     const render = (props: Record<string, unknown>, children: VNode[]) => {
       const scope = new Proxy(props as Record<string, unknown>, {
-        get(target, key) { return sfcScopeProperty(target, key); },
-        has(target, key) { return typeof key === "string" ? key in target || Object.keys(target).some(candidate => candidate.toLowerCase() === key.toLowerCase()) : key in target; }
+        get(target, key) {
+          if (moduleMap && typeof key === "string" && key in moduleMap) return moduleMap[key];
+          return sfcScopeProperty(target, key);
+        },
+        has(target, key) { return Boolean(moduleMap && typeof key === "string" && key in moduleMap) || (typeof key === "string" ? key in target || Object.keys(target).some(candidate => candidate.toLowerCase() === key.toLowerCase()) : key in target); }
       });
       const nodes = renderSfcChildren(roots, scope, children);
       return nodes.length === 1 ? nodes[0] : h(Fragment, {}, nodes);
@@ -2679,6 +2765,7 @@ export function compileSfcComponent(source: string): Component {
         defineExpose(Object.fromEntries(Object.entries(setup.exposes).map(([key, expression]) =>
           [key, readPath(local, expression)])));
       }
+      if (moduleMap) Object.entries(moduleMap).forEach(([name, classes]) => { local[name] = classes; });
       const scope = proxyRefs(local);
       sfcRefContexts.set(scope, { owner: local, arrays: new Map(), collect: false });
       const onceCache: SfcOnceCache = new Map();

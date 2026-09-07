@@ -4338,6 +4338,106 @@ test('Transition in-out mode delays the leave until enter completes', async () =
   app.unmount();
 });
 
+test('SFC scoped :global selectors escape the scope attribute', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Scoped = compileSfcComponent(`
+    <template><p class="a"><span class="b">Inside</span></p></template>
+    <style scoped>
+      .a :global(.b) { color: red; }
+      :global(.c) { color: blue; }
+      .a { color: green; }
+    </style>
+  `);
+  createApp(() => h(Scoped)).mount(root);
+  const css = document.head.querySelector('style[data-tr-sfc]').textContent;
+  assert.match(css, /\.a \.b ?\{ color: red; \}/);
+  assert.match(css, /(^|[;}])\.c ?\{ color: blue; \}/);
+  assert.match(css, /\.a\[data-v-[^\]]+\] ?\{ color: green; \}/);
+  assert.doesNotMatch(css, /\.b\[data-v-[^\]]+\]/);
+});
+
+test('SFC style module hashes classes and exposes the $style mapping', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Card = compileSfcComponent(`
+    <template>
+      <p :class="$style.red">Card</p>
+      <strong :class="classes.blue">Named</strong>
+    </template>
+    <style module>
+    .red { color: red; }
+    </style>
+    <style module="classes">
+    .blue { color: blue; }
+    </style>
+  `);
+  createApp(() => h(Card)).mount(root);
+  const css = document.head.querySelector('style[data-tr-sfc]').textContent;
+  assert.match(css, /\.red_[A-Za-z0-9]+ \{ color: red; \}/);
+  assert.match(css, /\.blue_[A-Za-z0-9]+ \{ color: blue; \}/);
+  const paragraph = root.querySelector('p');
+  assert.match(paragraph.className, /^red_[A-Za-z0-9]+$/);
+  assert.match(root.querySelector('strong').className, /^blue_[A-Za-z0-9]+$/);
+  assert.doesNotMatch(paragraph.className, /data-v/);
+});
+
+test('SFC templates resolve builtin components like keep-alive and transition', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Tabs = compileSfcComponent(`
+    <template>
+      <section>
+        <button class="to-a" @click="tab = 'a'">A</button>
+        <button class="to-b" @click="tab = 'b'">B</button>
+        <keep-alive>
+          <input v-if="tab === 'a'" key="a" aria-label="kept">
+          <p v-else key="b">Branch B</p>
+        </keep-alive>
+        <transition mode="out-in" name="fade">
+          <em v-if="tab === 'a'" key="ta">A view</em>
+          <strong v-else key="tb">B view</strong>
+        </transition>
+      </section>
+    </template>
+    <script setup>
+      const tab = ref('a');
+    </script>
+  `);
+  createApp(() => h(Tabs)).mount(root);
+  const input = root.querySelector('input');
+  assert.ok(input, 'branch A renders an input');
+  input.value = 'kept-value';
+  root.querySelector('.to-b').dispatchEvent(new Event('click'));
+  await nextTick();
+  assert.equal(root.querySelector('p').textContent, 'Branch B');
+  await new Promise((resolve, reject) => {
+    const start = Date.now();
+    const poll = () => {
+      if (root.querySelector('strong')) return resolve();
+      if (Date.now() - start > 5000) return reject(new Error(`B view never appeared: ${root.innerHTML}`));
+      setTimeout(poll, 50);
+    };
+    poll();
+  });
+  assert.equal(root.querySelector('strong').textContent, 'B view');
+  root.querySelector('.to-a').dispatchEvent(new Event('click'));
+  await nextTick();
+  const restored = root.querySelector('input');
+  assert.equal(restored, input, 'KeepAlive restores the cached subtree');
+  assert.equal(restored.value, 'kept-value');
+  await new Promise((resolve, reject) => {
+    const start = Date.now();
+    const poll = () => {
+      if (root.querySelector('em')) return resolve();
+      if (Date.now() - start > 5000) return reject(new Error(`A view never appeared: ${root.innerHTML}`));
+      setTimeout(poll, 50);
+    };
+    poll();
+  });
+  assert.equal(root.querySelector('em').textContent, 'A view');
+});
+
 test('SFC injects style blocks and keeps recompiles idempotent', () => {
   const document = installDom();
   const root = document.createElement('main');

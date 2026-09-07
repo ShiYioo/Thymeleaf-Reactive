@@ -4,6 +4,30 @@ All notable changes to Thymeleaf Reactive are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/) and the project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Scoped CSS `:global(...)`: selectors containing `:global()` are emitted
+  without the scope attribute, and bare `:global(.x)` compiles to a global
+  descendant rule.
+- `<style module>` (with optional injection name, e.g.
+  `<style module="classes">`): every class is renamed with the file hash and
+  the mapping is exposed to templates as `$style` (or the custom name).
+- SFC templates resolve Vue builtin component names intrinsically:
+  `<transition>`, `<transition-group>`, `<keep-alive>`, `<teleport>`, and
+  `<suspense>` no longer need registry entries.
+- End-to-end HMR coverage for script changes (setup state rebuild) and for
+  KeepAlive/Transition subtrees on the `/tabs` example page: cached branches
+  survive toggles and template-only HMR, and a script edit rebuilds the
+  component in place.
+
+### Fixed
+
+- Adopted script-setup components re-run their setup when a hot update
+  changes the script. Previously the adopted fallback replayed the stale
+  render closure, so edited script logic never took effect in the browser.
+
 ## [0.1.0] - 2026-09-08
 
 First milestone release: a Vue-level reactive runtime natively integrated
