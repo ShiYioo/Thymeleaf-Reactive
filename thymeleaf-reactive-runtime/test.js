@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, readonly, shallowReadonly, isReadonly, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, customRef, defineAsyncComponent, defineComponent, defineExpose, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onEffectCleanup, onErrorCaptured, onScopeDispose, onWatcherCleanup, refreshComponentsFromPage, render, Teleport, inject, isProxy, isRef, isShallow, onMounted, onUnmounted, onUpdated, pauseTracking, enableTracking, resetTracking, provide, proxyRefs, queueJob, queuePostFlushCb, flushOnAppMount, stop, toRaw, toReactive, toReadonly, toRef, toRefs, toValue, traverse, unref, watch, watchEffect, watchPostEffect, watchSyncEffect, withDirectives, withMemo, mergeProps, cloneVNode, isVNode, startBatch, endBatch, getCurrentScope, getCurrentWatcher, SchedulerJobFlags } from './dist/index.js';
+import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, readonly, shallowReadonly, isReadonly, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, customRef, defineAsyncComponent, defineComponent, defineExpose, effectScope, useAttrs, useSlots, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onEffectCleanup, onErrorCaptured, onScopeDispose, onWatcherCleanup, refreshComponentsFromPage, render, Teleport, inject, isProxy, isRef, isShallow, onMounted, onUnmounted, onUpdated, pauseTracking, enableTracking, resetTracking, provide, proxyRefs, queueJob, queuePostFlushCb, flushOnAppMount, stop, toRaw, toReactive, toReadonly, toRef, toRefs, toValue, traverse, unref, watch, watchEffect, watchPostEffect, watchSyncEffect, withDirectives, withMemo, mergeProps, cloneVNode, isVNode, startBatch, endBatch, getCurrentScope, getCurrentWatcher, SchedulerJobFlags } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -4043,6 +4043,63 @@ test('app.use installs plugins once and lets them extend the app', () => {
   app.mount(root);
   assert.equal(root.querySelector('em').textContent, 'from-plugin');
   assert.throws(() => createApp(() => h('main')).use(42), /plugin must either be a function or an object/);
+});
+
+test('useSlots and useAttrs return the cached live setup context', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  let slotsFromSetup;
+  let slotsAgain;
+  const Child = {
+    props: ['label'],
+    setup(_props, ctx) {
+      const slots = useSlots();
+      const attrs = useAttrs();
+      slotsFromSetup = slots;
+      slotsAgain = useSlots();
+      assert.equal(slots, ctx.slots);
+      assert.equal(useAttrs(), attrs);
+      return () => h('section', {}, [
+        h('b', {}, String(attrs.note)),
+        h('i', {}, String(slots.default().length))
+      ]);
+    }
+  };
+  const app = createApp(state => h(Child, { label: 'declared', note: state.note }, ['fallback-body']), { note: 'n0' });
+  const state = app.mount(root);
+  assert.equal(slotsFromSetup, slotsAgain);
+  assert.equal(root.querySelector('b').textContent, 'n0');
+  assert.equal(root.querySelector('i').textContent, '1');
+  state.note = 'n1';
+  await nextTick();
+  assert.equal(root.querySelector('b').textContent, 'n1');
+});
+
+test('SFC script setup binds useSlots and useAttrs into the template scope', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Card = compileSfcComponent(`
+    <template>
+      <article :data-note="attrs.note">{{ slots.default().length }}</article>
+    </template>
+    <script setup>
+      const props = defineProps(['label']);
+      const slots = useSlots();
+      const attrs = useAttrs();
+    </script>
+  `);
+  const app = createApp(state => h(Card, { label: 'declared', note: state.note }, ['body']), { note: 'hello' });
+  const state = app.mount(root);
+  assert.equal(root.querySelector('article').textContent, '1');
+  assert.equal(root.querySelector('article').dataset.note, 'hello');
+  state.note = 'changed';
+  await nextTick();
+  assert.equal(root.querySelector('article').dataset.note, 'changed');
+});
+
+test('useSlots and useAttrs reject calls outside component setup', () => {
+  assert.throws(() => useSlots(), /useSlots\(\) must be called during component setup/);
+  assert.throws(() => useAttrs(), /useAttrs\(\) must be called during component setup/);
 });
 
 test('browser bootstrap keeps Thymeleaf hydration active when an SFC module cannot load', async () => {

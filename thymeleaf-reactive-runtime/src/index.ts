@@ -1130,6 +1130,7 @@ type ComponentInstance = {
   exposed?: Record<string, unknown> | null;
   exposeProxy?: Record<string, unknown> | null;
   appContext?: AppContext | null;
+  setupContext?: ComponentContext;
 };
 type HotReloadableRender = ComponentRender & { hmrUpdate?: (next: ComponentOptions) => boolean };
 const componentInstanceStack: ComponentInstance[] = [];
@@ -1325,6 +1326,10 @@ export function inject<T>(key: PropertyKey, defaultValue?: T | (() => T)): T | u
 export function defineExpose(exposed: Record<string, unknown> | null): void {
   const instance = currentComponentInstance();
   if (!instance) throw new Error("defineExpose() must be called during component setup");
+  exposeInstance(instance, exposed);
+}
+
+function exposeInstance(instance: ComponentInstance, exposed: Record<string, unknown> | null): void {
   if (exposed !== null && (typeof exposed !== "object" || Array.isArray(exposed))) {
     throw new Error("defineExpose() requires a plain object");
   }
@@ -1490,6 +1495,35 @@ function componentSlots(instance: ComponentInstance): ComponentSlots {
   }) as ComponentSlots;
 }
 
+/** Vue contract: the setup context is built lazily and cached for the instance lifetime. */
+function getSetupContext(instance: ComponentInstance): ComponentContext {
+  if (!instance.setupContext) {
+    const definition = instance.vnode.type as ComponentOptions;
+    instance.setupContext = {
+      children: instance.children!,
+      slots: componentSlots(instance),
+      attrs: readonly(instance.attrs!) as Record<string, unknown>,
+      emit: (event, ...args) => emitComponentEvent(instance.listeners!, event, args, definition.emits),
+      expose: exposed => exposeInstance(instance, exposed as Record<string, unknown>)
+    };
+  }
+  return instance.setupContext;
+}
+
+/** Vue-compatible setup helper: the component's live lazy slots object. */
+export function useSlots(): ComponentSlots {
+  const instance = currentComponentInstance();
+  if (!instance) throw new Error("useSlots() must be called during component setup");
+  return getSetupContext(instance).slots;
+}
+
+/** Vue-compatible setup helper: the component's live (readonly) attrs object. */
+export function useAttrs(): Record<string, unknown> {
+  const instance = currentComponentInstance();
+  if (!instance) throw new Error("useAttrs() must be called during component setup");
+  return getSetupContext(instance).attrs;
+}
+
 function areVNodeChildrenEqual(previous: VNode[], next: VNode[]): boolean {
   if (previous.length !== next.length) return false;
   return previous.every((child, index) => {
@@ -1514,16 +1548,9 @@ function renderObjectComponent(instance: ComponentInstance): VNode {
   if (instance.appContext) currentAppContext = instance.appContext;
   try {
     const publicProps = readonly(instance.props!);
-    const publicAttrs = readonly(instance.attrs!);
     if (!instance.render) {
       const definition = instance.vnode.type as ComponentOptions;
-      const setupRender = definition.setup?.(publicProps, {
-        children: instance.children!,
-        slots: componentSlots(instance),
-        attrs: publicAttrs,
-        emit: (event, ...args) => emitComponentEvent(instance.listeners!, event, args, definition.emits),
-        expose: exposed => defineExpose(exposed as Record<string, unknown>)
-      });
+      const setupRender = definition.setup?.(publicProps, getSetupContext(instance));
       instance.setupRender = typeof setupRender === "function";
       instance.render = setupRender ?? definition.render;
       if (!instance.render) throw new Error("Component requires setup() or render()");
@@ -2148,7 +2175,7 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
   return vnode;
 }
 
-type SfcSetupBinding = { name: string; kind: "ref" | "reactive" | "computed" | "props" | "emit" | "model"; expression: string };
+type SfcSetupBinding = { name: string; kind: "ref" | "reactive" | "computed" | "props" | "emit" | "model" | "slots" | "attrs"; expression: string };
 type SfcSetupMethod = { name: string; params: string[]; body: string };
 
 function splitSfcStatements(source: string): string[] {
@@ -2372,6 +2399,11 @@ function parseSfcSetup(source: string): { bindings: SfcSetupBinding[]; methods: 
       bindings.push({ name: binding[1], kind: binding[2] as SfcSetupBinding["kind"], expression: computedMatch?.[1].trim() ?? expression });
       return;
     }
+    const helper = statement.match(/^(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*(useSlots|useAttrs)\(\)$/);
+    if (helper) {
+      bindings.push({ name: helper[1], kind: helper[2] === "useSlots" ? "slots" : "attrs", expression: "" });
+      return;
+    }
     const arrow = statement.match(/^(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*\(\s*([A-Za-z_$][\w$]*(?:\s*,\s*[A-Za-z_$][\w$]*)*)?\s*\)\s*=>\s*(?:\{([\s\S]*)\}|([\s\S]+))$/);
     if (arrow) {
       methods.push({ name: arrow[1], params: arrow[2]?.split(",").map(param => param.trim()).filter(Boolean) ?? [], body: (arrow[3] ?? arrow[4]).trim() });
@@ -2523,6 +2555,8 @@ export function compileSfcComponent(source: string): Component {
         else if (binding.kind === "reactive") local[binding.name] = reactive(readPath(local, binding.expression) ?? {});
         else if (binding.kind === "computed") local[binding.name] = computed(() => readPath(proxyRefs(local), binding.expression));
         else if (binding.kind === "props") local[binding.name] = props;
+        else if (binding.kind === "slots") local[binding.name] = useSlots();
+        else if (binding.kind === "attrs") local[binding.name] = useAttrs();
         else if (binding.kind === "model") local[binding.name] = customRef((track, trigger) => ({
           get: () => { track(); return props[binding.expression]; },
           set: value => { context.emit(`update:${binding.expression}`, value); trigger(); }
