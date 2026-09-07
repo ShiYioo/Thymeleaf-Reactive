@@ -11,6 +11,8 @@ export type ComponentContext = {
   slots: ComponentSlots;
   attrs: Record<string, unknown>;
   emit: (event: string, ...args: unknown[]) => void;
+  /** Vue-compatible setup-context expose: declares what parent template refs may read. */
+  expose: (exposed: Record<string, unknown> | null) => void;
 };
 export type PropConstructor = StringConstructor | NumberConstructor | BooleanConstructor | ObjectConstructor | ArrayConstructor | FunctionConstructor | DateConstructor | RegExpConstructor;
 export type PropOptions = {
@@ -1118,6 +1120,8 @@ type ComponentInstance = {
   isMounted?: boolean;
   uid?: number;
   scope?: EffectScope;
+  exposed?: Record<string, unknown> | null;
+  exposeProxy?: Record<string, unknown> | null;
 };
 type HotReloadableRender = ComponentRender & { hmrUpdate?: (next: ComponentOptions) => boolean };
 const componentInstanceStack: ComponentInstance[] = [];
@@ -1305,6 +1309,37 @@ export function inject<T>(key: PropertyKey, defaultValue?: T | (() => T)): T | u
   return typeof defaultValue === "function" ? (defaultValue as () => T)() : defaultValue;
 }
 
+/**
+ * Declares the state a component exposes to parents through template refs.
+ * Vue-compatible `defineExpose`/`expose()`: refs and computeds stay live and
+ * are unwrapped when read through the parent's ref.
+ */
+export function defineExpose(exposed: Record<string, unknown> | null): void {
+  const instance = currentComponentInstance();
+  if (!instance) throw new Error("defineExpose() must be called during component setup");
+  if (exposed !== null && (typeof exposed !== "object" || Array.isArray(exposed))) {
+    throw new Error("defineExpose() requires a plain object");
+  }
+  if (instance.exposed) console.warn("[thymeleaf-reactive] expose() should be called only once per setup()");
+  instance.exposed = exposed ?? {};
+  instance.exposeProxy = null;
+}
+
+/** Vue contract: a component ref reads the exposed view when declared, the raw instance otherwise. */
+function getComponentPublicInstance(instance: ComponentInstance): unknown {
+  if (!instance.exposed) return instance;
+  if (!instance.exposeProxy) {
+    instance.exposeProxy = new Proxy(proxyRefs(instance.exposed), {
+      get(target, key) {
+        if (key === "$el") return instance.tree?.el ?? null;
+        return Reflect.get(target, key);
+      },
+      has(target, key) { return key === "$el" || Reflect.has(target, key); }
+    });
+  }
+  return instance.exposeProxy;
+}
+
 function isObjectComponent(type: VNode["type"]): type is ComponentOptions {
   return typeof type === "object" && type !== null;
 }
@@ -1476,7 +1511,8 @@ function renderObjectComponent(instance: ComponentInstance): VNode {
         children: instance.children!,
         slots: componentSlots(instance),
         attrs: publicAttrs,
-        emit: (event, ...args) => emitComponentEvent(instance.listeners!, event, args, definition.emits)
+        emit: (event, ...args) => emitComponentEvent(instance.listeners!, event, args, definition.emits),
+        expose: exposed => defineExpose(exposed as Record<string, unknown>)
       });
       instance.setupRender = typeof setupRender === "function";
       instance.render = setupRender ?? definition.render;
@@ -2189,8 +2225,13 @@ function parseSfcLiteral(source: string): unknown {
         const key = source[index] === "\"" || source[index] === "'" ? parseString() : parseIdentifier();
         if (unsafePropertyNames.has(key)) unexpected();
         skipWhitespace();
-        if (source[index++] !== ":") unexpected();
-        result[key] = parseValue();
+        if (source[index] === "," || source[index] === "}") {
+          // `{ count }` shorthand resolves to an identifier reference of the same name.
+          result[key] = key;
+        } else {
+          if (source[index++] !== ":") unexpected();
+          result[key] = parseValue();
+        }
         skipWhitespace();
         if (source[index] === ",") { index++; skipWhitespace(); }
         else if (source[index] !== "}") unexpected();
@@ -2221,18 +2262,34 @@ function sfcPropsWithDefaults(names: string[], expression: string): ComponentPro
     : [name, {}]));
 }
 
-function parseSfcSetup(source: string): { bindings: SfcSetupBinding[]; methods: SfcSetupMethod[]; props?: ComponentProps; emits?: string[]; options?: Pick<ComponentOptions, "inheritAttrs"> } {
+function parseSfcSetup(source: string): { bindings: SfcSetupBinding[]; methods: SfcSetupMethod[]; props?: ComponentProps; emits?: string[]; options?: Pick<ComponentOptions, "inheritAttrs">; exposes?: Record<string, string> } {
   const bindings: SfcSetupBinding[] = [];
   const methods: SfcSetupMethod[] = [];
   let props: ComponentProps | undefined;
   let emits: string[] | undefined;
   let options: Pick<ComponentOptions, "inheritAttrs"> | undefined;
+  let exposes: Record<string, string> | undefined;
   const body = source
     .replace(/\/\/.*$/gm, "")
-    .replace(/}\s*(?=(?:const|let|function)\b)/g, "};\n")
+    .replace(/}\s*(?=(?:const|let|function|defineProps|defineEmits|defineModel|defineOptions|defineExpose)\b)/g, "};\n")
     .trim();
-  if (!body) return { bindings, methods, props, emits, options };
+  if (!body) return { bindings, methods, props, emits, options, exposes };
   splitSfcStatements(body).forEach(statement => {
+    const exposeMacro = statement.match(/^defineExpose\s*\(([\s\S]*)\)$/);
+    if (exposeMacro) {
+      const parsed = parseSfcLiteral(exposeMacro[1]);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("defineExpose requires a literal object of setup bindings");
+      }
+      exposes = { ...(exposes ?? {}) };
+      Object.entries(parsed as Record<string, unknown>).forEach(([key, value]) => {
+        if (typeof value !== "string" || !/^[A-Za-z_$][\w$]*$/.test(value)) {
+          throw new Error("defineExpose only supports identifiers from the setup scope");
+        }
+        exposes![key] = value;
+      });
+      return;
+    }
     const optionsMacro = statement.match(/^defineOptions\s*\(([\s\S]*)\)$/);
     if (optionsMacro) {
       const parsed = parseSfcLiteral(optionsMacro[1]);
@@ -2301,7 +2358,7 @@ function parseSfcSetup(source: string): { bindings: SfcSetupBinding[]; methods: 
     }
     throw new Error(`Unsupported script setup statement: ${statement}`);
   });
-  return { bindings, methods, props, emits, options };
+  return { bindings, methods, props, emits, options, exposes };
 }
 
 function splitSfcArguments(source: string): string[] {
@@ -2452,6 +2509,10 @@ export function compileSfcComponent(source: string): Component {
       setup.methods.forEach(method => {
         local[method.name] = (...args: unknown[]) => runSfcSetupMethod(method.body, local, context, method.params, args);
       });
+      if (setup.exposes) {
+        defineExpose(Object.fromEntries(Object.entries(setup.exposes).map(([key, expression]) =>
+          [key, readPath(local, expression)])));
+      }
       const scope = proxyRefs(local);
       sfcRefContexts.set(scope, { owner: local, arrays: new Map(), collect: false });
       const onceCache: SfcOnceCache = new Map();
@@ -2828,7 +2889,8 @@ function setVNodeRef(vnode: VNode, value: unknown): void {
 }
 
 function vnodeRefValue(vnode: VNode): unknown {
-  return vnode.instance ?? vnode.component ?? vnode.el;
+  if (vnode.instance) return getComponentPublicInstance(vnode.instance);
+  return vnode.component ?? vnode.el;
 }
 
 function invokeDirectiveHooks(

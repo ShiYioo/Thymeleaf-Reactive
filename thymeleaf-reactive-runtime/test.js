@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, readonly, shallowReadonly, isReadonly, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, customRef, defineAsyncComponent, defineComponent, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onEffectCleanup, onErrorCaptured, onScopeDispose, onWatcherCleanup, refreshComponentsFromPage, render, Teleport, inject, isProxy, isRef, isShallow, onMounted, onUnmounted, onUpdated, pauseTracking, enableTracking, resetTracking, provide, proxyRefs, queueJob, queuePostFlushCb, flushOnAppMount, stop, toRaw, toReactive, toReadonly, toRef, toRefs, toValue, traverse, unref, watch, watchEffect, watchPostEffect, watchSyncEffect, withDirectives, withMemo, mergeProps, cloneVNode, isVNode, startBatch, endBatch, getCurrentScope, getCurrentWatcher, SchedulerJobFlags } from './dist/index.js';
+import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, readonly, shallowReadonly, isReadonly, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, customRef, defineAsyncComponent, defineComponent, defineExpose, effectScope, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onEffectCleanup, onErrorCaptured, onScopeDispose, onWatcherCleanup, refreshComponentsFromPage, render, Teleport, inject, isProxy, isRef, isShallow, onMounted, onUnmounted, onUpdated, pauseTracking, enableTracking, resetTracking, provide, proxyRefs, queueJob, queuePostFlushCb, flushOnAppMount, stop, toRaw, toReactive, toReadonly, toRef, toRefs, toValue, traverse, unref, watch, watchEffect, watchPostEffect, watchSyncEffect, withDirectives, withMemo, mergeProps, cloneVNode, isVNode, startBatch, endBatch, getCurrentScope, getCurrentWatcher, SchedulerJobFlags } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -3879,6 +3879,88 @@ test('SFC defineOptions controls attribute fallthrough', () => {
   createApp(render, { components: { Badge } }).mount(root);
   assert.equal(root.querySelector('strong').textContent, 'Ready');
   assert.equal(root.querySelector('strong').hasAttribute('data-secret'), false);
+});
+
+test('SFC defineExpose exposes only declared state to parent template refs', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Counter = compileSfcComponent(`
+    <template><button @click="increment">{{ count }}</button></template>
+    <script setup>
+      const count = ref(0);
+      const hidden = ref('secret');
+      function increment() { count.value++; }
+      defineExpose({ count, increment });
+    </script>
+  `);
+  const componentRef = ref(null);
+  createApp(() => h('section', {}, [h(Counter, { ref: componentRef })])).mount(root);
+  assert.equal(root.querySelector('button').textContent, '0');
+  assert.equal(componentRef.value.count, 0);
+  assert.equal(componentRef.value.hidden, undefined);
+  componentRef.value.increment();
+  await nextTick();
+  assert.equal(componentRef.value.count, 1);
+  assert.equal(root.querySelector('button').textContent, '1');
+});
+
+test('object component setup context expose closes the template-ref contract', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Child = {
+    setup(_props, { expose }) {
+      const clicks = ref(3);
+      const internal = 'do-not-leak';
+      expose({ clicks });
+      return () => h('span', {}, String(clicks.value));
+    }
+  };
+  const componentRef = ref(null);
+  createApp(() => h('section', {}, [h(Child, { ref: componentRef })])).mount(root);
+  assert.equal(root.querySelector('span').textContent, '3');
+  assert.equal(componentRef.value.clicks, 3);
+  assert.equal(componentRef.value.internal, undefined);
+  assert.equal(componentRef.value.scope, undefined);
+  assert.equal(componentRef.value.$el, root.querySelector('span'));
+  componentRef.value.clicks = 9;
+  await nextTick();
+  assert.equal(root.querySelector('span').textContent, '9');
+});
+
+test('defineExpose keeps exposed refs live and unwrapped across updates', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Child = {
+    setup(_props, { expose }) {
+      const total = ref(5);
+      expose({ total });
+      return () => h('b', {}, String(total.value));
+    }
+  };
+  const componentRef = ref(null);
+  const app = createApp(state => h('section', {}, [h(Child, { ref: componentRef, signal: state.signal })]), { signal: 0 });
+  const state = app.mount(root);
+  assert.equal(componentRef.value.total, 5);
+  state.signal = 1;
+  await nextTick();
+  assert.equal(componentRef.value.total, 5);
+  app.unmount();
+  assert.equal(componentRef.value, null);
+});
+
+test('defineExpose rejects calls outside setup and non-object payloads', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  assert.throws(() => defineExpose({}), /defineExpose\(\) must be called during component setup/);
+  assert.throws(() => defineExpose('nope'), /defineExpose\(\) must be called during component setup/);
+  const Child = {
+    setup() {
+      assert.throws(() => defineExpose([1, 2]), /plain object/);
+      return () => h('i', {}, 'ok');
+    }
+  };
+  createApp(() => h(Child)).mount(root);
+  assert.equal(root.querySelector('i').textContent, 'ok');
 });
 
 test('browser bootstrap keeps Thymeleaf hydration active when an SFC module cannot load', async () => {
