@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, readonly, shallowReadonly, isReadonly, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, customRef, defineAsyncComponent, defineComponent, defineExpose, effectScope, useAttrs, useSlots, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onEffectCleanup, onErrorCaptured, onScopeDispose, onWatcherCleanup, refreshComponentsFromPage, render, Teleport, inject, isProxy, isRef, isShallow, onMounted, onUnmounted, onUpdated, pauseTracking, enableTracking, resetTracking, provide, proxyRefs, queueJob, queuePostFlushCb, flushOnAppMount, stop, toRaw, toReactive, toReadonly, toRef, toRefs, toValue, traverse, unref, watch, watchEffect, watchPostEffect, watchSyncEffect, withDirectives, withMemo, mergeProps, cloneVNode, isVNode, startBatch, endBatch, getCurrentScope, getCurrentWatcher, SchedulerJobFlags } from './dist/index.js';
+import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, readonly, shallowReadonly, isReadonly, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, customRef, defineAsyncComponent, capitalize, defineComponent, defineExpose, effectScope, getCurrentInstance, hasInjectionContext, normalizeClass, normalizeStyle, resolveComponent, resolveDirective, toDisplayString, toHandlerKey, useAttrs, useId, useTemplateRef, useSlots, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onEffectCleanup, onErrorCaptured, onScopeDispose, onWatcherCleanup, refreshComponentsFromPage, render, Teleport, inject, isProxy, isRef, isShallow, onMounted, onUnmounted, onUpdated, pauseTracking, enableTracking, resetTracking, provide, proxyRefs, queueJob, queuePostFlushCb, flushOnAppMount, stop, toRaw, toReactive, toReadonly, toRef, toRefs, toValue, traverse, unref, watch, watchEffect, watchPostEffect, watchSyncEffect, withDirectives, withMemo, mergeProps, cloneVNode, isVNode, startBatch, endBatch, getCurrentScope, getCurrentWatcher, SchedulerJobFlags } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -4436,6 +4436,125 @@ test('SFC templates resolve builtin components like keep-alive and transition', 
     poll();
   });
   assert.equal(root.querySelector('em').textContent, 'A view');
+});
+
+test('KeepAlive include and exclude control which components are cached', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const mounted = [];
+  const activated = [];
+  const makeCounted = name => defineComponent(name, {
+    setup() {
+      onMounted(() => mounted.push(name));
+      onActivated(() => activated.push(name));
+      return () => h('p', {}, name);
+    }
+  });
+  const KeptA = makeCounted('kept-a');
+  const KeptB = makeCounted('kept-b');
+  const state = reactive({ tab: 'a' });
+  const app = createApp(() => h(KeepAlive, { include: 'kept-a' },
+    [state.tab === 'a' ? h(KeptA, { key: 'a' }) : h(KeptB, { key: 'b' })])).mount(root);
+  assert.deepEqual(mounted, ['kept-a']);
+  assert.deepEqual(activated, ['kept-a']);
+  state.tab = 'b';
+  await nextTick();
+  assert.deepEqual(mounted, ['kept-a', 'kept-b'], 'excluded component remounts');
+  assert.deepEqual(activated, ['kept-a']);
+  state.tab = 'a';
+  await nextTick();
+  assert.deepEqual(mounted, ['kept-a', 'kept-b'], 'included component is restored from cache');
+  assert.deepEqual(activated, ['kept-a', 'kept-a']);
+  app.unmount?.();
+});
+
+test('KeepAlive include accepts arrays and regexps; exclude keeps everything else', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const deactivated = [];
+  const Alpha = defineComponent('keep-alpha', () => h('i', {}, 'alpha'));
+  const Beta = defineComponent('keep-beta', () => h('i', {}, 'beta'));
+  const state = reactive({ tab: 'alpha' });
+  createApp(() => h(KeepAlive, { include: [/^keep-al/, 'keep-beta'] },
+    [state.tab === 'alpha' ? h(Alpha, { key: 'alpha' }) : h(Beta, { key: 'beta' })])).mount(root);
+  const alphaDeactivate = () => deactivated.push('alpha');
+  state.tab = 'beta';
+  await nextTick();
+  assert.equal(root.querySelector('i').textContent, 'beta');
+  assert.deepEqual(deactivated, []);
+});
+
+test('Transition appear accepts an object of enter hooks', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const events = [];
+  const app = createApp(() => h(Transition, {
+    appear: { onBeforeEnter: () => events.push('appear-before'), onAfterEnter: () => events.push('appear-after') },
+    onBeforeEnter: () => events.push('props-before')
+  }, [h('p', {}, 'Initial')]));
+  app.mount(root);
+  assert.deepEqual(events, ['appear-before']);
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.deepEqual(events, ['appear-before', 'appear-after']);
+  app.unmount();
+});
+
+test('API parity helpers behave like their Vue counterparts', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  assert.equal(toDisplayString(null), '');
+  assert.equal(toDisplayString(5), '5');
+  assert.equal(toDisplayString({ a: 1 }), '{"a":1}');
+  assert.equal(toHandlerKey('save'), 'onSave');
+  assert.deepEqual(normalizeStyle(['color: red', { fontSize: '12px' }]), { color: 'red', fontSize: '12px' });
+  assert.equal(normalizeClass(['a', { b: true }]), 'a b');
+  assert.equal(typeof useId(), 'string');
+  assert.notEqual(useId(), useId());
+  assert.equal(hasInjectionContext(), false);
+  const Badge = defineComponent('parity-badge', () => h('b', {}, 'ok'));
+  const render = compileSfcComponent('<template><parity-badge /></template>');
+  const directive = { mounted() {} };
+  const resolved = {};
+  const Probe = { setup() {
+    resolved.badge = resolveComponent('parity-badge');
+    resolved.transition = resolveComponent('transition');
+    resolved.directive = resolveDirective('parity-highlight');
+    return () => h('span', {}, 'probe');
+  } };
+  const app = createApp(() => h(Probe), {});
+  app.component('parity-badge', Badge);
+  app.directive('parity-highlight', directive);
+  app.mount(root);
+});
+
+test('getCurrentInstance and useTemplateRef work inside setup', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const seen = {};
+  const Child = compileSfcComponent(`
+    <template>
+      <section>
+        <input ref="box">
+        <output>{{ target ? target.tagName : 'none' }}</output>
+        <em>{{ instance ? 'has-instance' : 'none' }}</em>
+        <button @click="tick = 't2'">re</button>
+        <small>{{ tick }}</small>
+      </section>
+    </template>
+    <script setup>
+      const target = useTemplateRef('box');
+      const instance = getCurrentInstance();
+      const tick = ref('t1');
+    </script>
+  `);
+  createApp(() => h(Child)).mount(root);
+  assert.equal(root.querySelector('em').textContent, 'has-instance');
+  assert.equal(root.querySelector('output').textContent, 'none');
+  assert.equal(root.querySelector('small').textContent, 't1');
+  root.querySelector('button').dispatchEvent(new Event('click', { bubbles: true }));
+  await nextTick();
+  assert.equal(root.querySelector('small').textContent, 't2');
+  assert.equal(root.querySelector('output').textContent, 'INPUT');
 });
 
 test('SFC injects style blocks and keeps recompiles idempotent', () => {

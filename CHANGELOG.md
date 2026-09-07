@@ -28,6 +28,33 @@ adheres to [Semantic Versioning](https://semver.org/).
   changes the script. Previously the adopted fallback replayed the stale
   render closure, so edited script logic never took effect in the browser.
 
+## [Unreleased]
+
+### Added
+
+- `KeepAlive include` / `exclude` (comma-delimited strings, RegExp, or arrays)
+  controlling which named components are cached; excluded children unmount
+  instead of deactivating.
+- `Transition appear` accepts an object of enter-hook overrides, in addition
+  to the boolean form.
+- SFC templates resolve builtin components (`transition`, `transition-group`,
+  `keep-alive`, `teleport`, `suspense`) intrinsically.
+- Scoped CSS `:global(...)` escapes the scope attribute; bare `:global(.x)`
+  compiles to a global descendant rule.
+- `<style module>` (optional injection name) renames classes with the file
+  hash and exposes the mapping to templates as `$style` or the custom name.
+- API parity batch: `getCurrentInstance`, `hasInjectionContext`, `useId`,
+  `useTemplateRef` (decoupled key registration), `resolveComponent`,
+  `resolveDirective`, `toDisplayString`, `toHandlerKey`, exported
+  `normalizeClass`/`normalizeStyle`, `capitalize`.
+- Systematic Vue-parity audit document (`docs/vue-parity.md`) with the
+  remaining prioritized gap list.
+
+### Fixed
+
+- Adopted script-setup components re-run setup when a hot update changes the
+  script (previously the stale render closure kept rendering).
+
 ## [0.1.0] - 2026-09-08
 
 First milestone release: a Vue-level reactive runtime natively integrated

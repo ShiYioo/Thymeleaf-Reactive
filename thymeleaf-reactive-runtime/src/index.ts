@@ -1133,6 +1133,7 @@ type ComponentInstance = {
   exposeProxy?: Record<string, unknown> | null;
   appContext?: AppContext | null;
   setupContext?: ComponentContext;
+  templateRefs?: Map<string, Ref<unknown>>;
 };
 type HotReloadableRender = ComponentRender & { hmrUpdate?: (next: ComponentOptions) => boolean };
 const componentInstanceStack: ComponentInstance[] = [];
@@ -1526,6 +1527,81 @@ export function useAttrs(): Record<string, unknown> {
   return getSetupContext(instance).attrs;
 }
 
+/** Vue-compatible: the active component instance during setup, undefined otherwise. */
+export function getCurrentInstance(): ComponentInstance | undefined {
+  return currentComponentInstance();
+}
+
+/** True when an active component instance exists, so inject() is legal. */
+export function hasInjectionContext(): boolean {
+  return Boolean(currentComponentInstance());
+}
+
+let nextUseId = 0;
+
+/** Stable per-call identifier, safe for SSR hydration pairings. */
+export function useId(): string {
+  return `v-${nextUseId++}`;
+}
+
+/**
+ * Vue 3.5 template refs: returns a ref bound to the element or component
+ * whose `ref` attribute matches `key`, decoupled from the variable name.
+ */
+export function useTemplateRef<T = unknown>(key: string): Ref<T | null> {
+  const instance = currentComponentInstance();
+  if (!instance) throw new Error("useTemplateRef() must be called during component setup");
+  const refs = instance.templateRefs ??= new Map<string, Ref<unknown>>();
+  let target = refs.get(key) as Ref<T | null> | undefined;
+  if (!target) {
+    target = ref(null) as Ref<T | null>;
+    refs.set(key, target);
+  }
+  return target;
+}
+
+/** Vue-compatible string casing helpers, also used by the SFC compiler. */
+export function capitalize(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+export function toHandlerKey(event: string): string {
+  return `on${capitalize(camelize(event))}`;
+}
+
+/** Vue template interpolation semantics for displaying values as text. */
+export function toDisplayString(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (isRef(value)) return toDisplayString(unref(value));
+  if (Array.isArray(value) || (typeof value === "object" && value !== null)) return JSON.stringify(value);
+  return String(value);
+}
+
+/** Resolves a component name through builtins, the app context, and hot registry. */
+export function resolveComponent(name: string): Component | undefined {
+  const kebab = toKebabCase(name);
+  const builtin = sfcBuiltinComponents[kebab] ?? sfcBuiltinComponents[name];
+  if (builtin) return builtin as Component;
+  const context = currentAppContext?.components;
+  const candidate = context?.[name] ?? context?.[kebab]
+    ?? Object.entries(context ?? {}).find(([entryName]) => entryName.toLowerCase() === name.toLowerCase())?.[1];
+  if (candidate !== undefined) return candidate as Component;
+  return hotComponents.get(name)?.render ?? hotComponents.get(kebab)?.render;
+}
+
+/** Resolves a directive name registered through app.directive(). */
+export function resolveDirective(name: string): Directive | undefined {
+  const context = currentAppContext?.directives;
+  if (!context) return undefined;
+  return context[camelize(name)]
+    ?? Object.entries(context).find(([entryName]) => entryName.toLowerCase() === name.toLowerCase())?.[1];
+}
+
+/** We bundle the SFC compiler, so this runtime is not runtime-only. */
+export function isRuntimeOnly(): boolean {
+  return false;
+}
+
 function areVNodeChildrenEqual(previous: VNode[], next: VNode[]): boolean {
   if (previous.length !== next.length) return false;
   return previous.every((child, index) => {
@@ -1826,12 +1902,17 @@ export function resolveDynamicComponent(value: unknown): string | Component | ty
 
 type SfcOnceCache = Map<Node, VNode | VNode[]>;
 type SfcMemoCache = Map<Node, { dependencies: unknown[]; vnode: VNode }>;
-type SfcRefContext = { owner: Record<string, unknown>; arrays: Map<string, unknown[]>; collect: boolean };
+type SfcRefContext = { owner: Record<string, unknown>; arrays: Map<string, unknown[]>; collect: boolean; instance?: ComponentInstance | null };
 const sfcRefContexts = new WeakMap<object, SfcRefContext>();
 
 function assignSfcTemplateRef(scope: Record<string, unknown>, name: string, value: unknown, previous?: unknown): void {
   const context = sfcRefContexts.get(scope);
   if (!context?.collect) {
+    const registered = context?.instance?.templateRefs?.get(name);
+    if (registered) {
+      registered.value = value;
+      return;
+    }
     if (name in scope) scope[name] = value;
     return;
   }
@@ -2217,7 +2298,7 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
   return vnode;
 }
 
-type SfcSetupBinding = { name: string; kind: "ref" | "reactive" | "computed" | "props" | "emit" | "model" | "slots" | "attrs"; expression: string };
+type SfcSetupBinding = { name: string; kind: "ref" | "reactive" | "computed" | "props" | "emit" | "model" | "slots" | "attrs" | "templateRef" | "instance"; expression: string };
 type SfcSetupMethod = { name: string; params: string[]; body: string };
 
 function splitSfcStatements(source: string): string[] {
@@ -2444,6 +2525,16 @@ function parseSfcSetup(source: string): { bindings: SfcSetupBinding[]; methods: 
     const helper = statement.match(/^(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*(useSlots|useAttrs)\(\)$/);
     if (helper) {
       bindings.push({ name: helper[1], kind: helper[2] === "useSlots" ? "slots" : "attrs", expression: "" });
+      return;
+    }
+    const instanceHelper = statement.match(/^(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*getCurrentInstance\(\)$/);
+    if (instanceHelper) {
+      bindings.push({ name: instanceHelper[1], kind: "instance", expression: "" });
+      return;
+    }
+    const templateRef = statement.match(/^(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*useTemplateRef\(\s*(['"])([^'"]+)\2\s*\)$/);
+    if (templateRef) {
+      bindings.push({ name: templateRef[1], kind: "templateRef", expression: templateRef[3] });
       return;
     }
     const arrow = statement.match(/^(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*\(\s*([A-Za-z_$][\w$]*(?:\s*,\s*[A-Za-z_$][\w$]*)*)?\s*\)\s*=>\s*(?:\{([\s\S]*)\}|([\s\S]+))$/);
@@ -2748,6 +2839,8 @@ export function compileSfcComponent(source: string): Component {
         else if (binding.kind === "computed") local[binding.name] = computed(() => readPath(proxyRefs(local), binding.expression));
         else if (binding.kind === "props") local[binding.name] = props;
         else if (binding.kind === "slots") local[binding.name] = useSlots();
+        else if (binding.kind === "templateRef") local[binding.name] = useTemplateRef(binding.expression);
+        else if (binding.kind === "instance") local[binding.name] = getCurrentInstance();
         else if (binding.kind === "attrs") local[binding.name] = useAttrs();
         else if (binding.kind === "model") local[binding.name] = customRef((track, trigger) => ({
           get: () => { track(); return props[binding.expression]; },
@@ -2767,7 +2860,7 @@ export function compileSfcComponent(source: string): Component {
       }
       if (moduleMap) Object.entries(moduleMap).forEach(([name, classes]) => { local[name] = classes; });
       const scope = proxyRefs(local);
-      sfcRefContexts.set(scope, { owner: local, arrays: new Map(), collect: false });
+      sfcRefContexts.set(scope, { owner: local, arrays: new Map(), collect: false, instance: currentComponentInstance() });
       const onceCache: SfcOnceCache = new Map();
       const memoCache: SfcMemoCache = new Map();
       let activeRender = hmrRender;
@@ -2815,8 +2908,16 @@ function transitionElement(vnode: VNode): Element | null {
 }
 
 function childWithTransitionProps(child: VNode, props: Record<string, unknown>): VNode {
-  const { mode: _mode, ...rest } = props;
+  const { mode: _mode, appear: _appear, ...rest } = props;
   return { ...child, props: { ...child.props, ...rest } };
+}
+
+/** Vue `appear` accepts an object of enter hooks that override the component props. */
+function appearMergedProps(props: Record<string, unknown>): Record<string, unknown> {
+  const appear = props.appear;
+  return appear && typeof appear === "object" && !Array.isArray(appear)
+    ? { ...props, ...appear }
+    : props;
 }
 
 function transitionClassName(vnode: VNode): string {
@@ -2911,7 +3012,7 @@ const componentNames = new WeakMap<Component, string>();
 const componentSources = new Map<string, string>();
 const booleanAttributes = new Set(["allowfullscreen", "async", "autofocus", "autoplay", "checked", "controls", "defer", "disabled", "formnovalidate", "hidden", "inert", "ismap", "itemscope", "loop", "multiple", "muted", "nomodule", "novalidate", "open", "playsinline", "readonly", "required", "reversed", "selected"]);
 
-function normalizeClass(value: unknown): string {
+export function normalizeClass(value: unknown): string {
   if (typeof value === "string" || typeof value === "number") return String(value);
   if (Array.isArray(value)) return value.map(normalizeClass).filter(Boolean).join(" ");
   if (value && typeof value === "object") {
@@ -2923,7 +3024,12 @@ function normalizeClass(value: unknown): string {
   return "";
 }
 
-function normalizeStyle(value: unknown): Record<string, unknown> | string {
+function toKebabCase(value: string): string {
+  return value.replace(/([a-z0-9])([A-Z])/g, "$1-$2").replace(/([A-Z])([A-Z][a-z])/g, "$1-$2").toLowerCase();
+}
+
+
+export function normalizeStyle(value: unknown): Record<string, unknown> | string {
   if (typeof value === "string") return value;
   if (Array.isArray(value)) {
     return value.reduce<Record<string, unknown>>((result, entry) => {
@@ -3063,6 +3169,32 @@ function resolveTeleportTarget(to: unknown): Element {
 
 function keepAliveKey(vnode: VNode): unknown {
   return vnode.key ?? vnode.type;
+}
+
+function componentNameOf(vnode: VNode): string | undefined {
+  const type = vnode.type;
+  const named = typeof type === "function" || typeof type === "object" ? componentNames.get(type as Component) : undefined;
+  if (named) return named;
+  const declared = (type as { name?: string })?.name;
+  return typeof declared === "string" ? declared : undefined;
+}
+
+/** Vue include/exclude matching: comma-delimited string, RegExp, or array of names. */
+function matchesComponentFilter(filter: unknown, name: string | undefined): boolean {
+  if (typeof filter === "string") return filter.split(",").map(part => part.trim()).includes(name ?? "");
+  if (filter instanceof RegExp) return typeof name === "string" && filter.test(name);
+  if (Array.isArray(filter)) return filter.some(item => String(item) === name);
+  return false;
+}
+
+function keepAliveCacheable(props: Record<string, unknown>, child: VNode): boolean {
+  const include = props.include;
+  const exclude = props.exclude;
+  if (include === undefined && exclude === undefined) return true;
+  const name = componentNameOf(child);
+  if (include !== undefined && !matchesComponentFilter(include, name)) return false;
+  if (exclude !== undefined && matchesComponentFilter(exclude, name)) return false;
+  return true;
 }
 
 function isSameVNodeType(oldVNode: VNode, newVNode: VNode): boolean {
@@ -3235,7 +3367,7 @@ function mountVNode(vnode: VNode, container: Node, anchor: Node | null = null): 
     vnode.el = child.el;
     vnode.anchor = child.anchor;
     // Vue semantics: the initial render transitions only with `appear`.
-    if (wantsAppear(vnode.props)) transitionEnter(childWithTransitionProps(child, vnode.props));
+    if (wantsAppear(vnode.props)) transitionEnter(childWithTransitionProps(child, appearMergedProps(vnode.props)));
     return vnode;
   }
   if (vnode.type === TransitionGroup) {
@@ -3244,7 +3376,7 @@ function mountVNode(vnode: VNode, container: Node, anchor: Node | null = null): 
     mount(group, container, anchor);
     vnode.el = group.el;
     vnode.anchor = group.anchor;
-    if (wantsAppear(vnode.props)) vnode.children.forEach(child => transitionEnter(childWithTransitionProps(child, vnode.props)));
+    if (wantsAppear(vnode.props)) vnode.children.forEach(child => transitionEnter(childWithTransitionProps(child, appearMergedProps(vnode.props))));
     return vnode;
   }
   if (vnode.type === KeepAlive) {
@@ -3255,10 +3387,16 @@ function mountVNode(vnode: VNode, container: Node, anchor: Node | null = null): 
       container.insertBefore(vnode.el, anchor);
       return vnode;
     }
-    vnode.cache.set(keepAliveKey(child), child);
-    vnode.activeKey = keepAliveKey(child);
-    mount(child, container, anchor);
-    invokeComponentHook(child, "activatedHooks");
+    const cacheable = keepAliveCacheable(vnode.props, child);
+    if (cacheable) {
+      vnode.cache.set(keepAliveKey(child), child);
+      vnode.activeKey = keepAliveKey(child);
+      mount(child, container, anchor);
+      invokeComponentHook(child, "activatedHooks");
+    } else {
+      vnode.activeKey = keepAliveKey(child);
+      mount(child, container, anchor);
+    }
     vnode.component = child;
     vnode.el = child.el;
     vnode.anchor = child.anchor;
@@ -3664,10 +3802,15 @@ function patchVNode(oldVNode: VNode | undefined, newVNode: VNode | undefined, co
     const cache = newVNode.cache = oldVNode.cache ?? new Map();
     const oldChild = oldVNode.component;
     const nextChild = newVNode.children[0];
+    const oldCacheable = Boolean(oldChild && oldVNode.cache?.has(oldVNode.activeKey));
     if (!nextChild) {
       if (oldChild) {
-        invokeComponentHook(oldChild, "deactivatedHooks");
-        detachVNode(oldChild);
+        if (oldCacheable) {
+          invokeComponentHook(oldChild, "deactivatedHooks");
+          detachVNode(oldChild);
+        } else {
+          unmount(oldChild, container);
+        }
       }
       newVNode.el = oldVNode.el ?? document.createComment("keep-alive");
       if (!oldVNode.el) container.appendChild(newVNode.el);
@@ -3675,24 +3818,41 @@ function patchVNode(oldVNode: VNode | undefined, newVNode: VNode | undefined, co
       return newVNode;
     }
     const nextKey = keepAliveKey(nextChild);
+    const nextCacheable = keepAliveCacheable(newVNode.props, nextChild);
     const insertionAnchor = nextSiblingAfterVNode(oldChild);
     if (oldChild && oldVNode.activeKey !== nextKey) {
-      cache.set(oldVNode.activeKey, oldChild);
-      invokeComponentHook(oldChild, "deactivatedHooks");
-      detachVNode(oldChild);
+      if (oldCacheable) {
+        cache.set(oldVNode.activeKey, oldChild);
+        invokeComponentHook(oldChild, "deactivatedHooks");
+        detachVNode(oldChild);
+      } else {
+        unmount(oldChild, container);
+      }
     }
-    const cached = cache.get(nextKey);
-    let active = cached ?? nextChild;
-    if (cached) {
+    const sameChild = Boolean(oldChild && oldVNode.activeKey === nextKey);
+    const cached = nextCacheable && !sameChild ? cache.get(nextKey) : undefined;
+    let active: VNode;
+    if (oldChild && sameChild) {
+      active = patch(oldChild, nextChild, container) ?? nextChild;
+      if (nextCacheable) {
+        cache.delete(nextKey);
+        cache.set(nextKey, active);
+      } else if (oldCacheable) {
+        cache.delete(oldVNode.activeKey);
+      }
+    } else if (cached) {
       moveVNode(cached, container, insertionAnchor);
       active = patch(cached, nextChild, container) ?? cached;
       cache.delete(nextKey);
       cache.set(nextKey, active);
       invokeComponentHook(active, "activatedHooks");
     } else {
+      active = nextChild;
       mount(active, container, insertionAnchor);
-      cache.set(nextKey, active);
-      invokeComponentHook(active, "activatedHooks");
+      if (nextCacheable) {
+        cache.set(nextKey, active);
+        invokeComponentHook(active, "activatedHooks");
+      }
     }
     pruneKeepAliveCache(newVNode, cache, nextKey, container);
     newVNode.activeKey = nextKey;
