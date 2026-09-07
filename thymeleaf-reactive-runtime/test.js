@@ -4633,6 +4633,24 @@ test('onRenderTracked and onRenderTriggered report render dependencies', async (
   app.unmount();
 });
 
+test('a template ref assigned during mount is readable after the first tick', async t => {
+  t.skip('known divergence (docs/vue-parity.md): an in-render ref write does not schedule an extra render yet');
+  const document = installDom();
+  const root = document.createElement('main');
+  const Child = {
+    setup() {
+      const target = ref(null);
+      return () => h('section', {}, [
+        h('input', { ref: el => { target.value = el; } }),
+        h('output', {}, String(target.value))
+      ]);
+    }
+  };
+  createApp(() => h(Child)).mount(root);
+  await nextTick();
+  assert.equal(root.querySelector('output').textContent, 'INPUT', 'ref assignment during mount should schedule one extra render');
+});
+
 test('SFC injects style blocks and keeps recompiles idempotent', () => {
   const document = installDom();
   const root = document.createElement('main');

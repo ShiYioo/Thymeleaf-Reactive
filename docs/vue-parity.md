@@ -52,8 +52,23 @@ Sources compared:
 ### P1 — next up
 
 1. **Mount-time template ref re-render**: a ref assigned during the initial
-   render should schedule one extra render (Vue does); ours currently waits
-   for the next render trigger. Tracked as a scheduler recursion nuance.
+   render should schedule one extra render (Vue does). Root cause localized
+   with a minimal repro (kept as a skipped test in the suite): the assignment
+   runs inside the render effect's own execution, where `triggerEffects`
+   self-skips the running effect (`run === active`), so the write never
+   reaches the scheduler. Two fix attempts were explored and reverted:
+   - `allowRecurse` on component effects caused over-rendering in the
+     dedup/scheduler tests (an ALLOW_RECURSE job re-queues on any mid-run
+     trigger), and
+   - deferring `setVNodeRef` writes to the post-flush queue re-fired the
+     per-render ref closures (identity changes every render), producing a
+     write ping-pong.
+   A correct fix needs Vue's shape: defer template-ref writes to a
+   post-flush job with STABLE ref closures (compare by name, not closure
+   identity) and keep the scheduler untouched. The scheduler also has a
+   latent crash here: the component update scheduler closure captured the
+   not-yet-assigned effect binding, so an in-render trigger threw
+   `queueJob(undefined)` (silently swallowed by render error handling).
 
 ### P2
 
