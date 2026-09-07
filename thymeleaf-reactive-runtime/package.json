@@ -1,14 +1,54 @@
 {
   "name": "@thymeleaf-reactive/runtime",
   "version": "0.1.0",
+  "description": "Vue-level reactive runtime for Thymeleaf: virtual DOM, hydration, component model, and SSE hot module replacement, natively integrated with Thymeleaf-rendered pages.",
+  "license": "MIT",
+  "author": "ShiYioo",
   "type": "module",
   "main": "dist/index.js",
   "module": "dist/browser.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./browser": {
+      "types": "./dist/browser.d.ts",
+      "default": "./dist/browser.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc && node scripts/vendor-browser-deps.mjs",
-    "test": "npm run build && node --test"
+    "test": "npm run build && node --test",
+    "prepublishOnly": "npm test"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ShiYioo/Thymeleaf-Reactive.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ShiYioo/Thymeleaf-Reactive/issues"
+  },
+  "homepage": "https://github.com/ShiYioo/Thymeleaf-Reactive#readme",
+  "keywords": [
+    "thymeleaf",
+    "vue",
+    "virtual-dom",
+    "reactive",
+    "hot-reload",
+    "hmr",
+    "ssr",
+    "hydration",
+    "spring-boot"
+  ],
   "devDependencies": {
     "happy-dom": "^20.11.8",
     "jsep": "^1.4.0",

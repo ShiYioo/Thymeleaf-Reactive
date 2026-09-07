@@ -1,0 +1,99 @@
+# Changelog
+
+All notable changes to Thymeleaf Reactive are documented here. The format
+follows [Keep a Changelog](https://keepachangelog.com/) and the project
+adheres to [Semantic Versioning](https://semver.org/).
+
+## [0.1.0] - 2026-09-08
+
+First milestone release: a Vue-level reactive runtime natively integrated
+with Thymeleaf, shipped as an npm runtime, an npm compiler, and a Spring Boot
+starter.
+
+### Reactive core
+
+- Proxy-based `reactive`/`readonly`/`shallow*`/`ref`/`computed`/`customRef`
+  with Vue 3.6-aligned dependency tracking (version-counted deps, batch
+  coalescing, effect scopes, `onEffectCleanup`, `traverse`, `proxyRefs`).
+- `watch`/`watchEffect`/`watchSyncEffect`/`watchPostEffect` with multi-source,
+  deep (including Map/Set and symbol keys), `immediate`, numeric `deep`,
+  `once`, and `flush` modes; Vue 3.6 `WatchHandle` pause/resume;
+  `onWatcherCleanup`; `nextTick` and the `SchedulerJobFlags` job queue.
+- Scheduler deduplication, parent-before-child ordering, failed-job isolation,
+  post-flush callbacks, and `flushOnAppMount`.
+
+### Virtual DOM and components
+
+- Keyed diffing patcher with fragment ranges, SVG namespaces, event option
+  suffixes, class/style normalization, listener arrays, VNode refs, cloning,
+  merging, and memoization (`withMemo`, `v-memo`).
+- Object components: `setup`, reactive props with Vue-style options and
+  default factories, `attrs` fallthrough, emits validation with kebab-case
+  normalization, lazy slots, scoped slots, dynamic slots, `provide`/`inject`,
+  full lifecycle hooks, and `onErrorCaptured` isolation.
+- `Teleport`, `KeepAlive` (LRU `max`, teleported content), `Suspense` with
+  nested-boundary isolation and SSR fallback adoption, `Transition` with
+  enter/leave hooks, class phases, `mode: out-in`/`in-out`, and
+  `TransitionGroup`.
+- Async components: loaders returning dynamic `import()` modules, timeout,
+  error UI, and the Vue-compatible `onError(retry, fail, attempts)` protocol.
+- Directives: `withDirectives` covering the full VNode lifecycle, usable from
+  SFC templates with arguments and modifiers.
+- Vue-compatible app context: `app.component`, `app.directive`,
+  `app.provide`, `app.use`, chainable, with SFC-template global resolution.
+- Public-instance contract: `defineExpose()` and setup-context `expose()`;
+  template refs see only exposed state; `useSlots()`/`useAttrs()` setup
+  helpers, including SFC bindings.
+
+### Thymeleaf integration and hydration
+
+- `hydrate`/`hydrateRender` adopt server-rendered `tr:*` markup, recover from
+  structural mismatches, bind conditional blocks, keyed `each` rows, models,
+  handlers with modifiers, and `Suspense`/`Teleport`/multi-root fragments.
+- Browser bootstrap keeps Thymeleaf hydration interactive while an SFC module
+  loads, and upgrades `tr:component-src` roots to SFC components.
+- Server component props metadata (`tr:props`) survives hydration.
+
+### SFC compiler (CSP-safe subset)
+
+- `script setup`: `ref`, `reactive`, `computed`, `defineProps`,
+  `withDefaults`, `defineEmits`, `defineModel` (with defaults),
+  `defineOptions`, `defineExpose`, `useSlots`, `useAttrs`, methods with
+  parameters and `$event`, and explicit failures for unsupported statements.
+- Templates: `v-if`/`v-else-if`/`v-else`, `v-show`, `v-for` (ranges, object
+  aliases, tuple syntax), `v-model` (checkbox/radio/select, modifiers,
+  component contracts), `v-on` object bindings, dynamic arguments, event
+  modifiers, `v-once`, `v-memo`, static hoisting, named/dynamic/scoped
+  slots, string refs, `v-html`, dynamic components, and custom directives.
+- `<style>` blocks with `scoped` support: stable `data-v-*` scope ids,
+  selector rewriting (pseudo-classes, pseudo-elements, `:deep()`,
+  `@media`/`@supports` recursion), and idempotent style injection.
+
+### Hot module replacement
+
+- Component-level HMR over the starter's SSE channel: template-only edits
+  hot-swap the render while preserving script-setup state; script edits
+  rebuild the component; keyed instances reconcile across reorders.
+- Server-rendered roots adopted by SFCs keep Thymeleaf hydration when a
+  module fails to load.
+- Versioned change history, poll-based recovery, and full-reload fallback
+  when history is incomplete.
+
+### Spring Boot starter
+
+- Auto-configuration: `tr:*` dialect, runtime asset injection with import
+  map, SSE `/__thymeleaf_reactive__/events` plus `/status` recovery,
+  `WatchService` template watching with polling fallback and debouncing,
+  cache-busted SFC module serving, and `thymeleaf.reactive.*` properties.
+
+### Release engineering
+
+- Gradle `maven-publish` publication with sources jar and POM metadata;
+  artifacts verified via `publishToMavenLocal`; GitHub Packages target
+  configured through `github.user`/`github.token` properties.
+- npm packages declare `exports`, `files`, `repository`, and
+  `publishConfig`; publishing is guarded by `prepublishOnly` tests.
+- Real-browser end-to-end regression (`e2e/`, puppeteer-core) covering the
+  full SSE HMR loop against the counter example, including in-place hot
+  swaps without reload and state preservation. This harness caught and fixed
+  the bare `jsep` import that broke the served runtime in browsers.

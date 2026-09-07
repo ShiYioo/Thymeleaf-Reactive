@@ -4238,9 +4238,9 @@ test('Transition runs enter and leave lifecycle hooks around keyed replacement',
   }, [h('p', { key: state.showFirst ? 'first' : 'second' }, state.showFirst ? 'First' : 'Second')]));
   app.mount(root);
   assert.equal(root.textContent, 'First');
-  assert.deepEqual(events, ['before-enter']);
+  assert.deepEqual(events, [], 'initial render does not transition without appear');
   await new Promise(resolve => setTimeout(resolve, 5));
-  assert.deepEqual(events, ['before-enter', 'after-enter']);
+  assert.deepEqual(events, []);
   state.showFirst = false;
   await nextTick();
   assert.equal(root.textContent, 'SecondFirst');
@@ -4248,6 +4248,23 @@ test('Transition runs enter and leave lifecycle hooks around keyed replacement',
   await new Promise(resolve => setTimeout(resolve, 5));
   assert.equal(root.textContent, 'Second');
   assert.deepEqual(events.slice(-2), ['after-enter', 'after-leave']);
+  app.unmount();
+});
+
+test('Transition appear prop runs enter hooks on the initial render', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const events = [];
+  const app = createApp(() => h(Transition, {
+    appear: true,
+    name: 'fade',
+    onBeforeEnter: () => events.push('before-enter'),
+    onAfterEnter: () => events.push('after-enter')
+  }, [h('p', {}, 'Mounted')]));
+  app.mount(root);
+  assert.deepEqual(events, ['before-enter']);
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.deepEqual(events, ['before-enter', 'after-enter']);
   app.unmount();
 });
 
@@ -4266,7 +4283,7 @@ test('Transition out-in mode defers the incoming child until leave completes', a
   }, [h('p', { key: state.showFirst ? 'first' : 'second' }, state.showFirst ? 'First' : 'Second')]));
   app.mount(root);
   await new Promise(resolve => setTimeout(resolve, 30));
-  assert.deepEqual(events, ['before-enter', 'after-enter']);
+  assert.deepEqual(events, [], 'initial render does not transition without appear');
   state.showFirst = false;
   await nextTick();
   assert.equal(root.textContent, 'First');
@@ -4310,7 +4327,7 @@ test('Transition in-out mode delays the leave until enter completes', async () =
   }, [h('p', { key: state.showFirst ? 'first' : 'second' }, state.showFirst ? 'First' : 'Second')]));
   app.mount(root);
   await new Promise(resolve => setTimeout(resolve, 30));
-  assert.deepEqual(events, ['before-enter', 'after-enter']);
+  assert.deepEqual(events, [], 'initial render does not transition without appear');
   state.showFirst = false;
   await nextTick();
   assert.equal(root.textContent, 'SecondFirst');

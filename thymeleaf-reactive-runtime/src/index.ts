@@ -2736,6 +2736,11 @@ function transitionClassName(vnode: VNode): string {
   return String(vnode.props.name ?? "v");
 }
 
+/** Vue `appear`: an empty attribute counts as true, only false opts out. */
+function wantsAppear(props: Record<string, unknown>): boolean {
+  return props.appear !== undefined && props.appear !== false;
+}
+
 function transitionHook(vnode: VNode, name: string, element: Element, done: () => void): void {
   const hook = vnode.props[name];
   if (typeof hook !== "function") {
@@ -3142,7 +3147,8 @@ function mountVNode(vnode: VNode, container: Node, anchor: Node | null = null): 
     mount(child, container, anchor);
     vnode.el = child.el;
     vnode.anchor = child.anchor;
-    transitionEnter(childWithTransitionProps(child, vnode.props));
+    // Vue semantics: the initial render transitions only with `appear`.
+    if (wantsAppear(vnode.props)) transitionEnter(childWithTransitionProps(child, vnode.props));
     return vnode;
   }
   if (vnode.type === TransitionGroup) {
@@ -3151,7 +3157,7 @@ function mountVNode(vnode: VNode, container: Node, anchor: Node | null = null): 
     mount(group, container, anchor);
     vnode.el = group.el;
     vnode.anchor = group.anchor;
-    vnode.children.forEach(child => transitionEnter(childWithTransitionProps(child, vnode.props)));
+    if (wantsAppear(vnode.props)) vnode.children.forEach(child => transitionEnter(childWithTransitionProps(child, vnode.props)));
     return vnode;
   }
   if (vnode.type === KeepAlive) {
