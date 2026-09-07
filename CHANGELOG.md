@@ -49,6 +49,12 @@ adheres to [Semantic Versioning](https://semver.org/).
   `normalizeClass`/`normalizeStyle`, `capitalize`.
 - Systematic Vue-parity audit document (`docs/vue-parity.md`) with the
   remaining prioritized gap list.
+- `useModel(props, name, options)` standalone model helper with getter and
+  setter transforms, writing through the declared update listener.
+- `onRenderTracked` / `onRenderTriggered` render debug hooks backed by
+  `onTrack`/`onTrigger` effect options and `DebuggerEvent` payloads.
+- `/tabs` e2e now covers the `Transition appear` object form in a real
+  browser (hook override semantics asserted).
 
 ### Fixed
 

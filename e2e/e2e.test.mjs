@@ -249,6 +249,12 @@ test("KeepAlive and Transition subtrees survive template HMR; script edits rebui
     throw error;
   });
   await page.evaluate(() => { window.__e2eNoReload = true; });
+
+  // Transition appear (object form): the enter hooks run on the initial
+  // mount and override the props-level hook of the same name.
+  await waitFor(page, () => Array.isArray(window.__appearEvents) && window.__appearEvents.includes("appear-after"));
+  const appearEvents = await page.evaluate(() => window.__appearEvents);
+  assert.deepEqual(appearEvents, ["appear-before", "appear-after"]);
   assert.equal(await page.evaluate(() => document.querySelector(".tabs-version")?.textContent), "v1");
 
   // KeepAlive: type into branch A, switch to B, switch back — the cached

@@ -3,10 +3,27 @@
 <head>
   <meta charset="UTF-8">
   <title>Thymeleaf Reactive Tabs</title>
+  <script type="importmap">{"imports":{"jsep":"/thymeleaf-reactive/jsep.js"}}</script>
 </head>
 <body>
   <main tr:component="tabs" tr:component-src="components/Tabs.vue" tr:state="{}">
     <p>tabs placeholder</p>
   </main>
+
+  <div id="appear-demo"></div>
+  <script type="module">
+    const { createApp, h, Transition } = await import('/thymeleaf-reactive/index.js');
+    const events = [];
+    window.__appearEvents = events;
+    const Demo = {
+      setup() {
+        return () => h(Transition, {
+          appear: { onBeforeEnter: () => events.push('appear-before'), onAfterEnter: () => events.push('appear-after') },
+          onBeforeEnter: () => events.push('props-before-should-not-fire')
+        }, [h('p', { key: 'demo' }, 'Appear demo')]);
+      }
+    };
+    createApp(() => h(Demo)).mount(document.getElementById('appear-demo'));
+  </script>
 </body>
 </html>

@@ -39,14 +39,21 @@ Sources compared:
 
 ## Remaining gaps (prioritized)
 
+### P1 — closed this cycle
+
+1. **`Transition appear` object form end-to-end**: covered by the `/tabs`
+   browser scenario (hook-override semantics asserted through real Chrome).
+2. **`onRenderTracked` / `onRenderTriggered`**: implemented via
+   `onTrack`/`onTrigger` effect options and `DebuggerEvent` payloads on the
+   property-get/set and ref tracks/triggers.
+3. **`useModel`**: standalone helper with getter/setter transforms writing
+   through declared-emits listeners.
+
 ### P1 — next up
 
-1. **`Transition appear` object form end-to-end**: the hook-override object is
-   implemented; add it to the `/tabs` e2e page for browser coverage.
-2. **`onRenderTracked` / `onRenderTriggered`**: dev-time debug hooks need a
-   debug-event channel in the reactivity tracker.
-3. **`useModel`**: standalone model helper (`defineModel` already covers SFC;
-   `useModel` would extend it to object components and render functions).
+1. **Mount-time template ref re-render**: a ref assigned during the initial
+   render should schedule one extra render (Vue does); ours currently waits
+   for the next render trigger. Tracked as a scheduler recursion nuance.
 
 ### P2
 

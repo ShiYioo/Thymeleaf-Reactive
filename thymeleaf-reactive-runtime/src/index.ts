@@ -3,7 +3,16 @@ import jsep from "jsep";
 type Primitive = string | number | boolean | null | undefined;
 type VNodeChild = VNode | Primitive | VNodeChild[];
 export type Effect = (() => void) & { stop?: () => void; pause?: () => void; resume?: () => void };
-type EffectOptions = { lazy?: boolean; scheduler?: () => void };
+export type DebuggerEvent = {
+  effect: Effect;
+  target: object;
+  key: unknown;
+  type: "track" | "trigger";
+  newValue?: unknown;
+  oldValue?: unknown;
+};
+type EffectOptions = { lazy?: boolean; scheduler?: () => void; onTrack?: DebuggerEventCallback; onTrigger?: DebuggerEventCallback };
+type DebuggerEventCallback = (event: DebuggerEvent) => void;
 export type ComponentRender = (props: Record<string, unknown>, children: VNode[]) => VNode;
 export type ComponentSlots = Record<string, (props?: Record<string, unknown>) => VNode[]>;
 export type ComponentContext = {
@@ -279,7 +288,7 @@ function isReactiveValue(value: unknown): value is object {
   return prototype === Object.prototype || prototype === null;
 }
 
-function trackEffect(subscribers: Set<Effect>): void {
+function trackEffect(subscribers: Set<Effect>, debug?: { target: object; key: unknown }): void {
   if (!shouldTrack) return;
   const active = effectStack.at(-1);
   if (!active) return;
@@ -287,6 +296,8 @@ function trackEffect(subscribers: Set<Effect>): void {
   let tracked = effectDeps.get(active);
   if (!tracked) effectDeps.set(active, tracked = new Set());
   tracked.add(subscribers);
+  const onTrack = effectOnTrack.get(active);
+  if (onTrack && debug) onTrack({ effect: active, target: debug.target, key: debug.key, type: "track" });
 }
 
 /** Temporarily disables dependency collection; use with resetTracking(). */
@@ -342,10 +353,12 @@ export function endBatch(): void {
   });
 }
 
-function triggerEffects(subscribers: Iterable<Effect>): void {
+function triggerEffects(subscribers: Iterable<Effect>, debug?: { target: object; key: unknown; newValue?: unknown; oldValue?: unknown }): void {
   const active = effectStack.at(-1);
   [...new Set(subscribers)].forEach(run => {
     if (run === active) return;
+    const onTrigger = effectOnTrigger.get(run);
+    if (onTrigger && debug) onTrigger({ effect: run, target: debug.target, key: debug.key, type: "trigger", newValue: debug.newValue, oldValue: debug.oldValue });
     if (batchDepth > 0) {
       batchEffect(run);
       return;
@@ -459,13 +472,14 @@ function createReactive<T extends object>(value: T, shallow: boolean): T {
           }
         };
       }
-      trackEffect(subscribers(key));
+      trackEffect(subscribers(key), { target: target as object, key });
       const result = Reflect.get(target, key, receiver);
       return shallow ? result : isReactiveValue(result) ? reactive(result) : result;
     },
     set(target, key, next, receiver) {
       const oldLength = Array.isArray(target) ? target.length : 0;
-      const changed = !Object.is(Reflect.get(target, key, receiver), next);
+      const oldValue = Reflect.get(target, key, receiver);
+      const changed = !Object.is(oldValue, next);
       const ok = Reflect.set(target, key, next, receiver);
       if (changed) {
         const triggered = new Set<Effect>(deps.get(key) ?? []);
@@ -473,7 +487,7 @@ function createReactive<T extends object>(value: T, shallow: boolean): T {
           if (Number.isInteger(Number(key)) && Number(key) >= oldLength) deps.get("length")?.forEach(run => triggered.add(run));
         }
         deps.get(ITERATE_KEY)?.forEach(run => triggered.add(run));
-        triggerEffects(triggered);
+        triggerEffects(triggered, { target: target as object, key, newValue: next, oldValue });
       }
       return ok;
     },
@@ -634,6 +648,9 @@ export function getCurrentScope(): EffectScope | undefined {
   return activeEffectScope;
 }
 
+const effectOnTrack = new WeakMap<Effect, DebuggerEventCallback>();
+const effectOnTrigger = new WeakMap<Effect, DebuggerEventCallback>();
+
 export function effect(fn: Effect, options: EffectOptions = {}): Effect {
   let active = true;
   const run: Effect = () => {
@@ -652,12 +669,16 @@ export function effect(fn: Effect, options: EffectOptions = {}): Effect {
     effectStack.push(run);
     try { fn(); } finally { effectStack.pop(); }
   };
+  if (options.onTrack) effectOnTrack.set(run, options.onTrack);
+  if (options.onTrigger) effectOnTrigger.set(run, options.onTrigger);
   run.stop = () => {
     if (!active) return;
     active = false;
     effectDeps.get(run)?.forEach(subscribers => subscribers.delete(run));
     effectDeps.delete(run);
     effectSchedulers.delete(run);
+    effectOnTrack.delete(run);
+    effectOnTrigger.delete(run);
     pausedEffects.delete(run);
     dirtyEffects.delete(run);
     const pending = effectCleanups.get(run);
@@ -702,13 +723,14 @@ function createRef<T>(value: T, shallow: boolean): Ref<T> {
   let current = value;
   const result = {
     get value(): T {
-      trackEffect(subscribers);
+      trackEffect(subscribers, { target: result as unknown as object, key: "value" });
       return current;
     },
     set value(next: T) {
       if (Object.is(current, next)) return;
+      const oldValue = current;
       current = next;
-      triggerEffects(subscribers);
+      triggerEffects(subscribers, { target: result as unknown as object, key: "value", newValue: next, oldValue });
     }
   };
   refValues.add(result);
@@ -1134,7 +1156,25 @@ type ComponentInstance = {
   appContext?: AppContext | null;
   setupContext?: ComponentContext;
   templateRefs?: Map<string, Ref<unknown>>;
+  renderTrackedHooks?: DebuggerEventCallback[];
+  renderTriggeredHooks?: DebuggerEventCallback[];
 };
+
+/** Fan-out helper for per-instance render debug hooks. */
+function invokeRenderDebug(hooks: DebuggerEventCallback[] | undefined, event: DebuggerEvent): void {
+  hooks?.forEach(callback => {
+    try { callback(event); }
+    catch (error) { console.error("[thymeleaf-reactive] render debug hook failed", error); }
+  });
+}
+
+/** Wires the render-effect debug events of one instance to its registered hooks. */
+function componentDebugOptions(instance: ComponentInstance): { onTrack: DebuggerEventCallback; onTrigger: DebuggerEventCallback } {
+  return {
+    onTrack: event => invokeRenderDebug(instance.renderTrackedHooks, event),
+    onTrigger: event => invokeRenderDebug(instance.renderTriggeredHooks, event)
+  };
+}
 type HotReloadableRender = ComponentRender & { hmrUpdate?: (next: ComponentOptions) => boolean };
 const componentInstanceStack: ComponentInstance[] = [];
 export type VNode = {
@@ -1600,6 +1640,46 @@ export function resolveDirective(name: string): Directive | undefined {
 /** We bundle the SFC compiler, so this runtime is not runtime-only. */
 export function isRuntimeOnly(): boolean {
   return false;
+}
+
+/** Registers a debug hook fired when the render effect tracks a dependency. */
+export function onRenderTracked(callback: DebuggerEventCallback): void {
+  const instance = currentComponentInstance();
+  if (!instance) throw new Error("onRenderTracked() must be called during component setup");
+  (instance.renderTrackedHooks ??= []).push(callback);
+}
+
+/** Registers a debug hook fired when a dependency invalidates the render effect. */
+export function onRenderTriggered(callback: DebuggerEventCallback): void {
+  const instance = currentComponentInstance();
+  if (!instance) throw new Error("onRenderTriggered() must be called during component setup");
+  (instance.renderTriggeredHooks ??= []).push(callback);
+}
+
+export type UseModelOptions<T> = { get?: (value: T) => T; set?: (value: T) => T };
+
+/**
+ * Vue-compatible standalone model helper: a writable ref backed by the
+ * `name` prop. Writes go through the matching `onUpdate:name` listener (or
+ * the component's declared-emits listeners), so `v-model` keeps working.
+ */
+export function useModel<T>(props: Record<string, unknown>, name: string, options: UseModelOptions<T> = {}): Ref<T> {
+  const listenerKey = `onUpdate:${camelize(name)}`;
+  const instance = currentComponentInstance();
+  return customRef<T>((track, trigger) => ({
+    get() {
+      track();
+      const value = props[name] as T;
+      return options.get ? options.get(value) : value;
+    },
+    set(next) {
+      const value = options.set ? options.set(next) : next;
+      const handler = props[listenerKey];
+      if (typeof handler === "function") (handler as (v: T) => void)(value);
+      else emitComponentEvent(instance?.listeners ?? {}, `update:${name}`, [value], (instance?.vnode.type as ComponentOptions | undefined)?.emits);
+      trigger();
+    }
+  }));
 }
 
 function areVNodeChildrenEqual(previous: VNode[], next: VNode[]): boolean {
@@ -3444,7 +3524,7 @@ function mountVNode(vnode: VNode, container: Node, anchor: Node | null = null): 
       instance.vnode.component = nextTree;
       instance.vnode.el = nextTree.el;
       instance.vnode.anchor = nextTree.anchor;
-    }, { scheduler: () => queueJob(componentUpdate, instance.uid, true) }))!;
+    }, { scheduler: () => queueJob(componentUpdate, instance.uid, true), ...componentDebugOptions(instance) }))!;
     instance.update = componentUpdate;
     instance.dispose = () => instance.scope?.stop();
     vnode.instance = instance;
@@ -3980,7 +4060,7 @@ function hydrateObjectComponent(vnode: VNode, node: Node | null, container: Node
     vnode.component = instance.tree;
     vnode.el = instance.tree.el;
     vnode.anchor = instance.tree.anchor;
-  }, { scheduler: () => queueJob(componentUpdate, instance.uid, true) }))!;
+  }, { scheduler: () => queueJob(componentUpdate, instance.uid, true), ...componentDebugOptions(instance) }))!;
   instance.update = componentUpdate;
   instance.dispose = () => instance.scope?.stop();
   vnode.instance = instance;
@@ -4283,7 +4363,7 @@ export function adoptComponentRoot(root: Element, component: Component, props: R
       instance.vnode.component = instance.tree;
       instance.vnode.el = instance.tree.el;
       instance.vnode.anchor = instance.tree.anchor;
-    }, { scheduler: () => queueJob(componentUpdate, instance.uid, true) }))!;
+    }, { scheduler: () => queueJob(componentUpdate, instance.uid, true), ...componentDebugOptions(instance) }))!;
     instance.update = componentUpdate;
     const update = () => {
       if (entry && isObjectComponent(entry.render) && hotUpdateObjectComponent(vnode, entry.render)) return;

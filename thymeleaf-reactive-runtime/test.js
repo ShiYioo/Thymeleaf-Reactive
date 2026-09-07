@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, readonly, shallowReadonly, isReadonly, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, customRef, defineAsyncComponent, capitalize, defineComponent, defineExpose, effectScope, getCurrentInstance, hasInjectionContext, normalizeClass, normalizeStyle, resolveComponent, resolveDirective, toDisplayString, toHandlerKey, useAttrs, useId, useTemplateRef, useSlots, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onEffectCleanup, onErrorCaptured, onScopeDispose, onWatcherCleanup, refreshComponentsFromPage, render, Teleport, inject, isProxy, isRef, isShallow, onMounted, onUnmounted, onUpdated, pauseTracking, enableTracking, resetTracking, provide, proxyRefs, queueJob, queuePostFlushCb, flushOnAppMount, stop, toRaw, toReactive, toReadonly, toRef, toRefs, toValue, traverse, unref, watch, watchEffect, watchPostEffect, watchSyncEffect, withDirectives, withMemo, mergeProps, cloneVNode, isVNode, startBatch, endBatch, getCurrentScope, getCurrentWatcher, SchedulerJobFlags } from './dist/index.js';
+import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, readonly, shallowReadonly, isReadonly, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, customRef, defineAsyncComponent, capitalize, defineComponent, defineExpose, effectScope, onRenderTracked, onRenderTriggered, useModel, getCurrentInstance, hasInjectionContext, normalizeClass, normalizeStyle, resolveComponent, resolveDirective, toDisplayString, toHandlerKey, useAttrs, useId, useTemplateRef, useSlots, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onEffectCleanup, onErrorCaptured, onScopeDispose, onWatcherCleanup, refreshComponentsFromPage, render, Teleport, inject, isProxy, isRef, isShallow, onMounted, onUnmounted, onUpdated, pauseTracking, enableTracking, resetTracking, provide, proxyRefs, queueJob, queuePostFlushCb, flushOnAppMount, stop, toRaw, toReactive, toReadonly, toRef, toRefs, toValue, traverse, unref, watch, watchEffect, watchPostEffect, watchSyncEffect, withDirectives, withMemo, mergeProps, cloneVNode, isVNode, startBatch, endBatch, getCurrentScope, getCurrentWatcher, SchedulerJobFlags } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -4555,6 +4555,82 @@ test('getCurrentInstance and useTemplateRef work inside setup', async () => {
   await nextTick();
   assert.equal(root.querySelector('small').textContent, 't2');
   assert.equal(root.querySelector('output').textContent, 'INPUT');
+});
+
+test('useModel writes through the declared update listener', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Counter = defineComponent('use-model-child', {
+    props: { count: Number },
+    emits: ['update:count'],
+    setup(props) {
+      const model = useModel(props, 'count');
+      return () => h('section', {}, [
+        h('b', {}, String(model.value)),
+        h('button', { onClick: () => { model.value = 7; } }, '+')
+      ]);
+    }
+  });
+  const received = [];
+  const app = createApp(state => h('div', {}, [h(Counter, {
+    count: state.count,
+    'onUpdate:count': value => { received.push(value); state.count = value; }
+  })]), { count: 3 });
+  const state = app.mount(root);
+  assert.equal(root.querySelector('b').textContent, '3');
+  root.querySelector('button').dispatchEvent(new Event('click'));
+  await nextTick();
+  assert.deepEqual(received, [7]);
+  assert.equal(root.querySelector('b').textContent, '7');
+  app.unmount();
+});
+
+test('useModel supports getter and setter transforms', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Child = defineComponent('use-model-transform-child', {
+    props: { label: String },
+    emits: ['update:label'],
+    setup(props) {
+      const shout = useModel(props, 'label', {
+        get: value => `${value}!`,
+        set: value => String(value).toUpperCase()
+      });
+      return () => h('section', {}, [h('b', {}, shout.value), h('button', { onClick: () => { shout.value = 'hey'; } }, 'go')]);
+    }
+  });
+  const seen = [];
+  const app = createApp(() => h('div', {}, [h(Child, { label: 'hi', 'onUpdate:label': v => seen.push(v) })]));
+  app.mount(root);
+  assert.equal(root.querySelector('b').textContent, 'hi!');
+  root.querySelector('button').dispatchEvent(new Event('click'));
+  assert.deepEqual(seen, ['HEY']);
+  app.unmount();
+});
+
+test('onRenderTracked and onRenderTriggered report render dependencies', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const tracked = [];
+  const triggered = [];
+  const Child = {
+    setup() {
+      onRenderTracked(event => tracked.push(`${String(event.key)}:${event.type}`));
+      onRenderTriggered(event => triggered.push(`${String(event.key)}:${event.type}`));
+      return () => h('p', {}, String(props_source.value));
+    }
+  };
+  const props_source = ref('first');
+  const app = createApp(() => h(Child));
+  app.mount(root);
+  assert.equal(root.querySelector('p').textContent, 'first');
+  assert.ok(tracked.some(entry => entry.startsWith('value:track')), 'render tracked the ref');
+  props_source.value = 'second';
+  await nextTick();
+  assert.equal(root.querySelector('p').textContent, 'second');
+  assert.ok(triggered.some(entry => entry.startsWith('value:trigger')), 'render was triggered by the ref');
+  assert.throws(() => onRenderTracked(() => {}), /during component setup/);
+  app.unmount();
 });
 
 test('SFC injects style blocks and keeps recompiles idempotent', () => {
