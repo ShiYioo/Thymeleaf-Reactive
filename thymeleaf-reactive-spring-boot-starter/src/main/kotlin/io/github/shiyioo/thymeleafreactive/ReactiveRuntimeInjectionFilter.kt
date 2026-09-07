@@ -11,6 +11,9 @@ import java.nio.charset.Charset
 class ReactiveRuntimeInjectionFilter(
     private val properties: ReactiveProperties
 ) : OncePerRequestFilter() {
+    private fun importMap(): String =
+        "<script type=\"importmap\">{\"imports\":{\"jsep\":\"/thymeleaf-reactive/jsep.js\"}}</script>"
+
     private fun script(): String = "<script type=\"module\" src=\"${properties.runtimePath}?t=${System.currentTimeMillis()}\"></script>"
 
     override fun doFilterInternal(
@@ -37,7 +40,9 @@ class ReactiveRuntimeInjectionFilter(
                 if (!html.contains(properties.runtimePath)) {
                     val index = html.lastIndexOf("</body>", ignoreCase = true)
                     if (index >= 0) {
-                        val injected = html.substring(0, index) + script() + html.substring(index)
+                        // The runtime imports "jsep" as a bare specifier, which browsers
+                        // only resolve through an import map placed before any module script.
+                        val injected = html.substring(0, index) + importMap() + script() + html.substring(index)
                         wrapper.resetBuffer()
                         wrapper.writer.write(injected)
                     }

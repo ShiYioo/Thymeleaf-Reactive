@@ -1,0 +1,11 @@
+{
+  "name": "@thymeleaf-reactive/e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test ./e2e.test.mjs"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^23.11.1"
+  }
+}

@@ -23,6 +23,20 @@ Build with the checked-in Gradle Wrapper:
 ./gradlew.bat test
 ```
 
+## End-to-end HMR regression
+
+`e2e/` boots the counter example, drives it with a real Chrome/Edge via
+`puppeteer-core`, edits `components/Counter.vue` on disk, and asserts the page
+hot-swaps the component over the real SSE channel without a reload while
+preserving interactive state:
+
+```powershell
+./gradlew.bat :examples:counter:bootJar   # once
+cd e2e
+npm install
+npm test                                  # set E2E_BROWSER / E2E_JAVA / E2E_PORT to override discovery
+```
+
 ## Example
 
 Run the counter application with JDK 25:
