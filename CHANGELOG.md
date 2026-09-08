@@ -60,6 +60,10 @@ adheres to [Semantic Versioning](https://semver.org/).
   document renderer is unaffected.
 - `app.config.errorHandler`: app-level error handling consulted after the
   `onErrorCaptured` chain; returning `false` suppresses default logging.
+- `createHydrationRenderer(host)`: hydration-host parity for the custom
+  renderer entry (scoped `hydrateRender` + render/patch/unmount).
+- `useCssModule` now also reads options-style `__cssModules` mappings from
+  plain object component definitions.
 - **Fixed (P1)**: template ref writes are deferred to the post-flush queue
   with stable per-(scope, name) SFC ref handlers — a ref assigned during the
   initial render now schedules exactly one extra render (Vue semantics), and

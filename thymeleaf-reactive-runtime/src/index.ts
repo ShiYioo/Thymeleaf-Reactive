@@ -41,6 +41,8 @@ export type ComponentOptions = {
   __sfcStyles?: HTMLStyleElement[];
   /** Scoped-CSS attribute of this SFC (`data-v-*`); used to stamp slotted content. */
   __sfcScopeId?: string;
+  /** Options-style CSS module mappings, readable through useCssModule(). */
+  __cssModules?: Record<string, Record<string, string>>;
   setup?: (props: Record<string, unknown>, context: ComponentContext) => ComponentRender | void;
   render?: ComponentRender;
   hmrRender?: (scope: Record<string, unknown>, children: VNode[]) => VNode;
@@ -1620,9 +1622,12 @@ export function useTemplateRef<T = unknown>(key: string): Ref<T | null> {
  */
 export function useCssModule(name = "$style"): Record<string, string> {
   const instance = currentComponentInstance();
-  const classes = instance?.cssModules?.get(name);
-  if (!classes) throw new Error(`useCssModule() requires a <style module${name === "$style" ? "" : `="${name}"`}> block in this component`);
-  return classes;
+  const fromSfc = instance?.cssModules?.get(name);
+  if (fromSfc) return fromSfc;
+  const definition = instance?.vnode.type as ComponentOptions | undefined;
+  const fromDefinition = definition?.__cssModules?.[name];
+  if (fromDefinition) return fromDefinition;
+  throw new Error(`useCssModule() requires a <style module${name === "$style" ? "" : `="${name}"`}> block or an __cssModules option in this component`);
 }
 
 /** Vue-compatible string casing helpers, also used by the SFC compiler. */
@@ -3336,22 +3341,47 @@ let activeHost: RendererHost = domHost;
  * Useful for rendering into other documents (iframes, popups) or stub
  * DOM-like targets. Node insertion/removal stays on the container nodes.
  */
+function hostRunner(host: Partial<RendererHost>): { run: <T>(fn: () => T) => T } {
+  const merged: RendererHost = { ...domHost, ...host };
+  return {
+    run: <T,>(fn: () => T): T => {
+      const previous = activeHost;
+      activeHost = merged;
+      try { return fn(); }
+      finally { activeHost = previous; }
+    }
+  };
+}
+
 export function createRenderer(host: Partial<RendererHost> = {}): {
   render: (vnode: VNode | null, container: Element) => VNode | null;
   patch: (previous: VNode | undefined, next: VNode, container: Element) => VNode | null | undefined;
   unmount: (vnode: VNode, container: Element) => void;
 } {
-  const merged: RendererHost = { ...domHost, ...host };
-  const run = <T>(fn: () => T): T => {
-    const previous = activeHost;
-    activeHost = merged;
-    try { return fn(); }
-    finally { activeHost = previous; }
-  };
+  const { run } = hostRunner(host);
   return {
     render: (vnode, container) => run(() => render(vnode, container)),
     patch: (previous, next, container) => run(() => patch(previous, next, container)),
     unmount: (vnode, container) => run(() => unmount(vnode, container))
+  };
+}
+
+/**
+ * Vue-compatible hydration renderer: same host-swapped render API as
+ * createRenderer, plus `hydrateRender` for adopting existing server markup
+ * with node creation routed through the host.
+ */
+export function createHydrationRenderer(host: Partial<RendererHost> = {}): {
+  render: (vnode: VNode | null, container: Element) => VNode | null;
+  patch: (previous: VNode | undefined, next: VNode, container: Element) => VNode | null | undefined;
+  unmount: (vnode: VNode, container: Element) => void;
+  hydrateRender: (vnode: VNode, container: Node) => VNode;
+} {
+  const base = createRenderer(host);
+  const { run } = hostRunner(host);
+  return {
+    ...base,
+    hydrateRender: (vnode, container) => run(() => hydrateRender(vnode, container))
   };
 }
 

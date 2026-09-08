@@ -73,16 +73,17 @@ scheduler closures free of the effect binding.
 - **`app.onUnmount(callback)`** and **`app.config.errorHandler`** (consulted
   after the `onErrorCaptured` chain; `return false` suppresses default
   logging).
+- **`createHydrationRenderer(host)`**: hydration-host parity — same host API
+  as `createRenderer` plus a scoped `hydrateRender` entry.
+- **`useCssModule` in object components**: via the options-style
+  `__cssModules` mapping on the component definition (SFC `$style`/name
+  registries unchanged).
 
 ### P2 — remaining
 
-1. **`createHydrationRenderer`**: hydration-host parity for the custom
-   renderer entry.
-2. **`<style module>` CSS interop**: class hashes are not Vue-compatible
+1. **`<style module>` CSS interop**: class hashes are not Vue-compatible
    strings (different hash source); fine internally, matters only for sharing
    compiled CSS with Vue builds.
-3. **`useCssModule` in plain object components**: object components would
-   need module registration at creation (SFC usage is fully supported).
 
 ### P3 — accepted subset boundaries
 

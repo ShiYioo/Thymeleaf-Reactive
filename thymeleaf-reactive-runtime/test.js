@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, readonly, shallowReadonly, isReadonly, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, customRef, defineAsyncComponent, capitalize, createRenderer, defineComponent, defineExpose, effectScope, onRenderTracked, onRenderTriggered, useCssModule, useModel, getCurrentInstance, hasInjectionContext, normalizeClass, normalizeStyle, resolveComponent, resolveDirective, toDisplayString, toHandlerKey, useAttrs, useId, useTemplateRef, useSlots, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onEffectCleanup, onErrorCaptured, onScopeDispose, onWatcherCleanup, refreshComponentsFromPage, render, Teleport, inject, isProxy, isRef, isShallow, onMounted, onUnmounted, onUpdated, pauseTracking, enableTracking, resetTracking, provide, proxyRefs, queueJob, queuePostFlushCb, flushOnAppMount, stop, toRaw, toReactive, toReadonly, toRef, toRefs, toValue, traverse, unref, watch, watchEffect, watchPostEffect, watchSyncEffect, withDirectives, withMemo, mergeProps, cloneVNode, isVNode, startBatch, endBatch, getCurrentScope, getCurrentWatcher, SchedulerJobFlags } from './dist/index.js';
+import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, readonly, shallowReadonly, isReadonly, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, customRef, defineAsyncComponent, capitalize, createHydrationRenderer, createRenderer, defineComponent, defineExpose, effectScope, onRenderTracked, onRenderTriggered, useCssModule, useModel, getCurrentInstance, hasInjectionContext, normalizeClass, normalizeStyle, resolveComponent, resolveDirective, toDisplayString, toHandlerKey, useAttrs, useId, useTemplateRef, useSlots, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onEffectCleanup, onErrorCaptured, onScopeDispose, onWatcherCleanup, refreshComponentsFromPage, render, Teleport, inject, isProxy, isRef, isShallow, onMounted, onUnmounted, onUpdated, pauseTracking, enableTracking, resetTracking, provide, proxyRefs, queueJob, queuePostFlushCb, flushOnAppMount, stop, toRaw, toReactive, toReadonly, toRef, toRefs, toValue, traverse, unref, watch, watchEffect, watchPostEffect, watchSyncEffect, withDirectives, withMemo, mergeProps, cloneVNode, isVNode, startBatch, endBatch, getCurrentScope, getCurrentWatcher, SchedulerJobFlags } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -4765,6 +4765,42 @@ test('app.config.errorHandler captures component errors and can suppress propaga
   } finally {
     console.error = previousError;
   }
+});
+
+test('useCssModule reads __cssModules from plain object components', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Card = {
+    __cssModules: { $style: { red: 'red_hash' } },
+    setup() {
+      const cls = useCssModule();
+      return () => h('p', { class: cls.red }, 'module text');
+    }
+  };
+  createApp(() => h(Card)).mount(root);
+  assert.equal(root.querySelector('p').className, 'red_hash');
+});
+
+test('createHydrationRenderer adopts existing markup through the host and patches afterwards', async () => {
+  const document = installDom();
+  const otherWindow = new Window();
+  const otherDocument = otherWindow.document;
+  const custom = createHydrationRenderer({
+    createElement: tag => otherDocument.createElement(tag),
+    createTextNode: text => otherDocument.createTextNode(text),
+    createComment: text => otherDocument.createComment(text)
+  });
+  const container = otherDocument.createElement('main');
+  container.innerHTML = '<p class="ssr">server</p>';
+  const state = ref('server');
+  custom.hydrateRender(h('p', { class: 'ssr' }, 'server'), container);
+  assert.equal(container.querySelector('p').textContent, 'server');
+  assert.equal(container.querySelector('p').ownerDocument, otherDocument);
+  state.value = 'client';
+  custom.render(h('p', { class: 'ssr' }, 'client'), container);
+  const paragraph = container.querySelector('p');
+  assert.equal(paragraph.textContent, 'client', 'post-hydration patch updates through the host');
+  assert.equal(paragraph.ownerDocument, otherDocument);
 });
 
 test('SFC injects style blocks and keeps recompiles idempotent', () => {
