@@ -55,6 +55,15 @@ adheres to [Semantic Versioning](https://semver.org/).
   `onTrack`/`onTrigger` effect options and `DebuggerEvent` payloads.
 - `/tabs` e2e now covers the `Transition appear` object form in a real
   browser (hook override semantics asserted).
+- **Fixed (P1)**: template ref writes are deferred to the post-flush queue
+  with stable per-(scope, name) SFC ref handlers — a ref assigned during the
+  initial render now schedules exactly one extra render (Vue semantics), and
+  patch no longer re-fires ref writes on every re-render.
+- Scoped CSS `:slotted(...)`: passed slot content is stamped with the
+  `<scopeId>-s` attribute and `:slotted(.x)` compiles to `.x[<scopeId>-s]`.
+- `useCssModule(name)` inside script setup, backed by per-instance module
+  registries.
+- `app.onUnmount(callback)`: cleanup callbacks executed on `app.unmount()`.
 
 ### Fixed
 

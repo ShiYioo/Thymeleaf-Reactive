@@ -39,6 +39,8 @@ export type ComponentOptions = {
   inheritAttrs?: boolean;
   /** Style elements injected for this SFC; replaced when HMR swaps the definition. */
   __sfcStyles?: HTMLStyleElement[];
+  /** Scoped-CSS attribute of this SFC (`data-v-*`); used to stamp slotted content. */
+  __sfcScopeId?: string;
   setup?: (props: Record<string, unknown>, context: ComponentContext) => ComponentRender | void;
   render?: ComponentRender;
   hmrRender?: (scope: Record<string, unknown>, children: VNode[]) => VNode;
@@ -1158,6 +1160,7 @@ type ComponentInstance = {
   templateRefs?: Map<string, Ref<unknown>>;
   renderTrackedHooks?: DebuggerEventCallback[];
   renderTriggeredHooks?: DebuggerEventCallback[];
+  cssModules?: Map<string, Record<string, string>>;
 };
 
 /** Fan-out helper for per-instance render debug hooks. */
@@ -1598,6 +1601,17 @@ export function useTemplateRef<T = unknown>(key: string): Ref<T | null> {
     refs.set(key, target);
   }
   return target;
+}
+
+/**
+ * Vue-compatible: returns the class-name mapping of a `<style module>` block
+ * (default injection name `$style`).
+ */
+export function useCssModule(name = "$style"): Record<string, string> {
+  const instance = currentComponentInstance();
+  const classes = instance?.cssModules?.get(name);
+  if (!classes) throw new Error(`useCssModule() requires a <style module${name === "$style" ? "" : `="${name}"`}> block in this component`);
+  return classes;
 }
 
 /** Vue-compatible string casing helpers, also used by the SFC compiler. */
@@ -2188,11 +2202,23 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
       return previous.vnode;
     }
   }
+  /** Vue slotted scoping: passed slot content elements carry `<scopeId>-s`. */
+  function stampSlottedScope(vnode: VNode, attribute: string): VNode {
+    if (typeof vnode.type !== "string") return vnode;
+    return {
+      ...vnode,
+      props: { ...vnode.props, [attribute]: "" },
+      children: vnode.children.map(child => stampSlottedScope(child, attribute))
+    };
+  }
+
   if (element.tagName.toLowerCase() === "slot") {
     const name = sfcReceivingSlotName(element, scope);
     const slotProps = sfcSlotProps(element, scope);
     const assigned = slots.flatMap(child => (child.slot ?? "default") !== name ? [] : child.slotRender ? child.slotRender(slotProps) : [child]);
-    return h(Fragment, {}, assigned.length ? assigned : renderSfcChildren(Array.from(element.childNodes), scope, slots, onceCache, memoCache));
+    const slottedAttribute = typeof scope.__sfcScopeId === "string" ? scope.__sfcScopeId : undefined;
+    const stamped = slottedAttribute ? assigned.map(child => stampSlottedScope(child, slottedAttribute)) : assigned;
+    return h(Fragment, {}, stamped.length ? stamped : renderSfcChildren(Array.from(element.childNodes), scope, slots, onceCache, memoCache));
   }
   const loop = element.getAttribute("v-for");
   if (loop) {
@@ -2378,7 +2404,7 @@ function renderSfcNode(node: Node, scope: Record<string, unknown>, slots: VNode[
   return vnode;
 }
 
-type SfcSetupBinding = { name: string; kind: "ref" | "reactive" | "computed" | "props" | "emit" | "model" | "slots" | "attrs" | "templateRef" | "instance"; expression: string };
+type SfcSetupBinding = { name: string; kind: "ref" | "reactive" | "computed" | "props" | "emit" | "model" | "slots" | "attrs" | "templateRef" | "instance" | "cssModule"; expression: string };
 type SfcSetupMethod = { name: string; params: string[]; body: string };
 
 function splitSfcStatements(source: string): string[] {
@@ -2612,6 +2638,11 @@ function parseSfcSetup(source: string): { bindings: SfcSetupBinding[]; methods: 
       bindings.push({ name: instanceHelper[1], kind: "instance", expression: "" });
       return;
     }
+    const cssModuleHelper = statement.match(/^(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*useCssModule\(\s*(?:(['"])([^'"]+)\2)?\s*\)$/);
+    if (cssModuleHelper) {
+      bindings.push({ name: cssModuleHelper[1], kind: "cssModule", expression: cssModuleHelper[3] ?? "$style" });
+      return;
+    }
     const templateRef = statement.match(/^(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*useTemplateRef\(\s*(['"])([^'"]+)\2\s*\)$/);
     if (templateRef) {
       bindings.push({ name: templateRef[1], kind: "templateRef", expression: templateRef[3] });
@@ -2750,13 +2781,20 @@ function sfcScopeId(source: string): string {
 }
 
 /** Appends the scope attribute to the last compound of each simple selector. */
-function scopeSfcSelector(part: string, attribute: string): string {
+function scopeSfcSelector(part: string, attribute: string, slottedAttribute?: string): string {
   if (!part) return part;
   const global = part.match(/^(.*?)\s*:global\(\s*([^)]*?)\s*\)/);
   if (global) {
     const before = global[1].trim();
     const inner = global[2].trim();
     return `${before ? before + " " : ""}${inner}`;
+  }
+  const slotted = part.match(/^(.*?)\s*:slotted\(\s*([^)]*?)\s*\)/);
+  if (slotted) {
+    const base = slotted[1].trim();
+    const inner = slotted[2].trim();
+    const head = base ? base + attribute : "";
+    return inner ? `${head}${head ? " " : ""}${inner}${slottedAttribute}` : head;
   }
   const deep = part.match(/^(.*?)\s*:deep\(\s*([^)]*?)\s*\)/);
   if (deep) {
@@ -2793,14 +2831,14 @@ function moduleSfcCss(css: string, id: string): { css: string; classes: Record<s
 }
 
 /** Vue scoped-CSS subset: flat rules plus @media/@supports bodies; @keyframes pass through. */
-function scopeSfcCss(css: string, attribute: string): string {
+function scopeSfcCss(css: string, attribute: string, slottedAttribute?: string): string {
   return css.replace(/([^{}]+)\{([^{}]*)\}/g, (_match, selectorList: string, body: string) => {
     const selector = selectorList.trim();
     if (selector.startsWith("@")) {
-      if (/^@(?:media|supports)\b/.test(selector)) return `${selector}{${scopeSfcCss(body, attribute)}}`;
+      if (/^@(?:media|supports)\b/.test(selector)) return `${selector}{${scopeSfcCss(body, attribute, slottedAttribute)}}`;
       return _match;
     }
-    return `${selector.split(",").map(part => scopeSfcSelector(part.trim(), attribute)).join(", ")}{${body}}`;
+    return `${selector.split(",").map(part => scopeSfcSelector(part.trim(), attribute, slottedAttribute ?? `${attribute}-s`)).join(", ")}{${body}}`;
   });
 }
 
@@ -2871,7 +2909,7 @@ export function compileSfcComponent(source: string): Component {
         const result = moduleSfcCss(block.css, id);
         cssParts.push(result.css);
         moduleMap = { ...(moduleMap ?? {}), [block.module]: { ...(moduleMap?.[block.module] ?? {}), ...result.classes } };
-      } else if (block.scoped) cssParts.push(scopeSfcCss(block.css, `[${scopedAttribute}]`));
+      } else if (block.scoped) cssParts.push(scopeSfcCss(block.css, `[${scopedAttribute}]`, `[${scopedAttribute}-s]`));
       else cssParts.push(block.css);
     }
     const styleKey = scopedAttribute || styles.some(block => block.module !== undefined) ? sfcScopeId(source) : `${sfcScopeId(source)}-global`;
@@ -2883,10 +2921,11 @@ export function compileSfcComponent(source: string): Component {
     const render = (props: Record<string, unknown>, children: VNode[]) => {
       const scope = new Proxy(props as Record<string, unknown>, {
         get(target, key) {
+          if (scopedAttribute && key === "__sfcScopeId") return `${scopedAttribute}-s`;
           if (moduleMap && typeof key === "string" && key in moduleMap) return moduleMap[key];
           return sfcScopeProperty(target, key);
         },
-        has(target, key) { return Boolean(moduleMap && typeof key === "string" && key in moduleMap) || (typeof key === "string" ? key in target || Object.keys(target).some(candidate => candidate.toLowerCase() === key.toLowerCase()) : key in target); }
+        has(target, key) { return Boolean(scopedAttribute && key === "__sfcScopeId") || Boolean(moduleMap && typeof key === "string" && key in moduleMap) || (typeof key === "string" ? key in target || Object.keys(target).some(candidate => candidate.toLowerCase() === key.toLowerCase()) : key in target); }
       });
       const nodes = renderSfcChildren(roots, scope, children);
       return nodes.length === 1 ? nodes[0] : h(Fragment, {}, nodes);
@@ -2906,6 +2945,7 @@ export function compileSfcComponent(source: string): Component {
     emits: setup.emits,
     inheritAttrs: setup.options?.inheritAttrs,
     __sfcStyles: styleElements,
+    __sfcScopeId: scopedAttribute,
     setup(props, context) {
       const local = new Proxy(Object.create(null) as Record<string, unknown>, {
         get(target, key, receiver) {
@@ -2913,6 +2953,7 @@ export function compileSfcComponent(source: string): Component {
         },
         has(target, key) { return key in target || (typeof key === "string" && (key in props || Object.keys(props).some(candidate => candidate.toLowerCase() === key.toLowerCase()))); }
       });
+      const setupInstance = currentComponentInstance();
       setup.bindings.forEach(binding => {
         if (binding.kind === "ref") local[binding.name] = ref(readPath(local, binding.expression));
         else if (binding.kind === "reactive") local[binding.name] = reactive(readPath(local, binding.expression) ?? {});
@@ -2921,6 +2962,10 @@ export function compileSfcComponent(source: string): Component {
         else if (binding.kind === "slots") local[binding.name] = useSlots();
         else if (binding.kind === "templateRef") local[binding.name] = useTemplateRef(binding.expression);
         else if (binding.kind === "instance") local[binding.name] = getCurrentInstance();
+        else if (binding.kind === "cssModule") {
+          const classes = setupInstance?.cssModules?.get(binding.expression) ?? {};
+          local[binding.name] = classes;
+        }
         else if (binding.kind === "attrs") local[binding.name] = useAttrs();
         else if (binding.kind === "model") local[binding.name] = customRef((track, trigger) => ({
           get: () => { track(); return props[binding.expression]; },
@@ -2938,7 +2983,15 @@ export function compileSfcComponent(source: string): Component {
         defineExpose(Object.fromEntries(Object.entries(setup.exposes).map(([key, expression]) =>
           [key, readPath(local, expression)])));
       }
-      if (moduleMap) Object.entries(moduleMap).forEach(([name, classes]) => { local[name] = classes; });
+      if (scopedAttribute) local.__sfcScopeId = `${scopedAttribute}-s`;
+      if (moduleMap) {
+        Object.entries(moduleMap).forEach(([name, classes]) => { local[name] = classes; });
+        const moduleInstance = currentComponentInstance();
+        if (moduleInstance) {
+          moduleInstance.cssModules ??= new Map();
+          Object.entries(moduleMap).forEach(([name, classes]) => moduleInstance.cssModules!.set(name, classes));
+        }
+      }
       const scope = proxyRefs(local);
       sfcRefContexts.set(scope, { owner: local, arrays: new Map(), collect: false, instance: currentComponentInstance() });
       const onceCache: SfcOnceCache = new Map();
@@ -4210,6 +4263,7 @@ export function createApp(render: (state: any) => VNode, state: object = {}) {
   const reactiveState = reactive(state);
   const context: AppContext = { components: {}, directives: {}, provides: {} };
   const installedPlugins = new Set<unknown>();
+  const onUnmountCallbacks: Array<() => void> = [];
   let currentRender = render;
   let rerender: Effect | undefined;
   let mountedRoot: Element | undefined;
@@ -4235,6 +4289,12 @@ export function createApp(render: (state: any) => VNode, state: object = {}) {
     provide(key: PropertyKey, value: unknown): unknown {
       if (key in context.provides) console.warn(`[thymeleaf-reactive] app already provides "${String(key)}"; it will be overwritten`);
       context.provides[key] = value;
+      return app;
+    },
+    /** Vue-compatible: registers a cleanup callback executed on app.unmount(). */
+    onUnmount(callback: () => void): unknown {
+      if (typeof callback !== "function") throw new Error("app.onUnmount() requires a function");
+      onUnmountCallbacks.push(callback);
       return app;
     },
     /** Vue-compatible plugin installation: `{ install(app, ...options) }` or a function, applied once. */
@@ -4282,6 +4342,10 @@ export function createApp(render: (state: any) => VNode, state: object = {}) {
       rerender = undefined;
       mountedRoot = undefined;
       tree = undefined;
+      onUnmountCallbacks.splice(0).forEach(callback => {
+        try { callback(); }
+        catch (error) { console.error("[thymeleaf-reactive] app onUnmount callback failed", error); }
+      });
     }
   };
   return app;

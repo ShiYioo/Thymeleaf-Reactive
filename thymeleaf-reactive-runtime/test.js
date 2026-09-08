@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, readonly, shallowReadonly, isReadonly, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, customRef, defineAsyncComponent, capitalize, defineComponent, defineExpose, effectScope, onRenderTracked, onRenderTriggered, useModel, getCurrentInstance, hasInjectionContext, normalizeClass, normalizeStyle, resolveComponent, resolveDirective, toDisplayString, toHandlerKey, useAttrs, useId, useTemplateRef, useSlots, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onEffectCleanup, onErrorCaptured, onScopeDispose, onWatcherCleanup, refreshComponentsFromPage, render, Teleport, inject, isProxy, isRef, isShallow, onMounted, onUnmounted, onUpdated, pauseTracking, enableTracking, resetTracking, provide, proxyRefs, queueJob, queuePostFlushCb, flushOnAppMount, stop, toRaw, toReactive, toReadonly, toRef, toRefs, toValue, traverse, unref, watch, watchEffect, watchPostEffect, watchSyncEffect, withDirectives, withMemo, mergeProps, cloneVNode, isVNode, startBatch, endBatch, getCurrentScope, getCurrentWatcher, SchedulerJobFlags } from './dist/index.js';
+import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, readonly, shallowReadonly, isReadonly, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, customRef, defineAsyncComponent, capitalize, defineComponent, defineExpose, effectScope, onRenderTracked, onRenderTriggered, useCssModule, useModel, getCurrentInstance, hasInjectionContext, normalizeClass, normalizeStyle, resolveComponent, resolveDirective, toDisplayString, toHandlerKey, useAttrs, useId, useTemplateRef, useSlots, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onEffectCleanup, onErrorCaptured, onScopeDispose, onWatcherCleanup, refreshComponentsFromPage, render, Teleport, inject, isProxy, isRef, isShallow, onMounted, onUnmounted, onUpdated, pauseTracking, enableTracking, resetTracking, provide, proxyRefs, queueJob, queuePostFlushCb, flushOnAppMount, stop, toRaw, toReactive, toReadonly, toRef, toRefs, toValue, traverse, unref, watch, watchEffect, watchPostEffect, watchSyncEffect, withDirectives, withMemo, mergeProps, cloneVNode, isVNode, startBatch, endBatch, getCurrentScope, getCurrentWatcher, SchedulerJobFlags } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -4649,6 +4649,73 @@ test('a template ref assigned during mount is readable after the first tick', as
   createApp(() => h(Child)).mount(root);
   await nextTick();
   assert.equal(root.querySelector('output').textContent, 'INPUT', 'ref assignment during mount should schedule one extra render');
+});
+
+test(':slotted stamps passed slot content for scoped targeting', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Card = compileSfcComponent(`
+    <template>
+      <article>
+        <slot><i class="fallback">fallback</i></slot>
+      </article>
+    </template>
+    <style scoped>
+      :slotted(.entry) { color: red; }
+      article { border: 1px solid; }
+    </style>
+  `);
+  const render = compileSfcComponent('<template><Card><p class="entry">Passed</p></Card></template>');
+  const app = createApp(render, { components: { Card } });
+  app.mount(root);
+  const style = document.head.querySelector('style[data-tr-sfc]').textContent;
+  assert.match(style, /\.entry\[data-v-[0-9a-z]+-s\] ?\{ color: red; \}/);
+  const slotted = root.querySelector('p.entry');
+  const slottedAttrs = Array.from(slotted.attributes).map(a => a.name).filter(n => n.startsWith('data-v-'));
+  assert.equal(slottedAttrs.length, 1, 'slotted content carries the -s scope variant');
+  assert.match(slottedAttrs[0], /-s$/);
+  app.unmount();
+});
+
+test('useCssModule exposes style module mappings inside script setup', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const Card = compileSfcComponent(`
+    <template><p :class="classes.red">Module</p></template>
+    <style module="classes">
+    .red { color: red; }
+    </style>
+    <script setup>
+      const classes = useCssModule('classes');
+    </script>
+  `);
+  createApp(() => h(Card)).mount(root);
+  const paragraph = root.querySelector('p');
+  assert.match(paragraph.className, /^red_[A-Za-z0-9]+$/);
+  const style = document.head.querySelector('style[data-tr-sfc]').textContent;
+  assert.match(style, new RegExp('\.red_[A-Za-z0-9]+ \{ color: red; \}'));
+  assert.throws(() => {
+    const Plain = compileSfcComponent('<template><p>{{ cls && "x" }}</p></template>');
+    void Plain;
+    createApp(() => {
+      const cls = useCssModule();
+      return h('p', {}, Object.keys(cls).join(','));
+    }).mount(root);
+  }, /style module/);
+});
+
+test('app.onUnmount registers cleanup callbacks executed on unmount', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const cleanups = [];
+  const app = createApp(() => h('p', {}, 'demo'), {});
+  assert.equal(app.onUnmount(() => cleanups.push('first')), app);
+  app.onUnmount(() => cleanups.push('second'));
+  app.mount(root);
+  assert.deepEqual(cleanups, []);
+  app.unmount();
+  assert.deepEqual(cleanups, ['first', 'second']);
+  assert.throws(() => createApp(() => h('p')).onUnmount('nope'), /requires a function/);
 });
 
 test('SFC injects style blocks and keeps recompiles idempotent', () => {
