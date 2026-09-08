@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, readonly, shallowReadonly, isReadonly, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, customRef, defineAsyncComponent, capitalize, defineComponent, defineExpose, effectScope, onRenderTracked, onRenderTriggered, useCssModule, useModel, getCurrentInstance, hasInjectionContext, normalizeClass, normalizeStyle, resolveComponent, resolveDirective, toDisplayString, toHandlerKey, useAttrs, useId, useTemplateRef, useSlots, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onEffectCleanup, onErrorCaptured, onScopeDispose, onWatcherCleanup, refreshComponentsFromPage, render, Teleport, inject, isProxy, isRef, isShallow, onMounted, onUnmounted, onUpdated, pauseTracking, enableTracking, resetTracking, provide, proxyRefs, queueJob, queuePostFlushCb, flushOnAppMount, stop, toRaw, toReactive, toReadonly, toRef, toRefs, toValue, traverse, unref, watch, watchEffect, watchPostEffect, watchSyncEffect, withDirectives, withMemo, mergeProps, cloneVNode, isVNode, startBatch, endBatch, getCurrentScope, getCurrentWatcher, SchedulerJobFlags } from './dist/index.js';
+import { adoptComponentRoot, reactive, shallowReactive, isReactive, markRaw, readonly, shallowReadonly, isReadonly, ref, shallowRef, triggerRef, effect, computed, compileSfcComponent, connectComponentHmr, createApp, customRef, defineAsyncComponent, capitalize, createRenderer, defineComponent, defineExpose, effectScope, onRenderTracked, onRenderTriggered, useCssModule, useModel, getCurrentInstance, hasInjectionContext, normalizeClass, normalizeStyle, resolveComponent, resolveDirective, toDisplayString, toHandlerKey, useAttrs, useId, useTemplateRef, useSlots, Fragment, KeepAlive, Suspense, Transition, TransitionGroup, h, hotUpdate, hydrate, hydrateRender, isMemoSame, nextTick, onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onDeactivated, onEffectCleanup, onErrorCaptured, onScopeDispose, onWatcherCleanup, refreshComponentsFromPage, render, Teleport, inject, isProxy, isRef, isShallow, onMounted, onUnmounted, onUpdated, pauseTracking, enableTracking, resetTracking, provide, proxyRefs, queueJob, queuePostFlushCb, flushOnAppMount, stop, toRaw, toReactive, toReadonly, toRef, toRefs, toValue, traverse, unref, watch, watchEffect, watchPostEffect, watchSyncEffect, withDirectives, withMemo, mergeProps, cloneVNode, isVNode, startBatch, endBatch, getCurrentScope, getCurrentWatcher, SchedulerJobFlags } from './dist/index.js';
 
 function installDom() {
   const window = new Window();
@@ -4716,6 +4716,55 @@ test('app.onUnmount registers cleanup callbacks executed on unmount', () => {
   app.unmount();
   assert.deepEqual(cleanups, ['first', 'second']);
   assert.throws(() => createApp(() => h('p')).onUnmount('nope'), /requires a function/);
+});
+
+test('createRenderer routes node creation through a custom host', () => {
+  const document = installDom();
+  const otherWindow = new Window();
+  const otherDocument = otherWindow.document;
+  const custom = createRenderer({
+    createElement: tag => otherDocument.createElement(tag),
+    createTextNode: text => otherDocument.createTextNode(text),
+    createComment: text => otherDocument.createComment(text)
+  });
+  const container = otherDocument.createElement('main');
+  custom.render(h('p', { class: 'hosted' }, 'custom host'), container);
+  const paragraph = container.querySelector('p.hosted');
+  assert.equal(paragraph.textContent, 'custom host');
+  assert.equal(paragraph.ownerDocument, otherDocument, 'created in the host document');
+  paragraph.dataset.marker = 'yes';
+  custom.render(h('p', { class: 'hosted' }, 'updated'), container);
+  assert.equal(paragraph.textContent, 'updated');
+  assert.equal(container.querySelector('p'), paragraph, 'patch updates the same element in place');
+
+  // The default document renderer keeps its own tree untouched.
+  const root = document.createElement('main');
+  render(h('b', {}, 'default doc'), root);
+  assert.equal(root.querySelector('b').textContent, 'default doc');
+  custom.unmount(h('p', { class: 'hosted' }, 'custom host'), container);
+});
+
+test('app.config.errorHandler captures component errors and can suppress propagation', () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  const seen = [];
+  const previousError = console.error;
+  const consoleCalls = [];
+  console.error = (...args) => consoleCalls.push(args.join(' '));
+  try {
+    const Boom = { setup() { throw new Error('boom'); } };
+    const app = createApp(() => h('section', {}, [h(Boom)]), {});
+    app.config.errorHandler = (error, instance, info) => {
+      seen.push([String(error.message), info, Boolean(instance)]);
+      return false;
+    };
+    app.mount(root);
+    assert.deepEqual(seen.map(entry => entry[0]), ['boom']);
+    assert.equal(consoleCalls.length, 0, 'suppressed errors stay out of the console');
+    app.unmount();
+  } finally {
+    console.error = previousError;
+  }
 });
 
 test('SFC injects style blocks and keeps recompiles idempotent', () => {

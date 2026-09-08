@@ -1120,10 +1120,13 @@ export const KeepAlive = Symbol("keep-alive");
 export const Suspense = Symbol("suspense");
 export const Transition = Symbol("transition");
 export const TransitionGroup = Symbol("transition-group");
+export type AppErrorHandler = (error: unknown, instance: ComponentInstance | null, info: string) => boolean | void;
+
 type AppContext = {
   components: Record<string, Component>;
   directives: Record<string, Directive>;
   provides: Record<PropertyKey, unknown>;
+  config: { errorHandler?: AppErrorHandler };
 };
 let currentAppContext: AppContext | undefined;
 
@@ -1335,6 +1338,14 @@ function handleComponentError(instance: ComponentInstance, error: unknown, info:
   while (current) {
     if (current.errorCapturedHooks?.some(hook => hook(error, info) === true)) return;
     current = current.parent;
+  }
+  const errorHandler = instance.appContext?.config.errorHandler;
+  if (typeof errorHandler === "function") {
+    try {
+      if (errorHandler(error, instance, info) === false) return;
+    } catch (handlerError) {
+      console.error("[thymeleaf-reactive] app errorHandler itself failed", handlerError);
+    }
   }
   console.error("[thymeleaf-reactive] component error", error);
 }
@@ -3300,6 +3311,50 @@ function resolveTeleportTarget(to: unknown): Element {
   throw new Error("Teleport requires a valid `to` selector or Element target");
 }
 
+/** Node-creation operations a renderer host must provide (DOM-like documents). */
+export type RendererHost = {
+  createElement(tag: string): Element;
+  createElementNS(namespace: string, tag: string): Element;
+  createTextNode(text: string): Text;
+  createComment(text: string): Comment;
+  createDocumentFragment(): DocumentFragment;
+};
+
+const domHost: RendererHost = {
+  createElement: tag => document.createElement(tag),
+  createElementNS: (namespace, tag) => document.createElementNS(namespace, tag),
+  createTextNode: text => document.createTextNode(text),
+  createComment: text => document.createComment(text),
+  createDocumentFragment: () => document.createDocumentFragment()
+};
+
+let activeHost: RendererHost = domHost;
+
+/**
+ * Vue-compatible custom renderer entry: returns a scoped render API whose
+ * node creation goes through `host` (merged over the default DOM host).
+ * Useful for rendering into other documents (iframes, popups) or stub
+ * DOM-like targets. Node insertion/removal stays on the container nodes.
+ */
+export function createRenderer(host: Partial<RendererHost> = {}): {
+  render: (vnode: VNode | null, container: Element) => VNode | null;
+  patch: (previous: VNode | undefined, next: VNode, container: Element) => VNode | null | undefined;
+  unmount: (vnode: VNode, container: Element) => void;
+} {
+  const merged: RendererHost = { ...domHost, ...host };
+  const run = <T>(fn: () => T): T => {
+    const previous = activeHost;
+    activeHost = merged;
+    try { return fn(); }
+    finally { activeHost = previous; }
+  };
+  return {
+    render: (vnode, container) => run(() => render(vnode, container)),
+    patch: (previous, next, container) => run(() => patch(previous, next, container)),
+    unmount: (vnode, container) => run(() => unmount(vnode, container))
+  };
+}
+
 function keepAliveKey(vnode: VNode): unknown {
   return vnode.key ?? vnode.type;
 }
@@ -3382,7 +3437,7 @@ function pruneKeepAliveCache(vnode: VNode, cache: Map<unknown, VNode>, activeKey
 
 function detachVNode(vnode: VNode): void {
   const tree = vnode.instance?.tree ?? vnode.component ?? vnode;
-  const detached = document.createDocumentFragment();
+  const detached = activeHost.createDocumentFragment();
   prepareTeleportDetach(tree, detached);
   if (tree.type === Teleport) {
     if (tree.el) detached.appendChild(tree.el);
@@ -3457,27 +3512,27 @@ function mount(vnode: VNode, container: Node, anchor: Node | null = null): VNode
 
 function mountVNode(vnode: VNode, container: Node, anchor: Node | null = null): VNode {
   if (vnode.type === Text) {
-    vnode.el = document.createTextNode(vnode.text ?? "");
+    vnode.el = activeHost.createTextNode(vnode.text ?? "");
     container.insertBefore(vnode.el, anchor);
     return vnode;
   }
   if (vnode.type === Comment) {
-    vnode.el = document.createComment(vnode.text ?? "");
+    vnode.el = activeHost.createComment(vnode.text ?? "");
     container.insertBefore(vnode.el, anchor);
     return vnode;
   }
   if (vnode.type === Fragment) {
-    const start = vnode.el = document.createComment("fragment");
-    const end = vnode.anchor = document.createComment("/fragment");
+    const start = vnode.el = activeHost.createComment("fragment");
+    const end = vnode.anchor = activeHost.createComment("/fragment");
     container.insertBefore(start, anchor);
     container.insertBefore(end, anchor);
     vnode.children.forEach(child => mount(child, container, end));
     return vnode;
   }
   if (vnode.type === Teleport) {
-    const placeholder = vnode.el = document.createComment("teleport");
+    const placeholder = vnode.el = activeHost.createComment("teleport");
     const target = resolveTeleportTarget(vnode.props.to);
-    const targetAnchor = vnode.anchor = document.createComment("/teleport");
+    const targetAnchor = vnode.anchor = activeHost.createComment("/teleport");
     container.insertBefore(placeholder, anchor);
     target.appendChild(targetAnchor);
     vnode.target = target;
@@ -3516,7 +3571,7 @@ function mountVNode(vnode: VNode, container: Node, anchor: Node | null = null): 
     vnode.cache = new Map();
     const child = vnode.children[0];
     if (!child) {
-      vnode.el = document.createComment("keep-alive");
+      vnode.el = activeHost.createComment("keep-alive");
       container.insertBefore(vnode.el, anchor);
       return vnode;
     }
@@ -3629,8 +3684,8 @@ function mountVNode(vnode: VNode, container: Node, anchor: Node | null = null): 
   const isSvg = vnode.type !== "html" && !parentIsForeignObject
     && (vnode.type === "svg" || (container as Element).namespaceURI === svgNamespace);
   const el = vnode.el = isSvg
-    ? document.createElementNS(svgNamespace, vnode.type)
-    : document.createElement(vnode.type);
+    ? activeHost.createElementNS(svgNamespace, vnode.type)
+    : activeHost.createElement(vnode.type);
   invokeDirectiveHooks(vnode, undefined, "created");
   const deferredValue = vnode.type === "select" && !vnode.props.multiple ? vnode.props.value : undefined;
   Object.entries(vnode.props).forEach(([key, value]) => {
@@ -3845,7 +3900,7 @@ function patchVNode(oldVNode: VNode | undefined, newVNode: VNode | undefined, co
     const nextTarget = resolveTeleportTarget(newVNode.props.to);
     newVNode.target = nextTarget;
     if (oldTarget !== nextTarget) {
-      const targetAnchor = newVNode.anchor = document.createComment("/teleport");
+      const targetAnchor = newVNode.anchor = activeHost.createComment("/teleport");
       nextTarget.appendChild(targetAnchor);
       oldVNode.children.forEach(child => moveVNode(child, nextTarget, targetAnchor));
       if (oldTarget && oldVNode.anchor?.parentNode === oldTarget) oldTarget.removeChild(oldVNode.anchor);
@@ -3945,7 +4000,7 @@ function patchVNode(oldVNode: VNode | undefined, newVNode: VNode | undefined, co
           unmount(oldChild, container);
         }
       }
-      newVNode.el = oldVNode.el ?? document.createComment("keep-alive");
+      newVNode.el = oldVNode.el ?? activeHost.createComment("keep-alive");
       if (!oldVNode.el) container.appendChild(newVNode.el);
       newVNode.activeKey = undefined;
       return newVNode;
@@ -4121,7 +4176,7 @@ function hydrateObjectComponent(vnode: VNode, node: Node | null, container: Node
 }
 
 function hydrateFragment(vnode: VNode, node: Node | null, container: Node): VNode {
-  const start = vnode.el = document.createComment("fragment");
+  const start = vnode.el = activeHost.createComment("fragment");
   container.insertBefore(start, node);
   let cursor = node;
   vnode.children.forEach(child => {
@@ -4129,7 +4184,7 @@ function hydrateFragment(vnode: VNode, node: Node | null, container: Node): VNod
     const end = hydrated.anchor ?? hydrated.el;
     cursor = end?.nextSibling ?? null;
   });
-  const end = vnode.anchor = document.createComment("/fragment");
+  const end = vnode.anchor = activeHost.createComment("/fragment");
   container.insertBefore(end, cursor);
   while (cursor && cursor !== end) {
     const next = cursor.nextSibling;
@@ -4178,14 +4233,14 @@ function hydrateVNodeImpl(vnode: VNode, node: Node | null, container: Node): VNo
   if (vnode.type === Teleport) {
     const placeholder = node?.nodeType === Node.COMMENT_NODE && node.textContent === "teleport"
       ? node
-      : document.createComment("teleport");
+      : activeHost.createComment("teleport");
     if (placeholder !== node) container.insertBefore(placeholder, node);
     vnode.el = placeholder;
     const target = resolveTeleportTarget(vnode.props.to);
     vnode.target = target;
     const targetAnchor = Array.from(target.childNodes).find(child =>
       child.nodeType === Node.COMMENT_NODE && child.textContent === "/teleport"
-    ) ?? document.createComment("/teleport");
+    ) ?? activeHost.createComment("/teleport");
     if (!targetAnchor.parentNode) target.appendChild(targetAnchor);
     vnode.anchor = targetAnchor;
     let cursor = target.firstChild;
@@ -4261,7 +4316,7 @@ export function render(vnode: VNode | null, container: Node): VNode | null {
 
 export function createApp(render: (state: any) => VNode, state: object = {}) {
   const reactiveState = reactive(state);
-  const context: AppContext = { components: {}, directives: {}, provides: {} };
+  const context: AppContext = { components: {}, directives: {}, provides: {}, config: {} };
   const installedPlugins = new Set<unknown>();
   const onUnmountCallbacks: Array<() => void> = [];
   let currentRender = render;
@@ -4270,6 +4325,7 @@ export function createApp(render: (state: any) => VNode, state: object = {}) {
   let tree: VNode | undefined;
   const app = {
     context,
+    config: context.config,
     /** Vue-compatible global component registry; SFC templates resolve it after local scope. */
     component(name: string, component?: Component): unknown {
       if (!component) return context.components[name];
@@ -5200,7 +5256,7 @@ export function hydrate(root: Element, state: object, handlers: Record<string, (
     }
     const blueprint = template.cloneNode(true) as HTMLElement;
     serverRows.forEach(row => row.removeAttribute("data-tr-each"));
-    const anchor = document.createComment("tr-each");
+    const anchor = activeHost.createComment("tr-each");
     parent.insertBefore(anchor, template);
     const records = new Map<string | number, EachRecord>();
     const runner = hydrationEffect(context, () => {
@@ -5327,7 +5383,7 @@ export function hydrate(root: Element, state: object, handlers: Record<string, (
     const expression = element.dataset.trIf!;
     const parent = element.parentNode;
     if (!parent) return;
-    const anchor = document.createComment("tr-if");
+    const anchor = activeHost.createComment("tr-if");
     parent.insertBefore(anchor, element);
     const runner = hydrationEffect(context, () => {
       if (readPath(reactiveState, expression)) {

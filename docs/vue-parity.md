@@ -60,17 +60,29 @@ investigation also surfaced a latent crash (the component scheduler closure
 capturing a not-yet-assigned binding) that is now avoided by keeping the
 scheduler closures free of the effect binding.
 
-### P2
+### P2 — closed this cycle
 
-4. **`createRenderer` / `createHydrationRenderer`**: custom renderer API.
-   Requires extracting our patcher behind a node-op interface.
-5. **`<style module>` CSS interop**: class hashes are not Vue-compatible
+- **`createRenderer(host)`**: custom renderer entry — node creation goes
+  through a `RendererHost` (merged over the default DOM host) for rendering
+  into other documents (iframes, popups, stub documents); insertion/removal
+  stays on the container nodes.
+- **`useCssModule`**: works in SFC script setup via per-instance module
+  registries.
+- **`:slotted()` selector** in scoped styles: slot outlets stamp passed
+  content with the `<scopeId>-s` attribute.
+- **`app.onUnmount(callback)`** and **`app.config.errorHandler`** (consulted
+  after the `onErrorCaptured` chain; `return false` suppresses default
+  logging).
+
+### P2 — remaining
+
+1. **`createHydrationRenderer`**: hydration-host parity for the custom
+   renderer entry.
+2. **`<style module>` CSS interop**: class hashes are not Vue-compatible
    strings (different hash source); fine internally, matters only for sharing
    compiled CSS with Vue builds.
-6. **`useCssModule`**: accessor for module maps in object components (SFC
-   `$style` already works in templates).
-7. **`:slotted()` selector** in scoped styles.
-8. **`app.onUnmount`** and app-level error handlers (`app.config.errorHandler`).
+3. **`useCssModule` in plain object components**: object components would
+   need module registration at creation (SFC usage is fully supported).
 
 ### P3 — accepted subset boundaries
 
