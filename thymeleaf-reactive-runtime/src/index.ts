@@ -1647,24 +1647,46 @@ export function toDisplayString(value: unknown): string {
   return String(value);
 }
 
-/** Resolves a component name through builtins, the app context, and hot registry. */
-export function resolveComponent(name: string): Component | undefined {
+function resolveContextAsset(registry: Record<string, unknown> | undefined, name: string): unknown {
+  const kebab = toKebabCase(name);
+  return registry?.[name] ?? registry?.[kebab]
+    ?? Object.entries(registry ?? {}).find(([entryName]) => entryName.toLowerCase() === name.toLowerCase())?.[1];
+}
+
+/**
+ * Vue-compatible resolution order: builtins, then the active app context
+ * globals, then the hot-component registry. Outside render()/setup() this
+ * warns and returns the name string (native-tag fallback), like Vue.
+ */
+export function resolveComponent(name: string): Component | string {
+  const instance = componentInstanceStack.at(-1);
+  if (!instance) {
+    console.warn(`[thymeleaf-reactive] resolveComponent can only be used in render() or setup().`);
+    return name;
+  }
   const kebab = toKebabCase(name);
   const builtin = sfcBuiltinComponents[kebab] ?? sfcBuiltinComponents[name];
   if (builtin) return builtin as Component;
-  const context = currentAppContext?.components;
-  const candidate = context?.[name] ?? context?.[kebab]
-    ?? Object.entries(context ?? {}).find(([entryName]) => entryName.toLowerCase() === name.toLowerCase())?.[1];
+  const context = instance.appContext?.components;
+  const candidate = resolveContextAsset(context ?? {}, name);
   if (candidate !== undefined) return candidate as Component;
-  return hotComponents.get(name)?.render ?? hotComponents.get(kebab)?.render;
+  const hot = hotComponents.get(name)?.render ?? hotComponents.get(kebab)?.render;
+  if (hot !== undefined) return hot;
+  console.warn(`[thymeleaf-reactive] failed to resolve component: ${name}`);
+  return name;
 }
 
-/** Resolves a directive name registered through app.directive(). */
+/** Vue-compatible directive resolution; warns outside render()/setup(). */
 export function resolveDirective(name: string): Directive | undefined {
-  const context = currentAppContext?.directives;
-  if (!context) return undefined;
-  return context[camelize(name)]
-    ?? Object.entries(context).find(([entryName]) => entryName.toLowerCase() === name.toLowerCase())?.[1];
+  const instance = componentInstanceStack.at(-1);
+  if (!instance) {
+    console.warn(`[thymeleaf-reactive] resolveDirective can only be used in render() or setup().`);
+    return undefined;
+  }
+  const candidate = resolveContextAsset(instance.appContext?.directives ?? {}, name);
+  return typeof candidate === "function" || (typeof candidate === "object" && candidate !== null)
+    ? candidate as Directive
+    : undefined;
 }
 
 /** We bundle the SFC compiler, so this runtime is not runtime-only. */

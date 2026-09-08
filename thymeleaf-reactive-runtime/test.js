@@ -4803,6 +4803,20 @@ test('createHydrationRenderer adopts existing markup through the host and patche
   assert.equal(paragraph.ownerDocument, otherDocument);
 });
 
+test('resolveComponent warns and falls back to the name outside setup', () => {
+  const warnings = [];
+  const previousWarn = console.warn;
+  console.warn = (...args) => warnings.push(args.join(' '));
+  try {
+    assert.equal(resolveComponent('no-such-component'), 'no-such-component');
+    assert.match(warnings.join(' '), /resolveComponent can only be used in render\(\) or setup\(\)/);
+    assert.equal(resolveDirective('missing'), undefined);
+    assert.match(warnings.join(' '), /resolveDirective can only be used in render\(\) or setup\(\)/);
+  } finally {
+    console.warn = previousWarn;
+  }
+});
+
 test('SFC injects style blocks and keeps recompiles idempotent', () => {
   const document = installDom();
   const root = document.createElement('main');

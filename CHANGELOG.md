@@ -64,6 +64,13 @@ adheres to [Semantic Versioning](https://semver.org/).
   renderer entry (scoped `hydrateRender` + render/patch/unmount).
 - `useCssModule` now also reads options-style `__cssModules` mappings from
   plain object component definitions.
+- `resolveComponent`/`resolveDirective` align with Vue: usable in render()
+  and setup(), local-before-global resolution, and out-of-context calls warn
+  (`resolveComponent` falls back to the name string, `resolveDirective`
+  returns undefined).
+- `<style module>` naming verified against the compiler source: Vue's
+  compiler-sfc delegates class naming to postcss-modules/bundler; ours uses
+  the same Vite-style `name_<filehash>` convention.
 - **Fixed (P1)**: template ref writes are deferred to the post-flush queue
   with stable per-(scope, name) SFC ref handlers — a ref assigned during the
   initial render now schedules exactly one extra render (Vue semantics), and

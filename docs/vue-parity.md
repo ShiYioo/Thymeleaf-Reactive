@@ -79,11 +79,14 @@ scheduler closures free of the effect binding.
   `__cssModules` mapping on the component definition (SFC `$style`/name
   registries unchanged).
 
-### P2 — remaining
+### P2 — closed (verified against the compiler source)
 
-1. **`<style module>` CSS interop**: class hashes are not Vue-compatible
-   strings (different hash source); fine internally, matters only for sharing
-   compiled CSS with Vue builds.
+**`<style module>` naming**: Vue's compiler-sfc delegates class naming to
+`postcss-modules` and leaves the final format to the bundler (Vite appends
+`_<filehash>`). Our `<name>_<base36(source hash)>` follows the same
+`name_hash` convention with a stable per-file hash, so this item closes as
+"verified, no compiler-level format to match". Sharing compiled CSS with Vue
+builds remains out of scope by design.
 
 ### P3 — accepted subset boundaries
 
@@ -109,8 +112,10 @@ scheduler closures free of the effect binding.
   in-effect recursion timing; tracked for P1.)
 - `normalizeStyle` keeps object keys as authored (no camelCase→kebab-case
   rewriting); Vue rewrites keys for style properties.
-- `resolveComponent` reads the active app context during rendering; calls
-  outside a render see only the hot-component registry.
+- `resolveComponent`/`resolveDirective` follow Vue: usable in render() and
+  setup(); outside both, `resolveComponent` warns and returns the name
+  string (native-tag fallback) and `resolveDirective` warns and returns
+  undefined.
 
 ## Verification
 
