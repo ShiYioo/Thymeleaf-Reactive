@@ -27,7 +27,7 @@
   },
   "scripts": {
     "build": "tsc && node scripts/vendor-browser-deps.mjs",
-    "test": "npm run build && node --test",
+    "test": "npm run build && node --max-old-space-size=1024 --test --test-timeout=10000",
     "prepublishOnly": "npm test"
   },
   "repository": {
