@@ -4817,6 +4817,27 @@ test('resolveComponent warns and falls back to the name outside setup', () => {
   }
 });
 
+test('strategy hydration requests are queued: one per flush, re-entrancy guarded', async () => {
+  const document = installDom();
+  const root = document.createElement('main');
+  root.innerHTML = '<span data-tr-text="count">0</span><button data-tr-on="click:increment">+1</button>';
+  const hydratedEvents = [];
+  root.addEventListener('tr:hydrated', () => hydratedEvents.push(1));
+  let requests = 0;
+  let strategy;
+  hydrate(root, { count: 0 }, { increment: s => { s.count = Number(s.count) + 1; } }, {
+    hydrateOn: request => { requests++; strategy = { hydrate: request, teardown: () => {} }; return strategy; }
+  });
+  assert.equal(requests, 1, 'the framework arms the strategy once with the request');
+  strategy.hydrate(); strategy.hydrate(); strategy.hydrate();
+  await nextTick();
+  assert.equal(hydratedEvents.length, 1, 'coalesced to a single hydration per flush');
+  assert.equal(root.dataset.trHydrated, 'true');
+  root.querySelector('button').dispatchEvent(new Event('click'));
+  await nextTick();
+  assert.equal(root.querySelector('span').textContent, '1');
+});
+
 test('SFC injects style blocks and keeps recompiles idempotent', () => {
   const document = installDom();
   const root = document.createElement('main');

@@ -103,6 +103,14 @@ const ITERATE_KEY = Symbol("iterate");
 const queuedPreJobs = new Set<() => void>();
 const queuedJobs = new Map<() => void, number>();
 const queuedPostJobs = new Set<() => void>();
+/** One queued hydration per root: strategy callbacks enqueue instead of re-entering the hydration pass. */
+const queuedHydrations = new Map<Element, () => void>();
+
+function queueHydration(root: Element, hydrate: () => void): void {
+  if (queuedHydrations.has(root)) return;
+  queuedHydrations.set(root, hydrate);
+  queueFlush();
+}
 /** Vue 3.6 scheduler: bit flags carried on queued jobs. */
 export enum SchedulerJobFlags {
   QUEUED = 1 << 0,
@@ -227,10 +235,18 @@ function flushJobs(): void {
   isFlushing = true;
   try {
     const seen = new Map<() => void, number>();
-    while (queuedPreJobs.size || queuedJobs.size || queuedPostJobs.size) {
+    while (queuedPreJobs.size || queuedJobs.size || queuedPostJobs.size || queuedHydrations.size) {
       const preJobs = [...queuedPreJobs];
       queuedPreJobs.clear();
       preJobs.forEach(job => runScheduledJob(job, seen));
+      if (queuedHydrations.size) {
+        const hydrations = [...queuedHydrations.entries()];
+        queuedHydrations.clear();
+        hydrations.forEach(([, hydrate]) => {
+          try { hydrate(); }
+          catch (error) { console.error("[thymeleaf-reactive] queued hydration failed", error); }
+        });
+      }
       const jobs = [...queuedJobs.entries()]
         .sort((left, right) => left[1] - right[1])
         .map(([job]) => job);
@@ -5281,7 +5297,126 @@ function cloneEachTemplate(template: HTMLElement): HTMLElement {
 }
 
 /** Hydrates server-rendered Thymeleaf metadata into reactive DOM bindings. */
-export function hydrate(root: Element, state: object, handlers: Record<string, (...args: any[]) => any> = {}): object {
+export type HydrationStrategy = { hydrate: () => void; teardown: () => void };
+
+/** Vue 3.5+: hydrates when the browser is idle (setTimeout fallback included). */
+export function hydrateOnIdle(hydrate: () => void, options: { timeout?: number } = {}): HydrationStrategy {
+  let handle: number | undefined;
+  const schedule = () => {
+    if (typeof requestIdleCallback === "function") {
+      handle = requestIdleCallback(() => hydrate(), { timeout: options.timeout });
+    } else {
+      handle = setTimeout(hydrate, options.timeout ?? 200) as unknown as number;
+    }
+  };
+  schedule();
+  return {
+    hydrate: schedule,
+    teardown: () => {
+      if (typeof cancelIdleCallback === "function" && handle !== undefined) cancelIdleCallback(handle);
+      if (handle !== undefined) clearTimeout(handle);
+      handle = undefined;
+    }
+  };
+}
+
+/** Vue 3.5+: hydrates when any element visited by forEachElement intersects the viewport. */
+export function hydrateOnVisible(
+  hydrate: () => void,
+  forEachElement?: (callback: (element: Element) => void) => void,
+  options: { rootMargin?: string } = {}
+): HydrationStrategy {
+  if (typeof IntersectionObserver === "undefined") {
+    hydrate();
+    return { hydrate: () => {}, teardown: () => {} };
+  }
+  const observer = new IntersectionObserver(entries => {
+    if (entries.some(entry => entry.isIntersecting)) {
+      observer.disconnect();
+      hydrate();
+    }
+  }, { rootMargin: options.rootMargin ?? "0px" });
+  forEachElement?.(element => observer.observe(element));
+  return {
+    hydrate: () => observer.disconnect(),
+    teardown: () => observer.disconnect()
+  };
+}
+
+/** Vue 3.5+: hydrates on the first of the given interaction events (document-delegated when no elements are given). */
+export function hydrateOnInteraction(
+  hydrate: () => void,
+  events: string[] | string = ["click"],
+  forEachElement?: (callback: (element: Element) => void) => void
+): HydrationStrategy {
+  const eventList = typeof events === "string" ? events.split(",").map(event => event.trim()).filter(Boolean) : events;
+  const targets: Array<{ element: EventTarget; event: string; listener: EventListener }> = [];
+  let settled = false;
+  const fire = () => {
+    if (settled) return;
+    settled = true;
+    targets.forEach(({ element, event, listener }) => element.removeEventListener(event, listener));
+    hydrate();
+  };
+  const attach = (element: EventTarget) => eventList.forEach(event => {
+    const listener = () => fire();
+    targets.push({ element, event, listener });
+    element.addEventListener(event, listener);
+  });
+  forEachElement?.(attach);
+  if (!forEachElement) attach(document);
+  return { hydrate: fire, teardown: () => fire };
+}
+
+/** Vue 3.5+: hydrates when the media query matches (immediately if it already matches). */
+export function hydrateOnMediaQuery(hydrate: () => void, query: string): HydrationStrategy {
+  if (typeof matchMedia !== "function") {
+    hydrate();
+    return { hydrate: () => {}, teardown: () => {} };
+  }
+  const list = matchMedia(query);
+  if (list.matches) {
+    hydrate();
+    return { hydrate: () => {}, teardown: () => {} };
+  }
+  const listener = () => {
+    if (list.matches) {
+      teardown();
+      hydrate();
+    }
+  };
+  const teardown = () => {
+    if (typeof list.removeEventListener === "function") list.removeEventListener("change", listener);
+    else if (typeof list.removeListener === "function") list.removeListener(listener);
+  };
+  if (typeof list.addEventListener === "function") list.addEventListener("change", listener);
+  else if (typeof list.addListener === "function") list.addListener(listener);
+  return { hydrate: () => {}, teardown };
+}
+
+export type HydrateOptions = {
+  /** Defers hydration until the strategy fires. Compose with hydrateOnIdle/Visible/Interaction/MediaQuery. */
+  hydrateOn?: (hydrate: () => void) => HydrationStrategy;
+};
+
+export function hydrate(root: Element & { dataset?: DOMStringMap }, state: object, handlers: Record<string, (...args: any[]) => any> = {}, options: HydrateOptions = {}): object {
+  if (options.hydrateOn) {
+    if (root.dataset?.trHydrated === "true") return state;
+    let settled = false;
+    const strategy = options.hydrateOn(() => {
+      if (settled) return;
+      settled = true;
+      strategy.teardown();
+      queueHydration(root, () => {
+        hydrate(root, state, handlers);
+        if (root.dataset) root.dataset.trHydrated = "true";
+        if (typeof CustomEvent === "function") root.dispatchEvent(new CustomEvent("tr:hydrated", { bubbles: true }));
+      });
+    });
+    if (root.dataset) root.dataset.trHydrated = "pending";
+    void strategy;
+    return state;
+  }
   disposeHydration(root);
   const reactiveState = reactive(state);
   const context: HydrationContext = { state: reactiveState, handlers, propKeys: new Set(Object.keys(parseComponentProps(root))), cleanups: new Set(), scope: effectScope(), uid: nextComponentUid++ };

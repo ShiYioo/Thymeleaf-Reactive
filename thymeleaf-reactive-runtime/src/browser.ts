@@ -1,4 +1,4 @@
-import { adoptComponentRoot, connectComponentHmr, defineComponent, hydrate, registerComponentSource, type Component } from "./index.js";
+import { adoptComponentRoot, connectComponentHmr, defineComponent, hydrate, hydrateOnIdle, hydrateOnInteraction, hydrateOnMediaQuery, hydrateOnVisible, registerComponentSource, type Component, type HydrationStrategy } from "./index.js";
 
 declare global {
   interface Window {
@@ -62,6 +62,18 @@ async function adoptSfcComponent(
   );
 }
 
+/** Parses data-tr-hydrate values into lazy hydration strategies. */
+function hydrateStrategyFor(value: string, root: HTMLElement): (hydrate: () => void) => HydrationStrategy {
+  const onRoot = (callback: (element: Element) => void) => callback(root);
+  const [kind, argument] = value.split(":").map(part => part.trim());
+  switch (kind) {
+    case "visible": return hydrate => hydrateOnVisible(hydrate, onRoot, argument ? { rootMargin: argument } : {});
+    case "interaction": return hydrate => hydrateOnInteraction(hydrate, argument ? argument.split(",").map(event => event.trim()).filter(Boolean) : ["click"], onRoot);
+    case "media": return hydrate => hydrateOnMediaQuery(hydrate, argument ?? "");
+    case "idle": default: return hydrate => hydrateOnIdle(hydrate, argument ? { timeout: Number(argument) || 200 } : {});
+  }
+}
+
 async function boot(): Promise<void> {
   const api = {
     handlers: window.ThymeleafReactive?.handlers ?? {},
@@ -73,6 +85,25 @@ async function boot(): Promise<void> {
   roots.forEach(root => {
     if (root.dataset.trHydrated === "true") return;
     const state = parseState(root.dataset.trState);
+    // data-tr-hydrate defers the whole hydration + SFC adoption of this root
+    // until the requested strategy fires (islands-style lazy hydration). The
+    // strategy request goes through the queued hydration entry, so fires are
+    // coalesced to one hydration job per root per flush.
+    const hydrateAttr = root.dataset.trHydrate;
+    if (hydrateAttr) {
+      states.set(root, state);
+      root.dataset.trHydrated = "pending";
+      api.hydrate(root, state, api.handlers, {
+        hydrateOn: request => hydrateStrategyFor(hydrateAttr, root)(() => {
+          api.hydrate(root, state, api.handlers);
+          root.dataset.trHydrated = "true";
+          void adoptSfcComponent(root, state, api.handlers).catch(error =>
+            console.error("[thymeleaf-reactive] failed to load SFC component", error)
+          );
+        })
+      });
+      return;
+    }
     // Metadata hydration provides an interactive server-rendered fallback
     // while an optional resource SFC loads, and remains active if it fails.
     states.set(root, api.hydrate(root, state, api.handlers));

@@ -88,18 +88,18 @@ scheduler closures free of the effect binding.
 "verified, no compiler-level format to match". Sharing compiled CSS with Vue
 builds remains out of scope by design.
 
-### Deferred with findings — lazy hydration strategies
+### Lazy hydration — implemented via the queued-entry design
 
 `hydrateOnIdle` / `hydrateOnVisible` / `hydrateOnInteraction` /
-`hydrateOnMediaQuery` (Vue 3.5 naming) were implemented and pass their
-strategy-level tests, but wiring them into `hydrate()` exposed a
-re-entrancy issue: invoking the full hydration pass from inside a strategy
-callback (an interaction listener or the deferred hydrate call) hangs the
-subsequent update of the hydrated component. The recursion limiter
-correctly stops the loop, but the feature is deferred until the hydration
-pass gets a queued-entry design (one hydration job per flush, re-entrancy
-guarded) instead of a direct call from strategy callbacks. Strategy
-primitives and tests are preserved in history for that round.
+`hydrateOnMediaQuery` (Vue 3.5 naming) are implemented on top of the
+scheduler's queued hydration entry: strategy callbacks enqueue one
+hydration job per root (`queuedHydrations`, re-entrancy guarded), and the
+flush loop runs queued hydrations before render jobs in the same pass.
+The browser bootstrap also supports declarative per-root lazy hydration
+via `data-tr-hydrate="visible|idle|interaction[:events]|media:query"`.
+The earlier direct-call implementation (which re-entered the hydration
+pass from strategy callbacks and hung the hydrated component) was
+reverted and replaced by this queued design.
 
 ### P3 — accepted subset boundaries
 

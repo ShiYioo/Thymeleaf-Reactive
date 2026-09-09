@@ -62,6 +62,11 @@ adheres to [Semantic Versioning](https://semver.org/).
   `onErrorCaptured` chain; returning `false` suppresses default logging.
 - `createHydrationRenderer(host)`: hydration-host parity for the custom
   renderer entry (scoped `hydrateRender` + render/patch/unmount).
+- Lazy hydration strategies (Vue 3.5 naming): `hydrateOnIdle`,
+  `hydrateOnVisible`, `hydrateOnInteraction`, `hydrateOnMediaQuery`, plus a
+  queued hydration entry in the scheduler (one hydration job per root per
+  flush, re-entrancy guarded) and declarative `data-tr-hydrate` bootstrap
+  support (`visible`, `idle`, `interaction:events`, `media:query`).
 - `useCssModule` now also reads options-style `__cssModules` mappings from
   plain object component definitions.
 - `resolveComponent`/`resolveDirective` align with Vue: usable in render()
