@@ -73,8 +73,10 @@ scheduler closures free of the effect binding.
 - **`app.onUnmount(callback)`** and **`app.config.errorHandler`** (consulted
   after the `onErrorCaptured` chain; `return false` suppresses default
   logging).
-- **`createHydrationRenderer(host)`**: hydration-host parity — same host API
-  as `createRenderer` plus a scoped `hydrateRender` entry.
+- **`createHydrationRenderer(host)`**: hydration-host parity verified —
+  hydration of mismatched server markup, anchor comments, and post-hydration
+  conditional updates all create nodes in the host document (unit-proven).
+  Same host API as `createRenderer` plus a scoped `hydrateRender` entry.
 - **`useCssModule` in object components**: via the options-style
   `__cssModules` mapping on the component definition (SFC `$style`/name
   registries unchanged).

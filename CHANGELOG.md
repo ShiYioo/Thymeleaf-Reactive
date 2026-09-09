@@ -67,6 +67,9 @@ adheres to [Semantic Versioning](https://semver.org/).
   queued hydration entry in the scheduler (one hydration job per root per
   flush, re-entrancy guarded) and declarative `data-tr-hydrate` bootstrap
   support (`visible`, `idle`, `interaction:events`, `media:query`).
+- `createHydrationRenderer` hydration-host parity proven by test: hydration
+  of structurally mismatched server markup, anchor comments, and reactive
+  condition updates all create nodes inside the host document.
 - `useCssModule` now also reads options-style `__cssModules` mappings from
   plain object component definitions.
 - `resolveComponent`/`resolveDirective` align with Vue: usable in render()

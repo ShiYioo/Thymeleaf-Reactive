@@ -4838,6 +4838,35 @@ test('strategy hydration requests are queued: one per flush, re-entrancy guarded
   assert.equal(root.querySelector('span').textContent, '1');
 });
 
+test('createHydrationRenderer keeps hydration node creation in the host document', async () => {
+  const document = installDom();
+  const otherWindow = new Window();
+  const otherDocument = otherWindow.document;
+  const custom = createHydrationRenderer({
+    createElement: tag => otherDocument.createElement(tag),
+    createTextNode: text => otherDocument.createTextNode(text),
+    createComment: text => otherDocument.createComment(text)
+  });
+  // Empty container = structural mismatch: every node must be created
+  // through the host during hydration...
+  const container = otherDocument.createElement('main');
+  const show = ref(true);
+  const Child = { setup: () => () => (show.value ? h('p', { class: 'live' }, 'live') : h('span', {}, 'hidden')) };
+  custom.hydrateRender(h(Child), container);
+  const paragraph = container.querySelector('p.live');
+  assert.ok(paragraph, 'hydration created the mismatched subtree through the host');
+  assert.equal(paragraph.ownerDocument, otherDocument);
+  assert.equal(paragraph.textContent, 'live');
+  // ...and a reactive condition flip recreates nodes in the same document.
+  show.value = false;
+  await nextTick();
+  const replacement = container.querySelector('span');
+  assert.ok(replacement, 'conditional update recreated nodes in the host document');
+  assert.equal(replacement.ownerDocument, otherDocument);
+  const anchors = Array.from(container.childNodes).filter(n => n.nodeType === 8).map(n => n.ownerDocument);
+  assert.ok(anchors.every(doc => doc === otherDocument), 'any anchor comments live in the host document');
+});
+
 test('SFC injects style blocks and keeps recompiles idempotent', () => {
   const document = installDom();
   const root = document.createElement('main');
