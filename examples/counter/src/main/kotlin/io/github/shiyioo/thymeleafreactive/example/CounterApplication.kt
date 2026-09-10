@@ -20,6 +20,9 @@ class CounterController {
     @GetMapping("/tabs")
     fun tabs(): String = "tabs"
 
+    @GetMapping("/plain")
+    fun plain(): String = "plain"
+
 }
 
 fun main(args: Array<String>) {

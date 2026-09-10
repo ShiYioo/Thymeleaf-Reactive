@@ -70,6 +70,13 @@ adheres to [Semantic Versioning](https://semver.org/).
 - `createHydrationRenderer` hydration-host parity proven by test: hydration
   of structurally mismatched server markup, anchor comments, and reactive
   condition updates all create nodes inside the host document.
+- **Fixed**: the reactive dialect's reflection fallback could abort template
+  rendering mid-document (truncated pages without the runtime bootstrap)
+  when a Thymeleaf context object referenced classes removed from the
+  current Spring version; such candidates are now skipped safely.
+- Real-browser e2e now covers the Thymeleaf template channel (channel B):
+  in-place server-markup hot refresh with state preservation, plus an Edge
+  browser-matrix run.
 - `useCssModule` now also reads options-style `__cssModules` mappings from
   plain object component definitions.
 - `resolveComponent`/`resolveDirective` align with Vue: usable in render()

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en" xmlns:tr="https://thymeleaf-reactive.dev">
+<head>
+  <meta charset="UTF-8">
+  <title>Thymeleaf Reactive Plain</title>
+</head>
+<body>
+  <main tr:component="plain" tr:state='{"count":0,"label":"A"}'>
+    <h1>Plain</h1>
+    <span data-tr-text="count">0</span>
+    <button data-tr-on="click:inc">+1</button>
+  </main>
+
+  <script>
+    window.ThymeleafReactive = {
+      handlers: {
+        inc(s) { s.count = Number(s.count) + 1; }
+      }
+    };
+  </script>
+</body>
+</html>

@@ -301,3 +301,55 @@ test("KeepAlive and Transition subtrees survive template HMR; script edits rebui
   writeFileSync(tabsSfcPath, originalTabs);
   await waitFor(page, () => document.querySelector(".tabs-version")?.textContent === "v1");
 });
+
+test('channel B: Thymeleaf template edits hot-refresh the page in place', async t => {
+  const browser = await puppeteer.launch({
+    executablePath: findBrowser(),
+    headless: true,
+    args: ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"]
+  });
+  t.after(() => browser.close());
+
+  const page = await openPage(browser, "/plain");
+  await waitFor(page, () => window.ThymeleafReactive && document.querySelector("main [data-tr-hydrated='true'], main[data-tr-hydrated='true']"));
+  await page.evaluate(() => { window.__e2eNoReload = true; });
+
+  // interactive through metadata hydration
+  await page.click("main button");
+  await waitFor(page, () => document.querySelector("main [data-tr-text]")?.textContent?.trim() === "1", 5_000);
+
+  // channel B: edit the Thymeleaf template on disk
+  const plainPath = path.join(exampleDir, "src", "main", "resources", "templates", "plain.html");
+  const original = readFileSync(plainPath, "utf8");
+  t.after(() => writeFileSync(plainPath, original));
+  writeFileSync(plainPath, original.replace("<h1>Plain</h1>", "<h1>Plain v2</h1>"));
+
+  await waitFor(page, () => document.querySelector("main h1")?.textContent === "Plain v2", 20_000);
+
+  // no reload happened, state survived the in-place server-markup swap
+  assert.equal(await page.evaluate(() => window.__e2eNoReload), true);
+  assert.equal(await page.evaluate(() => document.querySelector("main [data-tr-text]")?.textContent?.trim()), "1");
+  await page.click("main button");
+  await waitFor(page, () => document.querySelector("main [data-tr-text]")?.textContent?.trim() === "2", 5_000);
+
+  writeFileSync(plainPath, original);
+  await waitFor(page, () => document.querySelector("main h1")?.textContent === "Plain", 20_000);
+});
+
+test('the same suite passes on Edge when installed (browser matrix evidence)', async t => {
+  const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+    "C:/Program Files/Microsoft/Edge/Application/msedge.exe"].find(p => existsSync(p));
+  if (!edge) { t.skip("Edge not installed"); return; }
+  const browser = await puppeteer.launch({
+    executablePath: edge,
+    headless: true,
+    args: ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"]
+  });
+  t.after(() => browser.close());
+
+  const page = await openPage(browser, "/");
+  await waitFor(page, () => window.ThymeleafReactive && document.querySelector("main p") && !document.querySelector("main [data-tr-text]"));
+  await page.click("main button");
+  await waitFor(page, () => document.querySelector("main p")?.textContent?.trim() === "1", 5_000);
+  assert.equal(await page.evaluate(() => document.querySelector("main p").ownerDocument === document), true);
+});

@@ -86,12 +86,21 @@ private fun evaluate(context: ITemplateContext, expression: String): Any? {
             }.getOrNull()
         }
         val keys = normalized.split('.').filter(String::isNotBlank)
+        // Reflection over framework context objects can hit classes whose
+        // signatures reference types missing from the current Spring version
+        // (for example the pre-6 Theme API); such candidates are skipped so a
+        // linkage error can never abort template rendering mid-document.
+        fun instanceProperty(candidate: Any, property: String): Any? = runCatching {
+            candidate.javaClass.methods.firstOrNull { method ->
+                method.parameterCount == 0 && (method.name == property || method.name == "get${property.replaceFirstChar(Char::uppercase)}")
+            }?.invoke(candidate)
+        }.getOrElse { error ->
+            if (error is ClassNotFoundException || error is NoClassDefFoundError) null else throw error
+        }
         fun descend(root: Any?): Any? = keys.drop(1).fold(root) { current, key ->
             when (current) {
                 is Map<*, *> -> current[key]
-                else -> current?.javaClass?.methods?.firstOrNull { method ->
-                    method.parameterCount == 0 && (method.name == key || method.name == "get${key.replaceFirstChar(Char::uppercase)}")
-                }?.invoke(current)
+                else -> current?.let { instanceProperty(it, key) }
             }
         }
         context.getVariable(keys.first())?.let { return descend(it) }
@@ -101,9 +110,7 @@ private fun evaluate(context: ITemplateContext, expression: String): Any? {
             val candidate = context.getVariable(name)
             val value = when (candidate) {
                 is Map<*, *> -> candidate[keys.first()]
-                else -> candidate?.javaClass?.methods?.firstOrNull { method ->
-                    method.parameterCount == 0 && (method.name == keys.first() || method.name == "get${keys.first().replaceFirstChar(Char::uppercase)}")
-                }?.invoke(candidate)
+                else -> candidate?.let { instanceProperty(it, keys.first()) }
             }
             if (value != null) return descend(value)
         }
