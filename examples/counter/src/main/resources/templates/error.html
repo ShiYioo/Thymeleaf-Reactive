@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="zh" xmlns:tr="https://thymeleaf-reactive.dev">
+<head>
+  <meta charset="UTF-8">
+  <title>请检查表单</title>
+</head>
+<body>
+  <main tr:component="errorbox" tr:state='{"retry":0}'>
+    <h1>请检查表单</h1>
+    <p>姓名和邮箱都必须填写。</p>
+    <a href="/form">返回填写</a>
+  </main>
+  <script>window.ThymeleafReactive = { handlers: {} };</script>
+</body>
+</html>

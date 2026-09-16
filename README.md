@@ -4,6 +4,10 @@ A Vue-inspired reactive runtime for Thymeleaf applications.
 
 The project is intentionally split into a browser runtime, a Thymeleaf compiler, and a Spring Boot starter. The first milestone proves the core invariant: changing reactive state patches only the affected DOM nodes.
 
+## 五分钟上手
+
+中文快速上手指南见 [docs/getting-started.md](docs/getting-started.md)。
+
 ## Milestone 1
 
 - `thymeleaf-reactive-runtime`: dependency-tracked state, virtual DOM, keyed patching, and declarative event bindings.

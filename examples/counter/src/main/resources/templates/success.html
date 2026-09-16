@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="zh" xmlns:tr="https://thymeleaf-reactive.dev">
+<head>
+  <meta charset="UTF-8">
+  <title>提交成功</title>
+</head>
+<body>
+  <main tr:component="welcome" tr:state='{"visits":1}'>
+    <h1>提交成功</h1>
+    <p data-tr-text="'欢迎你，' + name">欢迎</p>
+    <span data-tr-text="visits">0</span>
+  </main>
+  <script>window.ThymeleafReactive = { handlers: {} };</script>
+</body>
+</html>

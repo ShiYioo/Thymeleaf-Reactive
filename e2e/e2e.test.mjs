@@ -336,6 +336,43 @@ test('channel B: Thymeleaf template edits hot-refresh the page in place', async 
   await waitFor(page, () => document.querySelector("main h1")?.textContent === "Plain", 20_000);
 });
 
+test('classic Spring MVC form POST coexists with reactive components (Chrome)', async t => {
+  const browser = await puppeteer.launch({
+    executablePath: findBrowser(),
+    headless: true,
+    args: ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"]
+  });
+  t.after(() => browser.close());
+
+  const page = await openPage(browser, "/form");
+  // Hydration binds the output to state.email, replacing the server-rendered
+  // static text - its presence plus the hydrated marker means the runtime is
+  // driving this root.
+  await waitFor(page, () => window.ThymeleafReactive && document.querySelector("main")?.dataset.trHydrated === "true" && Boolean(document.querySelector("main output[data-tr-text]")));
+
+  // reactive live preview inside a native form
+  await page.type("input[name='email']", "z@x.com");
+  await waitFor(page, () => document.querySelector("main output[data-tr-text]")?.textContent === "z@x.com", 5_000);
+  await page.type("input[name='name']", "张三");
+
+  // native POST → redirect → success page renders server-side
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: "networkidle2", timeout: 15_000 }),
+    page.click("button[type=submit]")
+  ]);
+  assert.ok(page.url().includes("/form/success"), "redirected to the success page");
+  assert.ok((await page.content()).includes("提交成功"));
+
+  // empty submit → server-side validation error page
+  await page.goto(`${baseUrl}/form`, { waitUntil: "networkidle2" });
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: "networkidle2", timeout: 15_000 }),
+    page.click("button[type=submit]")
+  ]);
+  assert.ok(page.url().includes("/form/error"), "redirected to the error page");
+  assert.ok((await page.content()).includes("请检查表单"));
+});
+
 test('the same suite passes on Edge when installed (browser matrix evidence)', async t => {
   const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
     "C:/Program Files/Microsoft/Edge/Application/msedge.exe"].find(p => existsSync(p));

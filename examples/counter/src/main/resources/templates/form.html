@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh" xmlns:tr="https://thymeleaf-reactive.dev">
+<head>
+  <meta charset="UTF-8">
+  <title>注册示例 - 传统表单 + 响应式预览</title>
+</head>
+<body>
+  <main tr:component="signup" tr:state='{"name":"","email":""}'>
+    <h1>注册</h1>
+    <p>邮箱实时预览（响应式）：<output data-tr-text="email">未填写</output></p>
+    <form th:action="@{/form/submit}" method="post">
+      <input name="name" placeholder="姓名">
+      <input name="email" tr:model="email" placeholder="邮箱">
+      <button type="submit">提交</button>
+    </form>
+  </main>
+
+  <script>
+    window.ThymeleafReactive = { handlers: {} };
+  </script>
+</body>
+</html>
