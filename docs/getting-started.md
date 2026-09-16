@@ -25,6 +25,8 @@ dependencies {
 ./gradlew publishToMavenLocal
 ```
 
+完整的获取方式对比（源码构建 / GitHub Packages / npm）见[安装与接入](install.md)。
+
 ## 2. 三行配置
 
 ```properties
